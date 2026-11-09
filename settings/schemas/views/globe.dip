@@ -1,0 +1,21 @@
+?descr "Rotatable globe rendering and navigation."
+background str = "natural_earth"
+  ?descr "Earth image or palette style behind the geolocated observations."
+  !options ["natural_earth", "blue_marble", "ocean", "plain"]
+  !labels ["Natural Earth II map", "NASA Blue Marble with bathymetry", "Ocean tint", "Theme panel"]
+  !condition ({.} == "natural_earth" || {.} == "blue_marble" || {.} == "ocean" || {.} == "plain")
+  !setup
+zoom_min float = 0.55
+  ?descr "Minimum globe zoom."
+  !condition ({.} >= 0.25 && {.} < {.zoom_max})
+zoom_max float = 64.0
+  ?descr "Maximum globe zoom, clipped to the dedicated globe canvas."
+  !condition ({.} > {.zoom_min} && {.} <= 256)
+zoom_factor float = 1.12
+  ?descr "Magnification step per mouse wheel unit."
+  !condition ({.} > 1 && {.} <= 2)
+pinned_default str = "middle"
+  ?descr "Initial index for the fourth dimension of a geolocated 4D dataset."
+  !options ["start", "middle", "end"]
+  !condition ({.} == "start" || {.} == "middle" || {.} == "end")
+  !setup

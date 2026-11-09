@@ -1,0 +1,34 @@
+?descr "USGS PICS catalog site with two published regions (not one of the six CEOS reference PICS)"
+name str
+country str
+center_latitude float
+  !condition ({.} >= -90 && {.} <= 90)
+center_longitude float
+  !condition ({.} >= -180 && {.} <= 180)
+usable_km_1 int
+  !condition ({.} > 0)
+usable_km_2 int
+  !condition ({.} > 0)
+altitude_m int
+landsat_wrs_2 str
+status str
+  !options ["Active", "Inactive"]
+source_url str
+roi_1_name str
+roi_1_south float
+  !condition ({.} >= -90 && {.} < {.roi_1_north})
+roi_1_north float
+  !condition ({.} <= 90 && {.} > {.roi_1_south})
+roi_1_west float
+  !condition ({.} >= -180 && {.} < {.roi_1_east})
+roi_1_east float
+  !condition ({.} <= 180 && {.} > {.roi_1_west})
+roi_2_name str
+roi_2_south float
+  !condition ({.} >= -90 && {.} < {.roi_2_north})
+roi_2_north float
+  !condition ({.} <= 90 && {.} > {.roi_2_south})
+roi_2_west float
+  !condition ({.} >= -180 && {.} < {.roi_2_east})
+roi_2_east float
+  !condition ({.} <= 180 && {.} > {.roi_2_west})

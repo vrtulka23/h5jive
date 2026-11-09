@@ -1,0 +1,17 @@
+themes[light] : appearance_profile
+  base = "light"
+  rounding = 4.0
+  background = "#F4F6F9"
+  panel = "#E6EBF1"
+  text = "#1B2635"
+  border = "#A5B1BF"
+  table_row_alt = "#EDF1F5"
+  muted = "#808A97"
+  accent = "#E99448"
+  heatmap_low = "#2367B8"
+  heatmap_mid = "#F7F7F2"
+  heatmap_high = "#C93836"
+  nan = "#A000A8"
+  positive_inf = "#8C5600"
+  negative_inf = "#003DD9"
+  fill = "#B34852"

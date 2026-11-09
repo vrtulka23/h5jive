@@ -1,0 +1,217 @@
+name: Native release builds
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing GitHub release tag to build and update
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  prepare:
+    runs-on: ubuntu-22.04
+    outputs:
+      tag: ${{ steps.release.outputs.tag }}
+    steps:
+      - name: Check release tag
+        id: release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.event_name == 'release' && github.event.release.tag_name || inputs.tag }}
+        run: |
+          gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null
+          echo "tag=$RELEASE_TAG" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: prepare
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+            archive: h5jive-linux-x86_64.tar.gz
+          - os: macos-15-intel
+            target: x86_64-apple-darwin
+            archive: h5jive-macos-x86_64.tar.gz
+          - os: macos-15
+            target: aarch64-apple-darwin
+            archive: h5jive-macos-aarch64.tar.gz
+          - os: windows-2022
+            target: x86_64-pc-windows-gnu
+            archive: h5jive-windows-x86_64.zip
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Preserve Unix line endings on Windows
+        if: runner.os == 'Windows'
+        run: git config --global core.autocrlf input
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.tag }}
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install Linux build dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential clang cmake libclang-dev patchelf pkg-config \
+            libhdf5-dev libxcb1-dev libxrandr-dev libdbus-1-dev libx11-dev \
+            libwayland-dev libegl-dev libxkbcommon-dev libxkbcommon-x11-dev \
+            libgl1-mesa-dev libvulkan-dev
+
+      - name: Install macOS build dependencies
+        if: runner.os == 'macOS'
+        run: brew install hdf5 pkg-config llvm dylibbundler
+
+      - uses: msys2/setup-msys2@v2
+        if: runner.os == 'Windows'
+        with:
+          msystem: UCRT64
+          path-type: inherit
+          update: true
+          install: >-
+            mingw-w64-ucrt-x86_64-toolchain
+            mingw-w64-ucrt-x86_64-hdf5
+            mingw-w64-ucrt-x86_64-cmake
+            mingw-w64-ucrt-x86_64-ninja
+            mingw-w64-ucrt-x86_64-clang
+            mingw-w64-ucrt-x86_64-pkgconf
+            zip
+
+      - name: Build on Linux
+        if: runner.os == 'Linux'
+        run: cargo build --release --locked -p h5jive --target ${{ matrix.target }}
+
+      - name: Build on macOS
+        if: runner.os == 'macOS'
+        run: |
+          export HDF5_DIR="$(brew --prefix hdf5)"
+          export SNT3_HDF5_LIB_DIR="$HDF5_DIR/lib"
+          export LIBCLANG_PATH="$(brew --prefix llvm)/lib"
+          cargo build --release --locked -p h5jive --target ${{ matrix.target }}
+
+      - name: Build on Windows
+        if: runner.os == 'Windows'
+        shell: msys2 {0}
+        run: |
+          export HDF5_DIR=/ucrt64
+          export HDF5_ROOT=/ucrt64
+          export LIBCLANG_PATH=/ucrt64/bin
+          export PKG_CONFIG_PATH=/ucrt64/lib/pkgconfig
+          export CMAKE_GENERATOR=Ninja
+          # hdf5-metno-sys checks a fixed list of DLL names; MSYS2 uses a versioned name.
+          hdf5_dll=$(find /ucrt64/bin -maxdepth 1 -type f -name 'libhdf5-*.dll' -print -quit)
+          if [ -z "$hdf5_dll" ]; then
+            echo 'HDF5 runtime DLL was not found in /ucrt64/bin' >&2
+            exit 1
+          fi
+          cp "$hdf5_dll" /ucrt64/bin/hdf5.dll
+          # Cargo runs a Windows host build script for a GNU target, so build SNT3 with UCRT64 first.
+          cargo fetch --locked --target ${{ matrix.target }}
+          cargo_home=$(cygpath -u "${CARGO_HOME:-$USERPROFILE/.cargo}")
+          snt3_crate=$(find "$cargo_home/registry/src" -mindepth 2 -maxdepth 2 -type d -name 'scinumtools3-sys-0.10.1' -print -quit)
+          if [ -z "$snt3_crate" ]; then
+            echo 'Bundled scinumtools3-sys source was not found' >&2
+            exit 1
+          fi
+          snt3_build="$PWD/target/snt3-windows-build"
+          snt3_build_native=$(cygpath -m "$snt3_build")
+          cmake -S "$(cygpath -m "$snt3_crate/vendor/snt3")" -B "$snt3_build_native" -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER="$(cygpath -m /ucrt64/bin/gcc.exe)" \
+            -DCMAKE_CXX_COMPILER="$(cygpath -m /ucrt64/bin/g++.exe)" -DHDF5_ROOT="$(cygpath -m /ucrt64)" \
+            -DENABLE_BINDING_C=ON -DENABLE_BINDING_PYTHON=OFF \
+            -DENABLE_UNIT_TESTS=OFF -DENABLE_EXEC_APPS=OFF \
+            -DENABLE_EXEC_EXAMPLES=OFF -DENABLE_EXEC_BENCHMARKS=OFF \
+            -DENABLE_SNT_REPORT=OFF -DENABLE_MAT=OFF -DENABLE_API=OFF
+          cmake --build "$snt3_build_native" --config Release --target snt-c --parallel "$(nproc)"
+          export SNT3_BUILD_DIR="$snt3_build_native"
+          export SNT3_HDF5_LIB_DIR="$(cygpath -m /ucrt64/lib)"
+          cargo build --release --locked -p h5jive --target ${{ matrix.target }}
+
+      - name: Package Linux executable
+        if: runner.os == 'Linux'
+        run: |
+          mkdir -p bundle/lib dist
+          cp target/${{ matrix.target }}/release/h5jive bundle/
+          cp -R settings bundle/settings
+          printf '# Local settings overrides\n' > bundle/settings/overrides.dip
+          cp README.md LICENSE bundle/
+          # Keep HDF5 and its compression helpers beside the program.
+          ldd bundle/h5jive | awk '/=> \/.*lib(hdf5[^.]*|sz|aec|z)\.so/ {print $3}' | while read -r library; do
+            cp -L "$library" bundle/lib/
+          done
+          patchelf --set-rpath '$ORIGIN/lib' bundle/h5jive
+          for library in bundle/lib/*.so*; do
+            [ -e "$library" ] && patchelf --set-rpath '$ORIGIN' "$library"
+          done
+          ldd bundle/h5jive | awk '/libhdf5/ && !/bundle\/lib/ {print "HDF5 library is not bundled: " $0 > "/dev/stderr"; exit 1}'
+          bundle_exe="$PWD/bundle/h5jive"
+          (cd "$(mktemp -d)" && "$bundle_exe" --inspect)
+          tar -C bundle -czf dist/${{ matrix.archive }} .
+
+      - name: Package macOS executable and libraries
+        if: runner.os == 'macOS'
+        run: |
+          mkdir -p bundle/lib dist
+          cp target/${{ matrix.target }}/release/h5jive bundle/
+          cp -R settings bundle/settings
+          printf '# Local settings overrides\n' > bundle/settings/overrides.dip
+          cp README.md LICENSE bundle/
+          dylibbundler -b -x bundle/h5jive -d bundle/lib -p @executable_path/lib
+          find bundle/lib -type f -name '*.dylib' -exec codesign --force --sign - {} \;
+          codesign --force --sign - bundle/h5jive
+          bundle_exe="$PWD/bundle/h5jive"
+          (cd "$(mktemp -d)" && "$bundle_exe" --inspect)
+          tar -C bundle -czf dist/${{ matrix.archive }} .
+
+      - name: Package Windows executable and libraries
+        if: runner.os == 'Windows'
+        shell: msys2 {0}
+        run: |
+          mkdir -p bundle dist
+          cp target/${{ matrix.target }}/release/h5jive.exe bundle/
+          cp -R settings bundle/settings
+          printf '# Local settings overrides\n' > bundle/settings/overrides.dip
+          cp README.md LICENSE bundle/
+          # Ship the UCRT64 DLLs referenced by the executable, including HDF5.
+          ldd bundle/h5jive.exe | awk '/\/ucrt64\/bin\// {print $3}' | while read -r dll; do
+            cp "$dll" bundle/
+          done
+          bundle_exe="$PWD/bundle/h5jive.exe"
+          (cd "$(mktemp -d)" && "$bundle_exe" --inspect)
+          (cd bundle && zip -qr ../dist/${{ matrix.archive }} .)
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.archive }}
+          path: dist/${{ matrix.archive }}
+          if-no-files-found: error
+
+  attach:
+    needs: [prepare, build]
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: h5jive-*
+          path: dist
+          merge-multiple: true
+      - name: Attach native archives to release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
+        run: |
+          (cd dist && sha256sum h5jive-* > SHA256SUMS)
+          gh release upload "$RELEASE_TAG" dist/* --repo "$GITHUB_REPOSITORY" --clobber

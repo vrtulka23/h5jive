@@ -1,0 +1,42 @@
+?descr "Dataset format identification and geolocation discovery. Standard coordinate references are tried first."
+name str
+identification
+  ?descr "Product identity from root metadata, with filename as a fallback."
+  file_glob str
+    ?descr "Fallback filename glob; * and ? wildcards are supported."
+  platform str
+    ?descr "Root platform attribute pattern."
+  sensor str
+    ?descr "Root sensor attribute pattern."
+  product_type str
+    ?descr "Root product_type attribute pattern."
+observation_group str
+  ?descr "Name of the group containing observation datasets."
+coordinate_group str
+  ?descr "Sibling group containing geolocation datasets."
+latitude str
+longitude str
+latitude_bounds str
+longitude_bounds str
+overpass_group_depth int = 0
+  ?descr "Leading geolocation path components identifying independent platforms within one product; 0 groups by product."
+  !condition ({.} >= 0 && {.} <= 4)
+scan_direction
+  ?descr "Optional per-pixel scan direction flag. Unknown codes remain visible in Both mode."
+  group str = "coordinate"
+    ?descr "Set to coordinate or observation to choose the sibling group."
+    !options ["coordinate", "observation"]
+    !condition ({.} == "coordinate" || {.} == "observation")
+  variable str = ""
+  forward_values str = ""
+    ?descr "Comma-separated integer flag values for forward pixels."
+    !format "^$|^-?[0-9]+( *, *-?[0-9]+)*$"
+    !condition ({.variable} == "" || {.} != "")
+  backward_values str = ""
+    ?descr "Comma-separated integer flag values for backward pixels."
+    !format "^$|^-?[0-9]+( *, *-?[0-9]+)*$"
+    !condition ({.variable} == "" || {.} != "")
+  default_filter str = "forward"
+    ?descr "Initial map/globe pixel selection: forward, backward, or both."
+    !options ["both", "forward", "backward"]
+    !condition ({.} == "both" || {.} == "forward" || {.} == "backward")

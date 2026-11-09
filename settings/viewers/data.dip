@@ -1,0 +1,6 @@
+# Dataset browser and value table view settings.
+table
+  columns_per_page int = 256
+  row_header_width int = 58
+  value_column_width int = 100
+  scrollbar_padding int = 22

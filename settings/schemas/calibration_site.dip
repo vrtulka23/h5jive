@@ -1,0 +1,22 @@
+?descr "A sourced calibration or atmospheric reference location with one search region"
+name str
+country str
+category str
+  !options ["Desert PICS", "Snow and ice", "Ocean color", "Atmospheric baseline"]
+center_latitude float
+  !condition ({.} >= -90 && {.} <= 90)
+center_longitude float
+  !condition ({.} >= -180 && {.} <= 180)
+roi_name str
+roi_south float
+  !condition ({.} >= -90 && {.} < {.roi_north})
+roi_north float
+  !condition ({.} <= 90 && {.} > {.roi_south})
+roi_west float
+  !condition ({.} >= -180 && {.} < {.roi_east})
+roi_east float
+  !condition ({.} <= 180 && {.} > {.roi_west})
+status str
+  !options ["Active", "Reference", "Historical"]
+notes str
+source_url str

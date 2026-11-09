@@ -1,0 +1,17 @@
+themes[high_contrast] : appearance_profile
+  base = "dark"
+  rounding = 0.0
+  background = "#07090D"
+  panel = "#161C25"
+  text = "#FFFFFF"
+  border = "#B9CCD9"
+  table_row_alt = "#10141A"
+  muted = "#9099A5"
+  accent = "#A5480A"
+  heatmap_low = "#2868FF"
+  heatmap_mid = "#FFFFFF"
+  heatmap_high = "#FF3D46"
+  nan = "#FF00D4"
+  positive_inf = "#FF9800"
+  negative_inf = "#125BFF"
+  fill = "#FFC4A3"

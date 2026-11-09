@@ -1,0 +1,16 @@
+[book]
+title = "H5Jive Guide"
+authors = ["H5Jive contributors"]
+description = "User and developer guide for the H5Jive scientific data explorer"
+language = "en"
+src = "src"
+
+[build]
+build-dir = "book"
+create-missing = false
+
+[output.html]
+default-theme = "navy"
+preferred-dark-theme = "navy"
+git-repository-url = "https://github.com/vrtulka23/h5jive"
+edit-url-template = "https://github.com/vrtulka23/h5jive/edit/main/docs/{path}"

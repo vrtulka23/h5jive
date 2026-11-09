@@ -1,0 +1,35 @@
+?descr "Two-dimensional array slice and color mapping settings."
+?rationale "Controls the visible cells and numeric-to-color mapping for 2D slices."
+colormap str = "viridis"
+  ?descr "Continuous 2D data color map; theme uses colors from the active appearance profile."
+  !options ["theme", "viridis", "grayscale"]
+  !labels ["Theme colors", "Viridis", "Grayscale"]
+  !condition ({.} == "theme" || {.} == "viridis" || {.} == "grayscale")
+  ?recommended_range "theme, viridis, grayscale"
+  !setup
+range_mode str = "auto"
+  ?descr "Choose the data-derived or fixed numeric color range."
+  !options ["auto", "fixed"]
+  !labels ["Automatic data range", "Fixed numeric range"]
+  !condition ({.} == "auto" || {.} == "fixed")
+  !setup
+cell_size int = 4
+  ?descr "Approximate displayed cell size in pixels."
+  !condition ({.} >= 1 && {.} <= 64)
+value_min float = -1.0
+  ?descr "Lower color limit when range_mode is fixed."
+  !condition (all_finite({.}) && {.} < {.value_max})
+  !setup
+value_max float = 1.0
+  ?descr "Upper color limit when range_mode is fixed."
+  !condition (all_finite({.}) && {.} > {.value_min})
+  !setup
+max_cells int = 65536
+  ?descr "Maximum sampled cells displayed in the overview."
+  !condition ({.} >= 256 && {.} <= 1048576)
+legend_width int = 112
+  ?descr "Color legend width in pixels."
+  !condition ({.} >= 60 && {.} <= 300)
+legend_fraction float = 0.24
+  ?descr "Fraction of the view reserved for the color legend."
+  !condition ({.} > 0 && {.} <= 0.5)

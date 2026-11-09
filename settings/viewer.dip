@@ -1,0 +1,15 @@
+# H5Jive viewer instance; defaults and validation are in schemas/viewer.dip.
+viewer : h5jive_settings
+  views
+    data
+      {viewer_data?}
+    slice_2d
+      {viewer_slice_2d?}
+    profiles_1d
+      {viewer_profiles_1d?}
+    spatial_3d
+      {viewer_spatial_3d?}
+    world_map
+      {viewer_world_map?}
+    globe
+      {viewer_globe?}

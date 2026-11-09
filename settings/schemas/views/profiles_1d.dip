@@ -1,0 +1,13 @@
+?descr "One-dimensional profile and distribution plot layout."
+min_width int = 150
+  ?descr "Minimum plot width in pixels."
+  !condition ({.} >= 80)
+min_height int = 200
+  ?descr "Minimum plot height in pixels."
+  !condition ({.} >= 80)
+x_tick_spacing int = 70
+  ?descr "Target spacing between x-axis tick labels in pixels."
+  !condition ({.} >= 30 && {.} <= 200)
+y_tick_intervals int = 4
+  ?descr "Target number of y-axis intervals."
+  !condition ({.} >= 1 && {.} <= 12)

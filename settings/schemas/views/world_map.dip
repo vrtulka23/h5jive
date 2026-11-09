@@ -1,0 +1,31 @@
+?descr "Flat geospatial map rendering and navigation."
+background str = "natural_earth"
+  ?descr "Earth image or palette style behind the geolocated observations."
+  !options ["natural_earth", "blue_marble", "ocean", "plain"]
+  !labels ["Natural Earth II map", "NASA Blue Marble with bathymetry", "Ocean tint", "Theme panel"]
+  !condition ({.} == "natural_earth" || {.} == "blue_marble" || {.} == "ocean" || {.} == "plain")
+  !setup
+max_zoom float = 1024.0
+  ?descr "Maximum flat map magnification relative to the world view."
+  !condition ({.} >= 2 && {.} <= 4096)
+site_zoom float = 96.0
+  ?descr "Magnification when a PICS site is selected."
+  !condition ({.} >= 2 && {.} <= {.max_zoom})
+zoom_factor float = 1.25
+  ?descr "Magnification step per mouse wheel unit."
+  !condition ({.} > 1 && {.} <= 2)
+show_pics bool = true
+  ?descr "Show PICS region markers when the flat map opens."
+  !setup
+max_points int = 30000
+  ?descr "Maximum geolocated samples retained in a world map preview."
+  !condition ({.} >= 1000 && {.} <= 200000)
+  ?performance_impact "Higher limits retain more swath samples and increase map draw time."
+point_radius float = 2.0
+  ?descr "Radius of satellite sample points on the map in pixels."
+  !condition ({.} >= 0.5 && {.} <= 8)
+pinned_default str = "middle"
+  ?descr "Initial index for the fourth dimension of a geolocated 4D dataset."
+  !options ["start", "middle", "end"]
+  !condition ({.} == "start" || {.} == "middle" || {.} == "end")
+  !setup

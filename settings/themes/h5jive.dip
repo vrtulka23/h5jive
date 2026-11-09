@@ -1,0 +1,17 @@
+themes[h5jive] : appearance_profile
+  base = "dark"
+  rounding = 3.0
+  background = "#111512"
+  panel = "#171F1B"
+  text = "#E6E8DF"
+  border = "#435148"
+  table_row_alt = "#151A16"
+  muted = "#929B91"
+  accent = "#A5480A"
+  heatmap_low = "#267C9A"
+  heatmap_mid = "#24C7D8"
+  heatmap_high = "#F3DD62"
+  nan = "#FF00D4"
+  positive_inf = "#FF9800"
+  negative_inf = "#125BFF"
+  fill = "#F2B49E"

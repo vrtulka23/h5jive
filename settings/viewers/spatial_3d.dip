@@ -1,0 +1,5 @@
+# 3D dataset projection settings.
+default_opacity float = 1.0
+default_log_scale bool = false
+max_zoom float = 32.0
+back_brightness float = 0.45

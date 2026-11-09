@@ -1,0 +1,36 @@
+?descr "One CEOS reference pseudo-invariant calibration site, with USGS CEOS and CNES ROIs"
+name str
+country str
+center_latitude float
+  ?descr "Site center latitude in decimal degrees north"
+  !condition ({.} >= -90 && {.} <= 90)
+center_longitude float
+  ?descr "Site center longitude in decimal degrees east"
+  !condition ({.} >= -180 && {.} <= 180)
+ceos_south float
+  !condition ({.} >= -90 && {.} < {.ceos_north})
+ceos_north float
+  !condition ({.} <= 90 && {.} > {.ceos_south})
+ceos_west float
+  !condition ({.} >= -180 && {.} < {.ceos_east})
+ceos_east float
+  !condition ({.} <= 180 && {.} > {.ceos_west})
+cnes_south float
+  !condition ({.} >= -90 && {.} < {.cnes_north})
+cnes_north float
+  !condition ({.} <= 90 && {.} > {.cnes_south})
+cnes_west float
+  !condition ({.} >= -180 && {.} < {.cnes_east})
+cnes_east float
+  !condition ({.} <= 180 && {.} > {.cnes_west})
+usable_km_1 int
+  !condition ({.} > 0)
+usable_km_2 int
+  !condition ({.} > 0)
+altitude_m int
+  !condition ({.} >= -500)
+landsat_wrs_2 str
+status str
+  !options ["Active", "Inactive"]
+source_url str
+  ?descr "USGS EROS Cal/Val Catalog site page"

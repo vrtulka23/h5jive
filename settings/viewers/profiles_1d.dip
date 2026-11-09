@@ -1,0 +1,5 @@
+# Profile and distribution plot layout settings.
+min_width int = 150
+min_height int = 200
+x_tick_spacing int = 70
+y_tick_intervals int = 4

@@ -1,0 +1,380 @@
+# Six CEOS reference PICS. Decimal degrees: north/east positive, south/west negative.
+# ROI coordinates, site centers, and metadata: USGS EROS Cal/Val Test Sites Catalog.
+pics[algeria_3] : pics_site
+  name = "Algeria 3"
+  country = "Algeria"
+  center_latitude = 30.32
+  center_longitude = 7.66
+  ceos_south = 29.77
+  ceos_north = 30.77
+  ceos_west = 7.21
+  ceos_east = 8.11
+  cnes_south = 30.22
+  cnes_north = 30.42
+  cnes_west = 7.56
+  cnes_east = 7.76
+  usable_km_1 = 110
+  usable_km_2 = 85
+  altitude_m = 245
+  landsat_wrs_2 = "192 / 39"
+  status = "Active"
+  source_url = "https://calval.cr.usgs.gov/apps/algeria-3"
+
+pics[algeria_5] : pics_site
+  name = "Algeria 5"
+  country = "Algeria"
+  center_latitude = 31.02
+  center_longitude = 2.23
+  ceos_south = 30.57
+  ceos_north = 31.47
+  ceos_west = 1.78
+  ceos_east = 2.68
+  cnes_south = 30.92
+  cnes_north = 31.12
+  cnes_west = 2.13
+  cnes_east = 2.33
+  usable_km_1 = 75
+  usable_km_2 = 75
+  altitude_m = 530
+  landsat_wrs_2 = "195 / 38-39"
+  status = "Active"
+  source_url = "https://calval.cr.usgs.gov/apps/algeria-5"
+
+pics[libya_1] : pics_site
+  name = "Libya 1"
+  country = "Libya"
+  center_latitude = 24.42
+  center_longitude = 13.35
+  ceos_south = 23.97
+  ceos_north = 24.87
+  ceos_west = 12.90
+  ceos_east = 13.80
+  cnes_south = 24.40
+  cnes_north = 24.60
+  cnes_west = 13.20
+  cnes_east = 13.40
+  usable_km_1 = 100
+  usable_km_2 = 90
+  altitude_m = 648
+  landsat_wrs_2 = "187 / 43"
+  status = "Active"
+  source_url = "https://calval.cr.usgs.gov/apps/node/27"
+
+pics[libya_4] : pics_site
+  name = "Libya 4"
+  country = "Libya"
+  center_latitude = 28.55
+  center_longitude = 23.39
+  ceos_south = 28.05
+  ceos_north = 29.05
+  ceos_west = 22.89
+  ceos_east = 23.89
+  cnes_south = 28.45
+  cnes_north = 28.65
+  cnes_west = 23.29
+  cnes_east = 23.49
+  usable_km_1 = 75
+  usable_km_2 = 75
+  altitude_m = 118
+  landsat_wrs_2 = "181 / 40"
+  status = "Active"
+  source_url = "https://calval.cr.usgs.gov/apps/libya-4"
+
+pics[mauritania_1] : pics_site
+  name = "Mauritania 1"
+  country = "Mauritania"
+  center_latitude = 19.40
+  center_longitude = -9.30
+  ceos_south = 18.95
+  ceos_north = 19.85
+  ceos_west = -9.75
+  ceos_east = -8.85
+  cnes_south = 19.30
+  cnes_north = 19.50
+  cnes_west = -9.40
+  cnes_east = -9.20
+  usable_km_1 = 50
+  usable_km_2 = 50
+  altitude_m = 392
+  landsat_wrs_2 = "201 / 46-47"
+  status = "Active"
+  source_url = "https://calval.cr.usgs.gov/apps/mauritania-1"
+
+pics[mauritania_2] : pics_site
+  name = "Mauritania 2"
+  country = "Mauritania"
+  center_latitude = 20.85
+  center_longitude = -8.78
+  ceos_south = 20.40
+  ceos_north = 21.30
+  ceos_west = -9.23
+  ceos_east = -8.33
+  cnes_south = 20.75
+  cnes_north = 20.95
+  cnes_west = -8.88
+  cnes_east = -8.68
+  usable_km_1 = 100
+  usable_km_2 = 90
+  altitude_m = 384
+  landsat_wrs_2 = "201 / 46"
+  status = "Active"
+  source_url = "https://calval.cr.usgs.gov/apps/mauritania-2"
+
+# Additional USGS PICS catalog sites with published CNES and SDSU regions.
+# Their catalog centers do not necessarily lie inside either published region.
+pics[egypt_1] : pics_catalog_site
+  name = "Egypt 1"
+  country = "Egypt"
+  center_latitude = 27.41
+  center_longitude = 26.38
+  roi_1_name = "CNES"
+  roi_1_south = 27.02
+  roi_1_north = 27.22
+  roi_1_west = 26.00
+  roi_1_east = 26.20
+  roi_2_name = "SDSU"
+  roi_2_south = 26.91
+  roi_2_north = 27.13
+  roi_2_west = 26.31
+  roi_2_east = 26.62
+  usable_km_1 = 100
+  usable_km_2 = 100
+  altitude_m = 226
+  landsat_wrs_2 = "179 / 41"
+  status = "Active"
+  source_url = "https://calval.cr.usgs.gov/apps/egypt-1"
+
+pics[sudan_1] : pics_catalog_site
+  name = "Sudan 1"
+  country = "Sudan"
+  center_latitude = 21.40
+  center_longitude = 27.70
+  roi_1_name = "CNES"
+  roi_1_south = 21.80
+  roi_1_north = 22.00
+  roi_1_west = 27.90
+  roi_1_east = 28.10
+  roi_2_name = "SDSU"
+  roi_2_south = 21.40
+  roi_2_north = 21.75
+  roi_2_west = 27.59
+  roi_2_east = 27.81
+  usable_km_1 = 10
+  usable_km_2 = 10
+  altitude_m = 325
+  landsat_wrs_2 = "177 / 45"
+  status = "Active"
+  source_url = "https://calval.cr.usgs.gov/apps/sudan"
+
+# Further radiometric PICS. A labelled search window is deliberately distinct
+# from an agency ROI; it helps find overpasses but does not define calibration pixels.
+pics[libya_2] : calibration_site
+  name = "Libya 2"
+  country = "Libya"
+  category = "Desert PICS"
+  center_latitude = 25.05
+  center_longitude = 20.48
+  roi_name = "Regional search window"
+  roi_south = 24.55
+  roi_north = 25.55
+  roi_west = 19.98
+  roi_east = 20.98
+  status = "Active"
+  notes = "Use product-specific cloud and aerosol screening before radiometric analysis."
+  source_url = "https://calval.cr.usgs.gov/apps/libya-2"
+
+pics[libya_3] : calibration_site
+  name = "Libya 3"
+  country = "Libya"
+  category = "Desert PICS"
+  center_latitude = 23.15
+  center_longitude = 23.10
+  roi_name = "Regional search window"
+  roi_south = 22.65
+  roi_north = 23.65
+  roi_west = 22.60
+  roi_east = 23.60
+  status = "Active"
+  notes = "Use product-specific cloud and aerosol screening before radiometric analysis."
+  source_url = "https://calval.cr.usgs.gov/apps/libya-3"
+
+pics[arabia_2] : calibration_site
+  name = "Arabia 2"
+  country = "Saudi Arabia"
+  category = "Desert PICS"
+  center_latitude = 20.13
+  center_longitude = 50.96
+  roi_name = "Regional search window"
+  roi_south = 19.63
+  roi_north = 20.63
+  roi_west = 50.46
+  roi_east = 51.46
+  status = "Active"
+  notes = "Published aerosol loading can be high; screen optical observations accordingly."
+  source_url = "https://calval.cr.usgs.gov/apps/arabia-2"
+
+pics[niger_1] : calibration_site
+  name = "Niger 1"
+  country = "Niger"
+  category = "Desert PICS"
+  center_latitude = 20.41
+  center_longitude = 9.36
+  roi_name = "SDSU"
+  roi_south = 20.28
+  roi_north = 20.53
+  roi_west = 9.19
+  roi_east = 9.52
+  status = "Active"
+  notes = "Published SDSU ROI."
+  source_url = "https://calval.cr.usgs.gov/apps/niger-1"
+
+pics[niger_2] : calibration_site
+  name = "Niger 2"
+  country = "Niger"
+  category = "Desert PICS"
+  center_latitude = 21.08
+  center_longitude = 10.44
+  roi_name = "SDSU"
+  roi_south = 21.25
+  roi_north = 21.47
+  roi_west = 10.38
+  roi_east = 10.71
+  status = "Active"
+  notes = "Published SDSU ROI; the catalog center is outside the ROI."
+  source_url = "https://calval.cr.usgs.gov/apps/niger-2"
+
+pics[namib_desert_1] : calibration_site
+  name = "Namib Desert 1"
+  country = "Namibia"
+  category = "Desert PICS"
+  center_latitude = -24.98
+  center_longitude = 15.27
+  roi_name = "Regional search window"
+  roi_south = -25.23
+  roi_north = -24.73
+  roi_west = 15.02
+  roi_east = 15.52
+  status = "Active"
+  notes = "Select a smaller uniform subregion for radiometric analysis."
+  source_url = "https://calval.cr.usgs.gov/apps/namib-desert-1"
+
+pics[white_sands] : calibration_site
+  name = "White Sands"
+  country = "United States"
+  category = "Desert PICS"
+  center_latitude = 32.92
+  center_longitude = -106.35
+  roi_name = "Regional search window"
+  roi_south = 32.67
+  roi_north = 33.17
+  roi_west = -106.60
+  roi_east = -106.10
+  status = "Active"
+  notes = "Bright playa calibration site; this search window is not a calibration ROI."
+  source_url = "https://calval.cr.usgs.gov/apps/white-sands"
+
+# Snow, ice, ocean colour, and baseline stations are search locations, not desert PICS.
+pics[dome_c] : calibration_site
+  name = "Dome C"
+  country = "Antarctica"
+  category = "Snow and ice"
+  center_latitude = -75.10
+  center_longitude = 123.39
+  roi_name = "Regional search window"
+  roi_south = -75.35
+  roi_north = -74.85
+  roi_west = 122.89
+  roi_east = 123.89
+  status = "Active"
+  notes = "Snow reference; reflective-band use is seasonal and requires BRDF screening."
+  source_url = "https://calval.cr.usgs.gov/apps/node/21"
+
+pics[greenland_summit] : calibration_site
+  name = "Summit, Greenland"
+  country = "Greenland"
+  category = "Snow and ice"
+  center_latitude = 72.5962
+  center_longitude = -38.422
+  roi_name = "Station search window"
+  roi_south = 72.3462
+  roi_north = 72.8462
+  roi_west = -38.672
+  roi_east = -38.172
+  status = "Reference"
+  notes = "NOAA atmospheric and snow reference station; search window is not a uniform snow ROI."
+  source_url = "https://gml.noaa.gov/dv/site/site.php?code=SUM"
+
+pics[moby] : calibration_site
+  name = "MOBY"
+  country = "Hawaii offshore waters"
+  category = "Ocean color"
+  center_latitude = 20.8167
+  center_longitude = -157.20
+  roi_name = "Mooring search window"
+  roi_south = 20.5667
+  roi_north = 21.0667
+  roi_west = -157.45
+  roi_east = -156.95
+  status = "Reference"
+  notes = "Ocean-colour buoy; satellite matchups require time, geometry, and water-quality screening."
+  source_url = "https://seabass.gsfc.nasa.gov/experiment/MOBY"
+
+pics[boussole] : calibration_site
+  name = "BOUSSOLE"
+  country = "Ligurian Sea"
+  category = "Ocean color"
+  center_latitude = 43.367
+  center_longitude = 7.90
+  roi_name = "Mooring search window"
+  roi_south = 43.117
+  roi_north = 43.617
+  roi_west = 7.65
+  roi_east = 8.15
+  status = "Reference"
+  notes = "Ocean-colour buoy; satellite matchups require time, geometry, and water-quality screening."
+  source_url = "https://seabass.gsfc.nasa.gov/experiment/BOUSSOLE/"
+
+pics[mauna_loa] : calibration_site
+  name = "Mauna Loa Observatory"
+  country = "Hawaii, United States"
+  category = "Atmospheric baseline"
+  center_latitude = 19.5362
+  center_longitude = -155.5763
+  roi_name = "Station search window"
+  roi_south = 19.2862
+  roi_north = 19.7862
+  roi_west = -155.8263
+  roi_east = -155.3263
+  status = "Reference"
+  notes = "NOAA atmospheric baseline site; a satellite overpass is not a direct in-situ matchup."
+  source_url = "https://gml.noaa.gov/dv/site/index.php?stacode=mlo"
+
+pics[barrow] : calibration_site
+  name = "Barrow Observatory"
+  country = "Alaska, United States"
+  category = "Atmospheric baseline"
+  center_latitude = 71.3230
+  center_longitude = -156.6114
+  roi_name = "Station search window"
+  roi_south = 71.0730
+  roi_north = 71.5730
+  roi_west = -156.8614
+  roi_east = -156.3614
+  status = "Reference"
+  notes = "NOAA Arctic atmospheric baseline site; matchups need time and air-mass screening."
+  source_url = "https://gml.noaa.gov/dv/site/?stacode=BRW"
+
+pics[american_samoa] : calibration_site
+  name = "American Samoa Observatory"
+  country = "American Samoa"
+  category = "Atmospheric baseline"
+  center_latitude = -14.2474
+  center_longitude = -170.5644
+  roi_name = "Station search window"
+  roi_south = -14.4974
+  roi_north = -13.9974
+  roi_west = -170.8144
+  roi_east = -170.3144
+  status = "Reference"
+  notes = "NOAA South Pacific atmospheric baseline site; matchups need time and air-mass screening."
+  source_url = "https://gml.noaa.gov/dv/site/index.php?stacode=SMO"

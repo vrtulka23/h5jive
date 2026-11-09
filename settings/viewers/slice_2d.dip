@@ -1,0 +1,9 @@
+# 2D slice rendering and color-scale settings.
+colormap str = "theme"
+range_mode str = "auto"
+cell_size int = 4
+value_min float = -1.0
+value_max float = 1.0
+max_cells int = 65536
+legend_width int = 112
+legend_fraction float = 0.24

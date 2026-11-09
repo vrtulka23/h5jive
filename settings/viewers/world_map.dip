@@ -1,0 +1,9 @@
+# Flat map interaction and satellite sample settings.
+    background str = "natural_earth"
+max_zoom float = 1024.0
+site_zoom float = 96.0
+zoom_factor float = 1.25
+show_pics bool = true
+max_points int = 30000
+point_radius float = 2.0
+pinned_default str = "middle"

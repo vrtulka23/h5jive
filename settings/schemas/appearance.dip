@@ -1,0 +1,42 @@
+?descr "GUI and data palette for one appearance profile"
+base str
+  !options ["dark", "light", "classic"]
+  !labels ["Dark", "Light", "Classic"]
+  !condition ({.} == "dark" || {.} == "light" || {.} == "classic")
+  !setup
+rounding float
+  ?descr "Corner radius for controls and panels"
+  !condition ({.} >= 0 && {.} <= 16)
+background str
+  !format "#[0-9A-Fa-f]{6}"
+panel str
+  !format "#[0-9A-Fa-f]{6}"
+text str
+  !format "#[0-9A-Fa-f]{6}"
+border str
+  !format "#[0-9A-Fa-f]{6}"
+table_row_alt str
+  ?descr "Alternating table row background; choose a subtle contrast with background"
+  !format "#[0-9A-Fa-f]{6}"
+muted str
+  !format "#[0-9A-Fa-f]{6}"
+accent str
+  !format "#[0-9A-Fa-f]{6}"
+heatmap_low str
+  !format "#[0-9A-Fa-f]{6}"
+heatmap_mid str
+  !format "#[0-9A-Fa-f]{6}"
+heatmap_high str
+  !format "#[0-9A-Fa-f]{6}"
+nan str
+  ?descr "NaN values in tables, statistics, and heatmaps"
+  !format "#[0-9A-Fa-f]{6}"
+positive_inf str
+  ?descr "Positive infinity values in tables, statistics, and heatmaps"
+  !format "#[0-9A-Fa-f]{6}"
+negative_inf str
+  ?descr "Negative infinity values in tables, statistics, and heatmaps"
+  !format "#[0-9A-Fa-f]{6}"
+fill str
+  ?descr "Fill values in tables, statistics, and heatmaps"
+  !format "#[0-9A-Fa-f]{6}"

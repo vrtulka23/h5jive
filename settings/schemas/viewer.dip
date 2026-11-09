@@ -1,0 +1,108 @@
+?descr "H5Jive viewer settings"
+?authors "H5Jive contributors"
+?license "MIT"
+?version "0.1.0"
+?url "https://github.com/vrtulka23/h5jive"
+application
+  title str = "H5Jive"
+    ?descr "Application window title"
+  default_view str = "data"
+    ?descr "View selected at startup"
+    !options ["spatial_3d", "slice_2d", "profiles_1d", "world_map", "globe", "data"]
+    !labels ["3D projection", "2D slice", "1D profiles", "Flat world map", "Globe", "Data table"]
+    !condition ({.} == "spatial_3d" || {.} == "slice_2d" || {.} == "profiles_1d" || {.} == "world_map" || {.} == "globe" || {.} == "data")
+    ?rationale "Selects the viewer panel opened when the application starts."
+    !setup
+
+graphics
+  backend str = "auto"
+    ?descr "WGPU backend: auto selects a native backend, or OpenGL for forwarded X11"
+    !options ["auto", "metal", "vulkan", "gl", "vulkan,gl"]
+    !labels ["Automatic", "Metal", "Vulkan", "OpenGL", "Vulkan + OpenGL"]
+    !condition ({.} == "auto" || {.} == "metal" || {.} == "vulkan" || {.} == "gl" || {.} == "vulkan,gl")
+    !setup
+  forwarded_x11_backend str = "gl"
+    ?descr "WGPU backend for SSH X11 forwarding on Linux when backend is auto"
+    !options ["gl", "vulkan", "vulkan,gl"]
+    !labels ["OpenGL", "Vulkan", "Vulkan + OpenGL"]
+    !condition ({.} == "gl" || {.} == "vulkan" || {.} == "vulkan,gl")
+
+appearance
+  profile str = "h5jive"
+    ?descr "Appearance profile applied at startup"
+    !options ["dark", "light", "high_contrast", "soft_slate", "h5jive"]
+    !labels ["Dark", "Light", "High contrast", "Soft slate", "H5Jive"]
+    !condition ({.} == "dark" || {.} == "light" || {.} == "high_contrast" || {.} == "soft_slate" || {.} == "h5jive")
+    !setup
+
+layout
+  sidebar_min_width int = 180
+    ?descr "Smallest draggable sidebar width in pixels"
+    !condition ({.} >= 120)
+  sidebar_max_width int = 800
+    ?descr "Largest draggable sidebar width in pixels"
+    !condition ({.} > {.sidebar_min_width})
+  sidebar_width int = 300
+    ?descr "Initial sidebar width in pixels"
+    !condition ({.} >= {.sidebar_min_width} && {.} <= {.sidebar_max_width})
+    !setup
+  viewer_min_width int = 280
+    !condition ({.} >= 160)
+  details_fraction float = 0.40
+    ?descr "Initial share of the sidebar given to details"
+    !condition ({.} > 0 && {.} < 1)
+  panel_min_height int = 80
+    !condition ({.} >= 40)
+  splitter_width int = 8
+    !condition ({.} >= 3 && {.} <= 24)
+  view_button_height int = 38
+    !condition ({.} >= 20 && {.} <= 80)
+  view_button_gap int = 8
+    !condition ({.} >= 0 && {.} <= 32)
+  refresh_button_width int = 130
+    !condition ({.} >= 80 && {.} <= 240)
+  refresh_button_height int = 70
+    !condition ({.} >= 24 && {.} <= 120)
+  details_max_width int = 420
+    !condition ({.} >= 160)
+
+tree
+  show_dataset_shape bool = true
+  max_depth int = 24
+    ?descr "Maximum HDF5 group depth to display"
+    !condition ({.} >= 1)
+  max_objects int = 10000
+    ?descr "Maximum HDF5 objects to list"
+    !condition ({.} >= 1)
+
+data
+  pinned_default str = "start"
+    ?descr "Initial index of dimensions pinned outside a table or slice"
+    !options ["start", "middle", "end"]
+    !labels ["First index", "Middle index", "Last index"]
+    !condition ({.} == "start" || {.} == "middle" || {.} == "end")
+    !setup
+  region_cache_entries int = 4
+    !condition ({.} >= 1 && {.} <= 64)
+
+format
+  decimals int = 4
+    ?descr "Maximum decimal places for displayed data values; scientific notation outside 0.001 to 1000"
+    !condition ({.} >= 0 && {.} <= 10)
+
+statistics
+  sample_values int = 1000000
+    ?descr "Maximum reservoir sample for quartiles and outliers"
+    !condition ({.} >= 1 && {.} <= 5000000)
+  histogram_bins int = 32
+    !condition ({.} >= 4 && {.} <= 512)
+
+views
+  ?descr "Per-view interaction and rendering settings."
+  ?rationale "Each named viewer has a dedicated schema for its options, validation, and setup controls."
+  data : data_view_settings
+  slice_2d : slice_2d_view_settings
+  profiles_1d : profiles_1d_view_settings
+  spatial_3d : spatial_3d_view_settings
+  world_map : world_map_view_settings
+  globe : globe_view_settings

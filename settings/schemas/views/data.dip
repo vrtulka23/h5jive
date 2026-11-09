@@ -1,0 +1,15 @@
+?descr "Dataset tree and value table view settings."
+table
+  ?descr "Visible table layout parameters."
+  columns_per_page int = 256
+    ?descr "Number of value columns shown on one page."
+    !condition ({.} >= 1 && {.} <= 512)
+  row_header_width int = 58
+    ?descr "Width of the table row-index column in pixels."
+    !condition ({.} >= 32 && {.} <= 200)
+  value_column_width int = 100
+    ?descr "Width of each value column in pixels."
+    !condition ({.} >= 48 && {.} <= 300)
+  scrollbar_padding int = 22
+    ?descr "Spacing reserved for the horizontal table scrollbar."
+    !condition ({.} >= 0 && {.} <= 64)

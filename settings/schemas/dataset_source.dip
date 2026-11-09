@@ -1,0 +1,8 @@
+?descr "One local dataset repository; several repositories may use the same dataset format."
+name str
+root str
+format
+tags str
+  ?descr "Comma-separated tags for dataset grouping and search."
+product_regex str
+  ?descr "Regex matched against the relative path; named captures year, month, day, orbit become index columns."

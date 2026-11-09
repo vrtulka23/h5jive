@@ -1,0 +1,8 @@
+[workspace]
+members = ["crates/data-source", "crates/h5jive"]
+resolver = "2"
+
+[workspace.package]
+edition = "2021"
+license = "MIT"
+

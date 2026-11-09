@@ -1,0 +1,14 @@
+?descr "Exact 3D volume rendering and opacity defaults."
+default_opacity float = 1.0
+  ?descr "Initial opacity of ordinary voxels."
+  !condition ({.} >= 0 && {.} <= 1)
+  !setup
+default_log_scale bool = false
+  ?descr "Start the 3D value color scale in signed logarithmic mode."
+  !setup
+max_zoom float = 32.0
+  ?descr "Maximum magnification of the 3D preview."
+  !condition ({.} >= 1 && {.} <= 128)
+back_brightness float = 0.45
+  ?descr "Brightness of geometry at the back of the 3D preview."
+  !condition ({.} >= 0 && {.} <= 1)

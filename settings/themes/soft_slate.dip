@@ -1,0 +1,17 @@
+themes[soft_slate] : appearance_profile
+  base = "dark"
+  rounding = 7.0
+  background = "#151B23"
+  panel = "#222C36"
+  text = "#DDE7ED"
+  border = "#43515D"
+  table_row_alt = "#1B222B"
+  muted = "#91A2AD"
+  accent = "#A5480A"
+  heatmap_low = "#3B659E"
+  heatmap_mid = "#DAE7E3"
+  heatmap_high = "#C77A70"
+  nan = "#FF00D4"
+  positive_inf = "#FF9800"
+  negative_inf = "#125BFF"
+  fill = "#FFB3A1"

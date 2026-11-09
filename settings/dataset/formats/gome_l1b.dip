@@ -1,0 +1,14 @@
+# ERS-2 GOME L1B groups repeat this layout under each band.
+dataset_formats[gome_l1b] : dataset_format
+  name = "GOME Level 1B"
+  identification
+    file_glob = "ER2_RPRO_GOM_L1B*.nc"
+    platform = "ERS-2"
+    sensor = "GOME"
+    product_type = "GOM_L1B___"
+  observation_group = "OBSERVATIONS"
+  coordinate_group = "GEODATA"
+  latitude = "latitude"
+  longitude = "longitude"
+  latitude_bounds = "latitude_bounds"
+  longitude_bounds = "longitude_bounds"

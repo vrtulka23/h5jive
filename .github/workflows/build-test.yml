@@ -1,0 +1,122 @@
+name: Build and test
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-test-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  native:
+    name: ${{ matrix.os }} (${{ matrix.target }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+          - os: macos-15-intel
+            target: x86_64-apple-darwin
+          - os: macos-15
+            target: aarch64-apple-darwin
+          - os: windows-2022
+            target: x86_64-pc-windows-gnu
+    steps:
+      - name: Preserve Unix line endings on Windows
+        if: runner.os == 'Windows'
+        run: git config --global core.autocrlf input
+
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install Linux build dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential clang cmake libclang-dev pkg-config \
+            libhdf5-dev libxcb1-dev libxrandr-dev libdbus-1-dev libx11-dev \
+            libwayland-dev libegl-dev libxkbcommon-dev libxkbcommon-x11-dev \
+            libgl1-mesa-dev libvulkan-dev
+
+      - name: Install macOS build dependencies
+        if: runner.os == 'macOS'
+        run: brew install hdf5 pkg-config llvm
+
+      - uses: msys2/setup-msys2@v2
+        if: runner.os == 'Windows'
+        with:
+          msystem: UCRT64
+          path-type: inherit
+          update: true
+          install: >-
+            mingw-w64-ucrt-x86_64-toolchain
+            mingw-w64-ucrt-x86_64-hdf5
+            mingw-w64-ucrt-x86_64-cmake
+            mingw-w64-ucrt-x86_64-ninja
+            mingw-w64-ucrt-x86_64-clang
+            mingw-w64-ucrt-x86_64-pkgconf
+
+      - name: Build and test on Linux
+        if: runner.os == 'Linux'
+        run: |
+          cargo build --workspace --locked --target ${{ matrix.target }}
+          cargo test --workspace --locked --target ${{ matrix.target }} -- --test-threads=1
+
+      - name: Build and test on macOS
+        if: runner.os == 'macOS'
+        run: |
+          export HDF5_DIR="$(brew --prefix hdf5)"
+          export SNT3_HDF5_LIB_DIR="$HDF5_DIR/lib"
+          export LIBCLANG_PATH="$(brew --prefix llvm)/lib"
+          cargo build --workspace --locked --target ${{ matrix.target }}
+          cargo test --workspace --locked --target ${{ matrix.target }} -- --test-threads=1
+
+      - name: Build and test on Windows
+        if: runner.os == 'Windows'
+        shell: msys2 {0}
+        run: |
+          export HDF5_DIR=/ucrt64
+          export HDF5_ROOT=/ucrt64
+          export LIBCLANG_PATH=/ucrt64/bin
+          export PKG_CONFIG_PATH=/ucrt64/lib/pkgconfig
+          export CMAKE_GENERATOR=Ninja
+          # hdf5-metno-sys checks a fixed list of DLL names; MSYS2 uses a versioned name.
+          hdf5_dll=$(find /ucrt64/bin -maxdepth 1 -type f -name 'libhdf5-*.dll' -print -quit)
+          if [ -z "$hdf5_dll" ]; then
+            echo 'HDF5 runtime DLL was not found in /ucrt64/bin' >&2
+            exit 1
+          fi
+          cp "$hdf5_dll" /ucrt64/bin/hdf5.dll
+          # Cargo runs a Windows host build script for a GNU target, so build SNT3 with UCRT64 first.
+          cargo fetch --locked --target ${{ matrix.target }}
+          cargo_home=$(cygpath -u "${CARGO_HOME:-$USERPROFILE/.cargo}")
+          snt3_crate=$(find "$cargo_home/registry/src" -mindepth 2 -maxdepth 2 -type d -name 'scinumtools3-sys-0.10.1' -print -quit)
+          if [ -z "$snt3_crate" ]; then
+            echo 'Bundled scinumtools3-sys source was not found' >&2
+            exit 1
+          fi
+          snt3_build="$PWD/target/snt3-windows-build"
+          snt3_build_native=$(cygpath -m "$snt3_build")
+          cmake -S "$(cygpath -m "$snt3_crate/vendor/snt3")" -B "$snt3_build_native" -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER="$(cygpath -m /ucrt64/bin/gcc.exe)" \
+            -DCMAKE_CXX_COMPILER="$(cygpath -m /ucrt64/bin/g++.exe)" -DHDF5_ROOT="$(cygpath -m /ucrt64)" \
+            -DENABLE_BINDING_C=ON -DENABLE_BINDING_PYTHON=OFF \
+            -DENABLE_UNIT_TESTS=OFF -DENABLE_EXEC_APPS=OFF \
+            -DENABLE_EXEC_EXAMPLES=OFF -DENABLE_EXEC_BENCHMARKS=OFF \
+            -DENABLE_SNT_REPORT=OFF -DENABLE_MAT=OFF -DENABLE_API=OFF
+          cmake --build "$snt3_build_native" --config Release --target snt-c --parallel "$(nproc)"
+          export SNT3_BUILD_DIR="$snt3_build_native"
+          export SNT3_HDF5_LIB_DIR="$(cygpath -m /ucrt64/lib)"
+          cargo build --workspace --locked --target ${{ matrix.target }}
+          cargo test --workspace --locked --target ${{ matrix.target }} -- --test-threads=1

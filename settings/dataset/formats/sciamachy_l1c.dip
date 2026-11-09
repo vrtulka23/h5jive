@@ -1,0 +1,20 @@
+# ENVISAT SCIAMACHY Level 1C bands use sibling observation and geodata groups.
+dataset_formats[sciamachy_l1c] : dataset_format
+  name = "SCIAMACHY Level 1C"
+  identification
+    file_glob = "EN1_RPRO_SCI_____1C_*.nc"
+    platform = "ENVISAT"
+    sensor = "SCIAMACHY"
+    product_type = "SCI_____1C"
+  observation_group = "OBSERVATIONS"
+  coordinate_group = "GEODATA"
+  latitude = "latitude"
+  longitude = "longitude"
+  latitude_bounds = "latitude_bounds"
+  longitude_bounds = "longitude_bounds"
+  scan_direction
+    group = "observation"
+    variable = "backscan_flag"
+    forward_values = "0"
+    backward_values = "1"
+    default_filter = "forward"

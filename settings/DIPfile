@@ -1,0 +1,96 @@
+schemas[]
+  name = "h5jive_settings"
+  file = "schemas/viewer.dip"
+schemas[]
+  name = "appearance_profile"
+  file = "schemas/appearance.dip"
+schemas[]
+  name = "pics_site"
+  file = "schemas/pics.dip"
+schemas[]
+  name = "pics_catalog_site"
+  file = "schemas/pics_catalog.dip"
+schemas[]
+  name = "calibration_site"
+  file = "schemas/calibration_site.dip"
+schemas[]
+  name = "dataset_format"
+  file = "schemas/dataset_format.dip"
+schemas[]
+  name = "dataset_source"
+  file = "schemas/dataset_source.dip"
+schemas[]
+  name = "data_view_settings"
+  file = "schemas/views/data.dip"
+schemas[]
+  name = "slice_2d_view_settings"
+  file = "schemas/views/slice_2d.dip"
+schemas[]
+  name = "profiles_1d_view_settings"
+  file = "schemas/views/profiles_1d.dip"
+schemas[]
+  name = "spatial_3d_view_settings"
+  file = "schemas/views/spatial_3d.dip"
+schemas[]
+  name = "world_map_view_settings"
+  file = "schemas/views/world_map.dip"
+schemas[]
+  name = "globe_view_settings"
+  file = "schemas/views/globe.dip"
+
+sources[]
+  name = "viewer_data"
+  filepath = "viewers/data.dip"
+sources[]
+  name = "viewer_slice_2d"
+  filepath = "viewers/slice_2d.dip"
+sources[]
+  name = "viewer_profiles_1d"
+  filepath = "viewers/profiles_1d.dip"
+sources[]
+  name = "viewer_spatial_3d"
+  filepath = "viewers/spatial_3d.dip"
+sources[]
+  name = "viewer_world_map"
+  filepath = "viewers/world_map.dip"
+sources[]
+  name = "viewer_globe"
+  filepath = "viewers/globe.dip"
+
+code[]
+  file = "viewer.dip"
+code[]
+  file = "pics.dip"
+code[]
+  file = "dataset/formats/gome_l1b.dip"
+code[]
+  file = "dataset/formats/sciamachy_l1c.dip"
+code[]
+  file = "dataset/formats/gome2_l1b.dip"
+code[]
+  file = "dataset/formats/fdr_atmos_l1a_uvn.dip"
+code[]
+  file = "dataset/formats/fdr_atmos_l1b_uvn.dip"
+code[]
+  file = "dataset/sources/mock_gome.dip"
+code[]
+  file = "dataset/sources/mock_sciamachy.dip"
+code[]
+  file = "dataset/sources/mock_gome2.dip"
+code[]
+  file = "dataset/sources/mock_fdr_l1a.dip"
+code[]
+  file = "dataset/sources/mock_fdr_l1b.dip"
+code[]
+  file = "themes/dark.dip"
+code[]
+  file = "themes/light.dip"
+code[]
+  file = "themes/high_contrast.dip"
+code[]
+  file = "themes/soft_slate.dip"
+code[]
+  file = "themes/h5jive.dip"
+
+overrides[]
+  file = "overrides.dip"

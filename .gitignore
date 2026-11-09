@@ -1,0 +1,10 @@
+/target/
+/website/node_modules/
+/website/dist/
+/website/.astro/
+/docs/book/
+/.spacegit/
+*.diph5
+/settings/.cache/
+.DS_Store
+PROPOSALS/*

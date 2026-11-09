@@ -1,0 +1,15 @@
+# FDR4ATMOS Level 1B UVN contains GOME and SCIAMACHY observation groups.
+dataset_formats[fdr_atmos_l1b_uvn] : dataset_format
+  name = "FDR4ATMOS Level 1B UVN"
+  identification
+    file_glob = "ESA_FDR_ATMOS__L1B_UVN__*.nc"
+    platform = "ERS-2, ENVISAT"
+    sensor = "GOME, SCIAMACHY"
+    product_type = "ATMOS__L1B"
+  observation_group = "OBSERVATIONS"
+  coordinate_group = "GEODATA"
+  latitude = "latitude"
+  longitude = "longitude"
+  latitude_bounds = "latitude_bounds"
+  longitude_bounds = "longitude_bounds"
+  overpass_group_depth = 1
