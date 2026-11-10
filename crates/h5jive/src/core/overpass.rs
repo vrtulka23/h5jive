@@ -512,11 +512,8 @@ mod tests {
     fn repeated_check_reuses_the_coordinate_result_cache() {
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples");
         let product = root.join("space_observation.nc");
-        let temporary = std::env::temp_dir().join(format!(
-            "h5jive_overpass_test_{}_{}",
-            std::process::id(),
-            std::thread::current().name().unwrap_or("test")
-        ));
+        let temporary =
+            std::env::temp_dir().join(format!("h5jive_overpass_test_{}", std::process::id()));
         let source = DatasetSource {
             id: "test".into(),
             name: "Test".into(),
@@ -561,9 +558,15 @@ mod tests {
             };
             assert_eq!(done, expected_cached);
             let finish = receiver.try_iter().last().unwrap();
-            let OverpassMessage::Finished { results, .. } = finish else {
+            let OverpassMessage::Finished {
+                results,
+                cache_error,
+                ..
+            } = finish
+            else {
                 panic!("missing result")
             };
+            assert!(cache_error.is_none(), "cache write failed: {cache_error:?}");
             assert!(results[&product.relative_path].as_ref().unwrap()[0].hit);
         }
         fs::remove_dir_all(temporary).unwrap();

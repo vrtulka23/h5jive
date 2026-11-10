@@ -1079,11 +1079,8 @@ mod tests {
 
     #[test]
     fn cached_products_survive_a_missing_mount() {
-        let base = std::env::temp_dir().join(format!(
-            "h5jive_dataset_mount_test_{}_{}",
-            std::process::id(),
-            std::thread::current().name().unwrap_or("test")
-        ));
+        let base =
+            std::env::temp_dir().join(format!("h5jive_dataset_mount_test_{}", std::process::id()));
         let root = base.join("mounted");
         fs::create_dir_all(&root).unwrap();
         fs::write(root.join("2020_42.nc"), b"mock").unwrap();
