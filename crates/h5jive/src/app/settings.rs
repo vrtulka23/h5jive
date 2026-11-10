@@ -487,10 +487,10 @@ impl Settings {
         let project = std::path::Path::new("settings/DIPfile");
         // An extracted release keeps its editable settings beside the executable.
         let executable = std::env::current_exe()?;
-        // Windows canonicalize() adds a \\?\ prefix that the SNT3 C++ loader
-        // cannot reopen after its Rust binding converts the path to text.
-        #[cfg(not(windows))]
-        let executable = executable.canonicalize()?;
+        // Windows canonicalize() and current_exe() add a \\?\ verbatim prefix
+        // that the SNT3 C++ loader cannot reopen after its MinGW std::filesystem::absolute
+        // misparses it as a relative path. dunce strips this prefix safely on Windows.
+        let executable = dunce::canonicalize(&executable).unwrap_or(executable);
         let bundled = executable
             .parent()
             .map(|directory| directory.join("settings/DIPfile"));
@@ -501,7 +501,8 @@ impl Settings {
         } else {
             std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../settings/DIPfile")
         };
-        let dip = Project::load(&project)?;
+        let project = dunce::simplified(&project);
+        let dip = Project::load(project)?;
         let values = ViewerValues(&dip);
         let default_view = values.string("application.default_view")?;
         let default_view = ViewMode::from_key(&default_view)
