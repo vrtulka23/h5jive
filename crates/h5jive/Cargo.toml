@@ -1,6 +1,6 @@
 [package]
 name = "h5jive"
-version = "0.1.0"
+version = "0.1.1"
 authors = ["Ondrej Pêgo Jaura"]
 edition.workspace = true
 license.workspace = true

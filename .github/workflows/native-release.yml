@@ -27,6 +27,18 @@ jobs:
         run: |
           gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null
           echo "tag=$RELEASE_TAG" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.release.outputs.tag }}
+          fetch-depth: 0
+      - name: Check Windows settings path fix is in the release tag
+        env:
+          RELEASE_TAG: ${{ steps.release.outputs.tag }}
+        run: |
+          if ! git merge-base --is-ancestor 5191fb68f82635256f3fa6cb1bc0b98ff57c6431 HEAD; then
+            echo "::error::Release tag $RELEASE_TAG points to $(git rev-parse --short HEAD), before the Windows settings path fix. Create a release tag at or after 5191fb6."
+            exit 1
+          fi
 
   build:
     needs: prepare
