@@ -6,7 +6,7 @@ cd "$(dirname "$0")"
 
 usage() {
   cat <<'EOF'
-Usage: ./h5jive.sh [-b|--build] [-r|--run] [-c|--clean] [FILE_A [FILE_B]]
+Usage: ./h5jive.sh [-b|--build] [-r|--run] [-c|--clean] [FILE_A[:/DATASET] [FILE_B[:/DATASET]]]
 
   -b, --build   Build the release viewer; run it if file paths or --run are supplied
   -r, --run     Run the existing build; use the bundled demo if no files are supplied
@@ -14,8 +14,8 @@ Usage: ./h5jive.sh [-b|--build] [-r|--run] [-c|--clean] [FILE_A [FILE_B]]
   -h, --help    Show this help
 
 With no options or file paths, this help is shown. Supply one or two HDF5 or
-NetCDF files with --run (or directly) to open them. Paths containing spaces
-are supported.
+NetCDF files with --run (or directly) to open them. Add :/path/to/dataset to
+select a dataset at startup. Paths containing spaces are supported.
 EOF
 }
 
@@ -56,11 +56,23 @@ if "$run" && ((${#files[@]} == 0)); then
 fi
 
 for i in "${!files[@]}"; do
-  if [[ ${files[$i]} != /* ]]; then files[$i]="$invocation_dir/${files[$i]}"; fi
-  if [[ ! -f ${files[$i]} ]]; then
-    echo "Input file does not exist: ${files[$i]}" >&2
+  input=${files[$i]}
+  file=$input
+  suffix=
+  if [[ $input == *:/* ]]; then
+    file=${input%:/*}
+    suffix=${input:${#file}}
+    if [[ $file == [A-Za-z] ]]; then
+      file=$input
+      suffix=
+    fi
+  fi
+  if [[ $file != /* ]]; then file="$invocation_dir/$file"; fi
+  if [[ ! -f $file ]]; then
+    echo "Input file does not exist: $file" >&2
     exit 2
   fi
+  files[$i]="$file$suffix"
 done
 
 if "$build"; then

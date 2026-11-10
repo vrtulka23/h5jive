@@ -12,5 +12,6 @@ create-missing = false
 [output.html]
 default-theme = "navy"
 preferred-dark-theme = "navy"
+site-url = "/h5jive/guide/"
 git-repository-url = "https://github.com/vrtulka23/h5jive"
 edit-url-template = "https://github.com/vrtulka23/h5jive/edit/main/docs/{path}"

@@ -6,8 +6,8 @@ profiles, 2D slices, 3D volumes, and geolocated data.
 
 Use this guide to install and run the application, inspect datasets, configure
 the viewer, or work on the Rust codebase. For project overview and current
-capabilities, see the [root README](../../README.md). For generated Rust API
-documentation, run `cargo doc --workspace --open`.
+capabilities, see the [root README](https://github.com/vrtulka23/h5jive#readme).
+For generated Rust API documentation, run `cargo doc --workspace --open`.
 
 ## At a glance
 

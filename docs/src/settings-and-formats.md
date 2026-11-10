@@ -21,8 +21,8 @@ The main files are:
 The `h5jive` appearance profile matches the project's static page: deep
 charcoal backgrounds, sage text, and orange/copper accents. It is the
 startup default; other profiles remain available from the Appearance menu.
-The default data colormap uses the profile's blue, cyan, and yellow stops;
-Viridis and grayscale remain available in the 2D slice settings.
+The default data colormap is Viridis. Theme colors and grayscale remain
+available in the 2D slice settings.
 
 ## Dataset browser
 

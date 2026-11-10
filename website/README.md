@@ -12,6 +12,6 @@ npm run preview
 ```
 
 Astro writes the static site to `dist/`. The project guide lives in `../docs/`.
-After building, open `dist/index.html` directly to preview from disk. The page
-uses relative local assets so the same output also works from a GitHub Pages
-project-site subpath; publish the contents of `dist/` as the Pages artifact.
+The [Pages workflow](../.github/workflows/pages.yml) builds both and publishes
+the guide at `/guide/`. It runs when the root README, documentation, or website
+changes on `main`.

@@ -73,9 +73,12 @@ From the repository root:
 ./h5jive.sh --build
 ./h5jive.sh --run
 ./h5jive.sh --build --run path/to/data.h5 path/to/other.nc
+./h5jive.sh --run path/to/data.nc:/group/radiance
 ```
 
-Pass file paths to open them at launch. `./h5jive.sh --help` lists the
+Pass file paths to open them at launch. Append `:/dataset/path` to select a
+dataset immediately; with two files, the first specified dataset is selected.
+`./h5jive.sh --help` lists the
 available options. `SNT3_PREFIX` and `SNT3_BUILD_DIR` can select an external
 native SNT3 build; otherwise the crate's bundled SNT3 source is used.
 You can also browse the system folders and set or replace input file A and B

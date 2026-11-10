@@ -1,0 +1,26 @@
+diff --git a/bindings/c/src/dip_internal.h b/bindings/c/src/dip_internal.h
+--- a/bindings/c/src/dip_internal.h
++++ b/bindings/c/src/dip_internal.h
+@@ -24,7 +24,7 @@ struct snt_dip_node {
+ 
+ namespace snt::c::dip_detail {
+ 
+-    inline thread_local std::string last_error;
++    extern thread_local std::string last_error;
+ 
+     inline int fail(snt_dip_error* error, const std::exception& exception) {
+         last_error = exception.what();
+diff --git a/bindings/c/src/dip.cpp b/bindings/c/src/dip.cpp
+--- a/bindings/c/src/dip.cpp
++++ b/bindings/c/src/dip.cpp
+@@ -6,6 +6,10 @@
+ 
+ #include <snt/dip/report/report.h>
+ 
++namespace snt::c::dip_detail {
++thread_local std::string last_error;
++}
++
+ namespace {
+ using namespace snt::c::dip_detail;
+ snt::dip::ExportFormat export_format(snt_dip_export_format format) {

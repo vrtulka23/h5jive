@@ -25,8 +25,8 @@ use volume_raycast::*;
 use dear_app::{
     imgui::{
         ColorEditFlags, ColorStackToken, Condition, DrawListMut, FontConfig, FontSource,
-        ListClipper, MouseCursor, StyleColor, StyleVar, TableColumnFlags, TableColumnStateFlags,
-        TableFlags, TableOptions, TableSizingPolicy, Ui, WindowFlags,
+        ListClipper, MouseCursor, StyleColor, StyleVar, TabItemFlags, TableColumnFlags,
+        TableColumnStateFlags, TableFlags, TableOptions, TableSizingPolicy, Ui, WindowFlags,
     },
     run as run_app, wgpu, AppConfig, Application, FrameContext, InitContext, RunError, Theme,
 };
@@ -80,6 +80,7 @@ struct App {
     pending_export: Option<PendingExport>,
     view_rect: [f32; 4],
     selection: Option<Selection>,
+    startup_tab: Option<usize>,
     details_key: Option<(usize, String)>,
     statistics_cache: Option<Result<DatasetStatistics, String>>,
     statistics_job: Option<mpsc::Receiver<Result<DatasetStatistics, String>>>,
@@ -209,7 +210,7 @@ struct FilePickerState {
 pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
     let mut args: Vec<String> = env::args().skip(1).collect();
     if args.first().is_some_and(|s| s == "--help" || s == "-h") {
-        println!("H5Jive [--inspect] [FILE_A] [FILE_B]\nReads HDF5 and NetCDF files. DIPL project: settings/DIPfile; local overrides: settings/overrides.dip");
+        println!("H5Jive [--inspect] [FILE_A[:/DATASET]] [FILE_B[:/DATASET]]\nReads HDF5 and NetCDF files. DIPL project: settings/DIPfile; local overrides: settings/overrides.dip");
         return Ok(());
     }
     let inspect = args.first().is_some_and(|s| s == "--inspect");
@@ -219,12 +220,16 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
     if args.len() > 2 {
         return Err("expected at most two file paths".into());
     }
-    let settings = Settings::load()?;
-    let files: Vec<File> = args
+    let inputs = args
         .iter()
-        .map(|path| {
+        .map(|arg| parse_input_spec(arg))
+        .collect::<Result<Vec<_>, _>>()?;
+    let settings = Settings::load()?;
+    let files: Vec<File> = inputs
+        .iter()
+        .map(|(path, _)| {
             File::open_with_options(
-                &PathBuf::from(path),
+                path,
                 OpenOptions {
                     max_depth: settings.tree_max_depth,
                     max_objects: settings.tree_max_objects,
@@ -232,10 +237,14 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
             )
         })
         .collect::<Result<_, _>>()?;
+    let selection = resolve_startup_selection(&files, &inputs)?;
     if inspect {
         for (i, file) in files.iter().enumerate() {
             println!("File {}: {}", i + 1, file.name);
             print_tree(&file.tree, 0);
+            if let Some(path) = &inputs[i].1 {
+                println!("Selected dataset: {path}");
+            }
         }
         return Ok(());
     }
@@ -252,10 +261,14 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
         .with_env();
     let app = App {
         files,
-        file_paths: args.iter().map(PathBuf::from).collect(),
+        file_paths: inputs.iter().map(|(path, _)| path.clone()).collect(),
         file_path_inputs: [
-            args.first().cloned().unwrap_or_default(),
-            args.get(1).cloned().unwrap_or_default(),
+            inputs
+                .first()
+                .map_or_else(String::new, |(path, _)| path.display().to_string()),
+            inputs
+                .get(1)
+                .map_or_else(String::new, |(path, _)| path.display().to_string()),
         ],
         file_error: None,
         file_open_jobs: [None, None],
@@ -265,7 +278,8 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
         export_dialog: None,
         pending_export: None,
         view_rect: [0.0; 4],
-        selection: None,
+        startup_tab: selection.as_ref().map(|selected| selected.file),
+        selection,
         details_key: None,
         statistics_cache: None,
         statistics_job: None,
@@ -347,6 +361,49 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
     };
     run_app(config, app)?;
     Ok(())
+}
+fn parse_input_spec(arg: &str) -> Result<(PathBuf, Option<String>), String> {
+    if let Some((file, dataset)) = arg.rsplit_once(":/") {
+        // A bare C:/path is a Windows file path, not a dataset suffix.
+        if file.len() == 1 && file.as_bytes()[0].is_ascii_alphabetic() {
+            return Ok((PathBuf::from(arg), None));
+        }
+        if file.is_empty() || dataset.is_empty() {
+            return Err(format!("expected FILE:/DATASET, got {arg:?}"));
+        }
+        Ok((PathBuf::from(file), Some(format!("/{dataset}"))))
+    } else {
+        Ok((PathBuf::from(arg), None))
+    }
+}
+
+fn resolve_startup_selection(
+    files: &[File],
+    inputs: &[(PathBuf, Option<String>)],
+) -> Result<Option<Selection>, String> {
+    let mut selected = None;
+    for (index, (_, dataset)) in inputs.iter().enumerate() {
+        let Some(path) = dataset else { continue };
+        let entry = find_entry(&files[index].tree, path).ok_or_else(|| {
+            format!(
+                "dataset {path:?} was not found in {} (check the path and tree limits)",
+                files[index].name
+            )
+        })?;
+        if !matches!(entry.kind, Kind::Dataset { .. }) {
+            return Err(format!(
+                "{path:?} in {} is not a dataset",
+                files[index].name
+            ));
+        }
+        if selected.is_none() {
+            selected = Some(Selection {
+                file: index,
+                path: path.clone(),
+            });
+        }
+    }
+    Ok(selected)
 }
 fn print_tree(entry: &Entry, depth: usize) {
     if depth > 0 {

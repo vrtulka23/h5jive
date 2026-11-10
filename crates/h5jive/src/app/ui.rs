@@ -452,13 +452,20 @@ pub(crate) fn draw_entry(
         let is_selected = selected
             .as_ref()
             .is_some_and(|s| s.file == file && s.path == entry.path);
-        let node = ui
+        let mut node = ui
             .tree_node_config(&label)
             .selected(is_selected)
             .open_on_arrow(true)
             .open_on_double_click(true)
-            .span_avail_width(true)
-            .push();
+            .span_avail_width(true);
+        if selected.as_ref().is_some_and(|s| {
+            s.file == file
+                && s.path.starts_with(&entry.path)
+                && s.path.as_bytes().get(entry.path.len()) == Some(&b'/')
+        }) {
+            node = node.opened(true, Condition::Once);
+        }
+        let node = node.push();
         draw_tree_entry_icons(ui, true, false, palette);
         if ui.is_item_clicked() {
             *selected = Some(Selection {

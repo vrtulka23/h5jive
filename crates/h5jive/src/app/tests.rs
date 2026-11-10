@@ -2,10 +2,11 @@ use super::{
     axis_ticks, draw_profile_plot, draw_workspace_mode_icon, extend_finite_range,
     format_attribute_value, format_value, heatmap_axis_ticks, heatmap_tile_bounds,
     heatmap_visible_bounds, heatmap_zoom_limits, human_bytes, load_heatmap_overview,
-    load_heatmap_tile, load_map_data, load_profile, overview_sample_index, parse_profile_indexes,
-    scan_heatmap_range, AttributeValue, ColormapPreset, File, GeoViewControls, MapViewport,
-    PinnedDefault, ProfileBin, ProfileData, ProfileLine, ProfileSlice, ScanFilter, Selection,
-    Settings, SpecialValue, TableSlice, ThemeColors, ValueVisibility, WorkspaceMode,
+    load_heatmap_tile, load_map_data, load_profile, overview_sample_index, parse_input_spec,
+    parse_profile_indexes, resolve_startup_selection, scan_heatmap_range, AttributeValue,
+    ColormapPreset, File, GeoViewControls, MapViewport, PinnedDefault, ProfileBin, ProfileData,
+    ProfileLine, ProfileSlice, ScanFilter, Selection, Settings, SpecialValue, TableSlice,
+    ThemeColors, ValueVisibility, WorkspaceMode,
 };
 use h5jive_data::ScanDirectionClass;
 use scinumtools3::Project;
@@ -31,6 +32,54 @@ fn copy_settings_for_schema_test(from: &Path, to: &Path) {
 fn test_settings() -> &'static Settings {
     static SETTINGS: OnceLock<Settings> = OnceLock::new();
     SETTINGS.get_or_init(|| Settings::load().unwrap())
+}
+
+#[test]
+fn startup_dataset_suffix_selects_a_real_dataset() {
+    let demo = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/space_demo.hdf5");
+    let (file_path, dataset) = parse_input_spec(&format!(
+        "{}:/satellite/gome2/so2_slant_column",
+        demo.display()
+    ))
+    .unwrap();
+    let file = File::open(&file_path).unwrap();
+    let selected = resolve_startup_selection(&[file], &[(file_path, dataset)])
+        .unwrap()
+        .unwrap();
+    assert_eq!(selected.file, 0);
+    assert_eq!(selected.path, "/satellite/gome2/so2_slant_column");
+}
+
+#[test]
+fn startup_dataset_suffix_rejects_missing_and_group_paths() {
+    let file_path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/space_demo.hdf5");
+    let file = File::open(&file_path).unwrap();
+    let inputs = [(file_path.clone(), Some("/missing".to_owned()))];
+    assert!(resolve_startup_selection(&[file], &inputs)
+        .unwrap_err()
+        .contains("not found"));
+    let file = File::open(&file_path).unwrap();
+    let inputs = [(file_path, Some("/satellite/gome2".to_owned()))];
+    assert!(resolve_startup_selection(&[file], &inputs)
+        .unwrap_err()
+        .contains("not a dataset"));
+}
+
+#[test]
+fn startup_dataset_suffix_keeps_windows_drive_and_plain_paths() {
+    let (file, dataset) = parse_input_spec("C:\\data\\orbit.nc:/group/radiance").unwrap();
+    assert_eq!(file.to_string_lossy(), "C:\\data\\orbit.nc");
+    assert_eq!(dataset.as_deref(), Some("/group/radiance"));
+    assert_eq!(parse_input_spec("C:/data/orbit.nc").unwrap().1, None);
+    assert_eq!(
+        parse_input_spec("C:/data/orbit.nc:/group/radiance")
+            .unwrap()
+            .1
+            .as_deref(),
+        Some("/group/radiance")
+    );
+    assert_eq!(parse_input_spec("/tmp/orbit.nc").unwrap().1, None);
+    assert!(parse_input_spec("orbit.nc:/").is_err());
 }
 
 #[test]
@@ -546,7 +595,7 @@ fn dipl_theme_collection_provides_distinct_profiles() {
     assert_eq!(settings.volume_default_opacity, 1.0);
     assert_eq!(settings.volume_max_zoom, 32.0);
     assert_eq!(settings.volume_back_brightness, 0.45);
-    assert_eq!(settings.heatmap_colormap_preset, ColormapPreset::Theme);
+    assert_eq!(settings.heatmap_colormap_preset, ColormapPreset::Viridis);
     assert_eq!(settings.graphics_backend, None);
     assert_eq!(settings.forwarded_x11_backend, dear_app::wgpu::Backends::GL);
     let profile = |name| {
@@ -564,7 +613,7 @@ fn dipl_theme_collection_provides_distinct_profiles() {
     assert!(dark.background[0] < light.background[0]);
     assert!(dark.text[0] > dark.background[0]);
     assert!(light.text[0] < light.background[0]);
-    assert_ne!(dark.heatmap_low, light.heatmap_low);
+    assert_eq!(dark.heatmap_low, light.heatmap_low);
     let h5jive = &profile("h5jive").palette;
     assert!(h5jive.heatmap_low[2] > h5jive.heatmap_low[0]);
     assert!(h5jive.heatmap_high[0] > h5jive.heatmap_high[2]);

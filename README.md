@@ -78,7 +78,11 @@ Launch `h5jive` (or `h5jive.exe` on Windows). Choose files from the
 
 ```sh
 h5jive path/to/product_A.h5 path/to/product_B.nc
+h5jive path/to/product.nc:/group/radiance
 ```
+
+Append `:/dataset/path` to a file path to select that dataset when the viewer
+opens. With two files, the first specified dataset is selected initially.
 
 The top mode bar offers a dataset browser, a data inspector, and a comparison
 workspace. The [exploring data guide](docs/src/exploring-data.md) explains the
@@ -93,6 +97,7 @@ the [getting started guide](docs/src/getting-started.md).
 ```sh
 ./h5jive.sh --build
 ./h5jive.sh --run
+./h5jive.sh --run examples/space_demo.hdf5:/satellite/gome2/so2_slant_column
 ```
 
 The repository includes a deterministic [HDF5 demo](examples/space_demo.hdf5)
@@ -112,7 +117,8 @@ cargo run -p h5jive -- --inspect examples/space_demo.hdf5
 - [Troubleshooting](docs/src/troubleshooting.md): common build and data issues
 
 The guide is built with mdBook; see [docs/README.md](docs/README.md). The
-[project page](website/README.md) is a separate static site. Publishing a
+[project page](website/README.md) and guide are deployed together by the
+[Pages workflow](.github/workflows/pages.yml). Publishing a
 GitHub release or running the [native release workflow](.github/workflows/native-release.yml)
 for an existing tag creates the platform archives and checksum manifest.
 

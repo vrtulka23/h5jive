@@ -1,5 +1,5 @@
 # 2D slice rendering and color-scale settings.
-colormap str = "theme"
+colormap str = "viridis"
 range_mode str = "auto"
 cell_size int = 4
 value_min float = -1.0

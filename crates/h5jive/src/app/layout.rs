@@ -259,7 +259,12 @@ impl App {
                         if let Some(_tabs) = ui.tab_bar("file_tree_tabs") {
                             for index in 0..2 {
                                 let label = if index == 0 { "File A" } else { "File B" };
-                                if let Some(_tab) = ui.tab_item(label) {
+                                let tab_flags = if self.startup_tab == Some(index) {
+                                    TabItemFlags::SET_SELECTED
+                                } else {
+                                    TabItemFlags::NONE
+                                };
+                                if let Some(_tab) = ui.tab_item_with_flags(label, None, tab_flags) {
                                     ui.child_window(format!("file_tree_slot_{index}"))
                                         .size([0.0, 0.0])
                                         .build(ui, || {
@@ -287,6 +292,7 @@ impl App {
                                         });
                                 }
                             }
+                            self.startup_tab = None;
                         }
                     });
                 self.refresh_selection();

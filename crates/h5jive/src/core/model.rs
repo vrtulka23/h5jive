@@ -75,7 +75,7 @@ impl MapViewport {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub(crate) struct Selection {
     pub(crate) file: usize,
     pub(crate) path: String,
