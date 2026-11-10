@@ -486,8 +486,12 @@ impl Settings {
     pub(super) fn load() -> Result<Self, Box<dyn std::error::Error>> {
         let project = std::path::Path::new("settings/DIPfile");
         // An extracted release keeps its editable settings beside the executable.
-        let bundled = std::env::current_exe()?
-            .canonicalize()?
+        let executable = std::env::current_exe()?;
+        // Windows canonicalize() adds a \\?\ prefix that the SNT3 C++ loader
+        // cannot reopen after its Rust binding converts the path to text.
+        #[cfg(not(windows))]
+        let executable = executable.canonicalize()?;
+        let bundled = executable
             .parent()
             .map(|directory| directory.join("settings/DIPfile"));
         let project = if project.exists() {
