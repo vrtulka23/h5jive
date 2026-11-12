@@ -7,7 +7,7 @@ mod data;
 mod pics;
 use pics::draw_pics_overlay;
 
-pub(super) struct GeoSource {
+pub(crate) struct GeoSource {
     pub(super) selection: Selection,
     pub(super) shape: Vec<usize>,
     pub(super) geolocation: Geolocation,
@@ -52,6 +52,16 @@ fn longitude_near(longitude: f32, reference: f32) -> f32 {
     reference + (longitude - reference + 180.0).rem_euclid(360.0) - 180.0
 }
 
+pub(super) fn geospatial_point_budget(
+    base: usize,
+    zoom_factor: f32,
+    zoom: f32,
+    total: usize,
+) -> usize {
+    let level = zoom.log2().floor().max(0.0) as i32;
+    ((base as f64 * (zoom_factor as f64).powi(level)) as usize).min(total)
+}
+
 impl App {
     pub(super) fn visible_geo_data(
         &self,
@@ -65,14 +75,11 @@ impl App {
         let loading_same_source = cached.file == key.file
             && cached.path == key.path
             && result.is_ok()
-            && self
-                .map_job
-                .as_ref()
-                .is_some_and(|(running, _)| running == key);
+            && self.map_job.is_some();
         loading_same_source.then_some(result)
     }
 
-    pub(super) fn selected_geo_source(&mut self) -> Option<GeoSource> {
+    pub(crate) fn selected_geo_source(&mut self) -> Option<GeoSource> {
         let selection = self.selection.clone()?;
         let entry = find_entry(&self.files[selection.file].tree, &selection.path)?;
         let shape = match &entry.kind {
@@ -105,6 +112,7 @@ impl App {
         &mut self,
         source: Option<&GeoSource>,
         options: GeoViewOptions,
+        max_points: usize,
     ) -> Option<MapKey> {
         let source = source?;
         let key = MapKey {
@@ -112,7 +120,20 @@ impl App {
             path: source.selection.path.clone(),
             time: options.time,
             spectral: options.pinned,
+            max_points,
         };
+        if let Some((running, receiver)) = &self.map_job {
+            if running != &key {
+                match receiver.try_recv() {
+                    Ok(result) => {
+                        self.map_cache = Some((running.clone(), result));
+                        self.map_job = None;
+                    }
+                    Err(mpsc::TryRecvError::Disconnected) => self.map_job = None,
+                    Err(mpsc::TryRecvError::Empty) => return Some(key),
+                }
+            }
+        }
         if self
             .map_cache
             .as_ref()
@@ -139,7 +160,6 @@ impl App {
                 let path = source.selection.path.clone();
                 let shape = source.shape.clone();
                 let geolocation = source.geolocation.clone();
-                let max_points = self.settings.map_max_points;
                 let time = options.time;
                 let spectral = options.pinned;
                 let (sender, receiver) = mpsc::channel();
@@ -180,7 +200,17 @@ impl App {
             source.geolocation.latitude_bounds.is_some()
                 && source.geolocation.longitude_bounds.is_some()
         });
-        let key = self.ensure_geo_data(source.as_ref(), options);
+        let max_points = if let Some(source) = source.as_ref() {
+            geospatial_point_budget(
+                self.settings.map_max_points,
+                self.settings.map_zoom_detail_factor,
+                self.map_viewport.zoom,
+                source.shape.iter().take(3).product(),
+            )
+        } else {
+            self.settings.map_max_points
+        };
+        let key = self.ensure_geo_data(source.as_ref(), options, max_points);
         let available = ui.content_region_avail();
         let legend_width = if key.is_some() {
             self.settings.heatmap_legend_width.min(available[0] * 0.23)
@@ -460,9 +490,14 @@ impl App {
             );
             if let Some((point, _)) = nearest.filter(|_| !hovered_pics) {
                 ui.tooltip_text(format!(
-                    "Lat {:.3}°, Lon {:.3}°\nValue: {}",
+                    "Lat {:.3}°, Lon {:.3}°\n{}: {}",
                     point.latitude,
                     point.longitude,
+                    if data.aggregated {
+                        "Mean value"
+                    } else {
+                        "Value"
+                    },
                     point.special.map_or_else(
                         || format_value(point.value, self.settings.display_decimals),
                         |kind| kind.label().into()

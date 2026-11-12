@@ -68,6 +68,8 @@ code[]
 code[]
   file = "dataset/formats/gome2_l1b.dip"
 code[]
+  file = "dataset/formats/s5p_tropomi_l1b_radiance.dip"
+code[]
   file = "dataset/formats/fdr_atmos_l1a_uvn.dip"
 code[]
   file = "dataset/formats/fdr_atmos_l1b_uvn.dip"
@@ -77,6 +79,8 @@ code[]
   file = "dataset/sources/mock_sciamachy.dip"
 code[]
   file = "dataset/sources/mock_gome2.dip"
+code[]
+  file = "dataset/sources/mock_s5p.dip"
 code[]
   file = "dataset/sources/mock_fdr_l1a.dip"
 code[]

@@ -87,11 +87,9 @@ available in the sidebar.
 
 ## Try the examples
 
-The demo generator writes `examples/space_demo.hdf5` and
-`examples/space_observation.nc`. Launch either file with the viewer and explore
-the sample groups and datasets. The HDF5 demo includes a real GOME-2 orbital
-swath at `satellite/gome2/so2_slant_column`; select it and open the world map
-view to inspect measured SO₂ slant-column values and pixel footprints.
-
-The orbit source is included as `examples/gome2_20090730_095156.dat`. Running
-the generator again updates both demo formats from this source.
+The array demo generator writes `examples/space_demo.hdf5` with 1D–4D
+datasets. The bundled `examples/gome2_band3_20130106_gome.nc` contains a
+sample extracted from a real GOME-2 Level 1B product. Select
+`MODE_NADIR/BAND_3/OBSERVATIONS/radiance` and open the world map or globe to
+inspect its geolocated pixels. The sample retains all 625 scan lines, 32 ground
+pixels, four-corner bounds, scan direction, and 64 radiance channels.

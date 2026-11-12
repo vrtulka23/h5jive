@@ -2,6 +2,7 @@ use super::super::super::*;
 
 #[cfg(test)]
 mod tests {
+    use super::super::geospatial_point_budget;
     use super::*;
     #[test]
     fn sampling_includes_both_ends_without_duplicates() {
@@ -10,40 +11,185 @@ mod tests {
     }
 
     #[test]
-    fn gome2_example_has_values_and_footprints_in_both_formats() {
-        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples");
-        for (file_name, path) in [
-            ("space_demo.hdf5", "/satellite/gome2/so2_slant_column"),
-            ("space_observation.nc", "/so2_slant_column"),
-        ] {
-            let file = File::open(&root.join(file_name)).unwrap();
-            let geo = file.geolocation(path).unwrap().unwrap();
-            let shape = file.dataset_info(path).unwrap().shape;
-            let all = load_map_data(&file, path, &shape, &geo, None, 0, 30_000).unwrap();
-            assert_eq!(all.points.len(), shape.iter().product::<usize>());
-            assert!(all.points.iter().all(|point| point.footprint.is_some()));
-            assert!(all
+    fn zoom_raises_detail_until_every_pixel_is_available() {
+        assert_eq!(geospatial_point_budget(30_000, 4.0, 1.0, 1_681_200), 30_000);
+        assert_eq!(
+            geospatial_point_budget(30_000, 4.0, 2.0, 1_681_200),
+            120_000
+        );
+        assert_eq!(
+            geospatial_point_budget(30_000, 4.0, 4.0, 1_681_200),
+            480_000
+        );
+        assert_eq!(
+            geospatial_point_budget(30_000, 4.0, 8.0, 1_681_200),
+            1_681_200
+        );
+    }
+
+    #[test]
+    fn bundled_band3_has_values_and_footprints() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../examples/gome2_band3_20130106_gome.nc");
+        let file = File::open(&path).unwrap();
+        let dataset = "/MODE_NADIR/BAND_3/OBSERVATIONS/radiance";
+        let geo = file
+            .geolocation_with_rules(dataset, &Settings::load().unwrap().dataset_rules)
+            .unwrap()
+            .unwrap();
+        let shape = file.dataset_info(dataset).unwrap().shape;
+        let data = load_map_data(&file, dataset, &shape, &geo, Some(0), 32, 30_000).unwrap();
+        assert_eq!(data.points.len(), 15_574);
+        assert!(data.points.iter().all(|point| point.footprint.is_some()));
+        assert!(data
+            .points
+            .iter()
+            .all(|point| (-90.0..=90.0).contains(&point.latitude)));
+        assert!(data.range.is_some_and(|(min, max)| min < max));
+        assert!(data
+            .points
+            .iter()
+            .any(|point| point.scan_direction == Some(h5jive_data::ScanDirectionClass::Forward)));
+        assert!(data
+            .points
+            .iter()
+            .any(|point| point.scan_direction == Some(h5jive_data::ScanDirectionClass::Backward)));
+        let controls = GeoViewControls::new(true);
+        assert_eq!(controls.applied.scan_filter, ScanFilter::Both);
+        assert!(data
+            .points
+            .iter()
+            .all(|point| controls.applied.scan_filter.allows(point.scan_direction)));
+    }
+
+    #[test]
+    fn gome2_binning_uses_its_native_corner_orientation() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../examples/gome2_band3_20130106_gome.nc");
+        let file = File::open(&path).unwrap();
+        let dataset = "/MODE_NADIR/BAND_3/OBSERVATIONS/radiance";
+        let geo = file
+            .geolocation_with_rules(dataset, &Settings::load().unwrap().dataset_rules)
+            .unwrap()
+            .unwrap();
+        assert!(geo.scan_direction.is_some());
+        let shape = file.dataset_info(dataset).unwrap().shape;
+        let map = load_map_data(&file, dataset, &shape, &geo, Some(0), 32, 500).unwrap();
+        assert!(map.aggregated);
+        assert!(map
+            .points
+            .iter()
+            .all(|point| point.scan_direction.is_some()));
+        assert!(
+            map.points
+                .iter()
+                .filter(|point| point.footprint.is_some())
+                .count()
+                > map.points.len() / 2
+        );
+        assert!(map.range.is_some_and(|(min, max)| min < max));
+    }
+
+    #[test]
+    fn s5p_radiance_bands_map_with_pixel_footprints_when_available() {
+        let directory =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../mock_datasets/S5P");
+        if !directory.is_dir() {
+            return;
+        }
+        for band in [3, 4, 5] {
+            let prefix = format!("S5P_OFFL_L1B_RA_BD{band}_");
+            let fixture = std::fs::read_dir(&directory)
+                .unwrap()
+                .map(|entry| entry.unwrap().path())
+                .find(|path| {
+                    path.file_name()
+                        .is_some_and(|name| name.to_string_lossy().starts_with(&prefix))
+                });
+            let Some(fixture) = fixture else {
+                continue;
+            };
+            let file = File::open(&fixture).unwrap();
+            let dataset = format!("/BAND{band}_RADIANCE/STANDARD_MODE/OBSERVATIONS/radiance");
+            let geo = file.geolocation(&dataset).unwrap().unwrap();
+            assert!(geo.latitude.ends_with("/GEODATA/latitude"));
+            assert!(geo.latitude_bounds.is_some());
+            assert!(geo.longitude_bounds.is_some());
+            let shape = file.dataset_info(&dataset).unwrap().shape;
+            let map = load_map_data(&file, &dataset, &shape, &geo, Some(0), 248, 160).unwrap();
+            assert!(map.points.len() >= 100, "band {band}");
+            assert!(map.points.iter().any(|point| point.footprint.is_some()));
+            assert!(map
                 .points
                 .iter()
-                .all(|point| (-90.0..=90.0).contains(&point.latitude)));
-            assert!(all.range.is_some_and(|(min, max)| min < max));
-            assert!(all.points.iter().any(|point| point.special.is_some()));
+                .filter_map(|point| point.footprint)
+                .any(|corners| {
+                    let latitude_span = corners
+                        .iter()
+                        .map(|corner| corner[1])
+                        .fold(f32::NEG_INFINITY, f32::max)
+                        - corners
+                            .iter()
+                            .map(|corner| corner[1])
+                            .fold(f32::INFINITY, f32::min);
+                    latitude_span > 1.0
+                }));
+            assert!(map.range.is_some_and(|(min, max)| min < max));
         }
+    }
+
+    #[test]
+    #[ignore = "manual full-resolution performance measurement"]
+    fn benchmark_s5p_full_resolution_map_loading() {
+        let directory =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../mock_datasets/S5P");
+        let Some(fixture) = std::fs::read_dir(directory).ok().and_then(|entries| {
+            entries
+                .filter_map(Result::ok)
+                .map(|entry| entry.path())
+                .find(|path| {
+                    path.file_name().is_some_and(|name| {
+                        name.to_string_lossy().starts_with("S5P_OFFL_L1B_RA_BD3_")
+                    })
+                })
+        }) else {
+            return;
+        };
+        let file = File::open(&fixture).unwrap();
+        let dataset = "/BAND3_RADIANCE/STANDARD_MODE/OBSERVATIONS/radiance";
+        let geo = file.geolocation(dataset).unwrap().unwrap();
+        let shape = file.dataset_info(dataset).unwrap().shape;
+        let start = std::time::Instant::now();
+        let map = load_map_data(&file, dataset, &shape, &geo, Some(0), 248, usize::MAX).unwrap();
+        eprintln!(
+            "S5P full map: {:.2}s, {} points",
+            start.elapsed().as_secs_f64(),
+            map.points.len()
+        );
     }
 
     #[test]
     fn batched_and_row_reads_produce_the_same_map() {
         let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../examples/space_observation.nc");
+            .join("../../examples/gome2_band3_20130106_gome.nc");
         let file = File::open(&path).unwrap();
-        let dataset = "/so2_slant_column";
+        let dataset = "/MODE_NADIR/BAND_3/OBSERVATIONS/radiance";
         let geo = file.geolocation(dataset).unwrap().unwrap();
         let shape = file.dataset_info(dataset).unwrap().shape;
-        let batched =
-            load_map_data_with_batch_limit(&file, dataset, &shape, &geo, None, 0, 30_000, 250_000)
+        let batched = load_map_data_with_batch_limit(
+            &file,
+            dataset,
+            &shape,
+            &geo,
+            Some(0),
+            32,
+            30_000,
+            250_000,
+        )
+        .unwrap();
+        let rows =
+            load_map_data_with_batch_limit(&file, dataset, &shape, &geo, Some(0), 32, 30_000, 0)
                 .unwrap();
-        let rows = load_map_data_with_batch_limit(&file, dataset, &shape, &geo, None, 0, 30_000, 0)
-            .unwrap();
         assert_eq!(batched.range, rows.range);
         assert_eq!(batched.points.len(), rows.points.len());
         for (left, right) in batched.points.iter().zip(&rows.points) {

@@ -85,6 +85,9 @@ impl App {
                     }
                     self.region_cache.clear();
                     self.heatmap_cache = None;
+                    if self.view == ViewMode::Slice2d {
+                        self.heatmap_tiles.clear();
+                    }
                 }
             }
         }

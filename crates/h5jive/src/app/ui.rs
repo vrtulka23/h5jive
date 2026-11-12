@@ -116,6 +116,41 @@ mod navigation_tests {
     use dear_app::imgui::{Condition, Context};
 
     #[test]
+    fn dataset_icon_sits_below_parent_folder_icon() {
+        let mut context = Context::create();
+        context.set_ini_filename(None::<String>).unwrap();
+        context.io_mut().set_display_size([500.0, 300.0]);
+        context.io_mut().set_delta_time(1.0 / 60.0);
+        context
+            .font_atlas()
+            .try_claim_legacy_renderer()
+            .unwrap()
+            .build();
+        let ui = context.frame();
+        ui.window("Tree alignment").build(|| {
+            let folder_row_x = ui.cursor_screen_pos()[0];
+            let folder_icon_x = tree_icon_x(ui, folder_row_x, true);
+            let node = ui
+                .tree_node_config("folder")
+                .opened(true, Condition::Always)
+                .push();
+            if let Some(_node) = node {
+                let dataset_row_x = ui.cursor_screen_pos()[0];
+                let name_x = dataset_row_x
+                    + ui.calc_text_size(format!("{DATASET_NAME_PREFIX}X"))[0]
+                    - ui.calc_text_size("X")[0];
+                let geo_icon_right = tree_icon_x(ui, dataset_row_x, false) + 29.0;
+                assert!((name_x - geo_icon_right - 7.0).abs() <= 4.0);
+                ui.selectable_config("dataset").build();
+                let dataset_icon_x = tree_icon_x(ui, dataset_row_x, false);
+                assert!((dataset_icon_x - folder_icon_x).abs() < 0.5);
+            } else {
+                panic!("folder should be open");
+            }
+        });
+    }
+
+    #[test]
     fn overlay_navigation_does_not_scroll_a_child_panel() {
         let mut context = Context::create();
         let settings = Settings::load().unwrap();
@@ -244,19 +279,9 @@ pub(super) fn draw_workspace_mode_icon(
     }
 }
 
-pub(super) fn draw_loading_indicator(
-    ui: &Ui,
-    top_right: [f32; 2],
-    count: usize,
-    palette: &Palette,
-) {
+pub(super) fn draw_loading_indicator(ui: &Ui, top_right: [f32; 2], label: &str, palette: &Palette) {
     let draw = ui.get_foreground_draw_list();
-    let label = if count == 1 {
-        "Loading".to_owned()
-    } else {
-        format!("Loading {count}")
-    };
-    let text_size = ui.calc_text_size(&label);
+    let text_size = ui.calc_text_size(label);
     let height = 25.0;
     let width = text_size[0] + 42.0;
     let min = [top_right[0] - width, top_right[1] - height * 0.5];
@@ -274,7 +299,7 @@ pub(super) fn draw_loading_indicator(
     draw.add_text(
         [min[0] + 32.0, top_right[1] - text_size[1] * 0.5],
         palette.text,
-        &label,
+        label,
     );
     let rotation = ui.time() as f32 * 4.0;
     for index in 0..10 {
@@ -414,6 +439,8 @@ pub(crate) fn find_entry<'a>(root: &'a Entry, path: &str) -> Option<&'a Entry> {
         .iter()
         .find_map(|entry| find_entry(entry, path))
 }
+const DATASET_NAME_PREFIX: &str = "     ";
+
 pub(crate) fn draw_entry(
     ui: &Ui,
     entry: &Entry,
@@ -443,12 +470,14 @@ pub(crate) fn draw_entry(
     let visible_label = match &entry.kind {
         Kind::Group => format!("      {}", entry.name),
         Kind::Dataset { shape, .. } if show_shape => {
-            format!("      {}  {:?}", entry.name, shape)
+            format!("{DATASET_NAME_PREFIX}{}  {:?}", entry.name, shape)
         }
-        _ => format!("      {}", entry.name),
+        Kind::Dataset { .. } => format!("{DATASET_NAME_PREFIX}{}", entry.name),
+        Kind::Other => format!("      {}", entry.name),
     };
     let label = format!("{visible_label}##{}", entry.path);
     if matches!(entry.kind, Kind::Group) {
+        let row_x = ui.cursor_screen_pos()[0];
         let is_selected = selected
             .as_ref()
             .is_some_and(|s| s.file == file && s.path == entry.path);
@@ -466,7 +495,7 @@ pub(crate) fn draw_entry(
             node = node.opened(true, Condition::Once);
         }
         let node = node.push();
-        draw_tree_entry_icons(ui, true, false, palette);
+        draw_tree_entry_icons(ui, row_x, true, false, palette);
         if ui.is_item_clicked() {
             *selected = Some(Selection {
                 file,
@@ -489,6 +518,7 @@ pub(crate) fn draw_entry(
             }
         }
     } else {
+        let row_x = ui.cursor_screen_pos()[0];
         let is_selected = selected
             .as_ref()
             .is_some_and(|s| s.file == file && s.path == entry.path);
@@ -498,7 +528,7 @@ pub(crate) fn draw_entry(
                 path: entry.path.clone(),
             });
         }
-        draw_tree_entry_icons(ui, false, geolocation.is_some(), palette);
+        draw_tree_entry_icons(ui, row_x, false, geolocation.is_some(), palette);
         if let Some(geolocation) = geolocation {
             ui.set_item_tooltip(format!(
                 "Geolocated dataset\nLatitude: {}\nLongitude: {}",
@@ -508,15 +538,10 @@ pub(crate) fn draw_entry(
     }
 }
 
-fn draw_tree_entry_icons(ui: &Ui, group: bool, geolocated: bool, palette: &Palette) {
+fn draw_tree_entry_icons(ui: &Ui, row_x: f32, group: bool, geolocated: bool, palette: &Palette) {
     let min = ui.item_rect_min();
     let max = ui.item_rect_max();
-    let x = min[0]
-        + if group {
-            ui.text_line_height() + 4.0
-        } else {
-            4.0
-        };
+    let x = tree_icon_x(ui, row_x, group);
     let y = (min[1] + max[1]) * 0.5;
     let color = if group { palette.accent } else { palette.muted };
     let draw = ui.get_window_draw_list();
@@ -539,7 +564,7 @@ fn draw_tree_entry_icons(ui: &Ui, group: bool, geolocated: bool, palette: &Palet
         }
     }
     if geolocated {
-        let center = [x + 18.0, y];
+        let center = [x + 24.0, y];
         let color = palette.accent;
         draw.add_circle(center, 5.0, color).thickness(1.2).build();
         draw.add_line(
@@ -558,6 +583,17 @@ fn draw_tree_entry_icons(ui: &Ui, group: bool, geolocated: bool, palette: &Palet
     }
 }
 
+fn tree_icon_x(ui: &Ui, row_x: f32, group: bool) -> f32 {
+    // A child row already includes one tree indent. Cancel it so its icon
+    // sits directly below the parent folder icon.
+    row_x + ui.text_line_height() + 4.0
+        - if group {
+            0.0
+        } else {
+            ui.clone_style().indent_spacing()
+        }
+}
+
 pub(super) fn detail_row(ui: &Ui, name: &str, value: impl AsRef<str>) {
     ui.table_next_row();
     ui.table_next_column();
@@ -570,9 +606,20 @@ pub(super) fn detail_row_special(
     name: &str,
     special: SpecialValue,
     count: u128,
+    total: u128,
+    decimals: usize,
     palette: &Palette,
 ) {
-    detail_row_tinted(ui, name, &count.to_string(), special.color(palette));
+    let value = format_count_percentage(count, total, decimals);
+    detail_row_tinted(ui, name, &value, special.color(palette));
+}
+pub(super) fn format_count_percentage(count: u128, total: u128, decimals: usize) -> String {
+    let percent = if total == 0 {
+        0.0
+    } else {
+        100.0 * count as f64 / total as f64
+    };
+    format!("{count} ({percent:.decimals$}%)")
 }
 pub(super) fn detail_row_tinted(ui: &Ui, name: &str, value: &str, color: [f32; 4]) {
     ui.table_next_row();

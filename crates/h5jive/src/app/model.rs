@@ -18,11 +18,11 @@ impl GeoViewOptions {
         Self {
             time: None,
             pinned: 0,
-            pixel_style: 0,
+            pixel_style: 2,
             scan_filter: ScanFilter::Both,
             dummy_color: false,
             dummy_rgb: [0.647, 0.282, 0.039],
-            opacity: 1.0,
+            opacity: 0.5,
             show_pics,
         }
     }

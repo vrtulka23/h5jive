@@ -176,9 +176,20 @@ impl File {
                     read_h5_attributes(group.attr_names().map_err(error)?, |name| group.attr(name))
                 } else {
                     let dataset = file.dataset(path).map_err(error)?;
-                    read_h5_attributes(dataset.attr_names().map_err(error)?, |name| {
-                        dataset.attr(name)
-                    })
+                    let mut attributes =
+                        read_h5_attributes(dataset.attr_names().map_err(error)?, |name| {
+                            dataset.attr(name)
+                        })?;
+                    if let Some(dimension_list) = attributes
+                        .iter_mut()
+                        .find(|attribute| attribute.name == "DIMENSION_LIST")
+                    {
+                        let names = self.axis_names(path)?;
+                        if !names.iter().any(|name| name.starts_with("Dimension ")) {
+                            dimension_list.value = names.join(", ");
+                        }
+                    }
+                    Ok(attributes)
                 }
             }
             Backend::ClassicNetcdf(file) => {
@@ -475,7 +486,18 @@ impl File {
                     children: vec![],
                 })
                 .collect();
-            entries.sort_by(|left, right| left.name.cmp(&right.name));
+            entries.sort_by(|a, b| {
+                let group_rank = |e: &Entry| {
+                    if matches!(e.kind, Kind::Group) {
+                        0u8
+                    } else {
+                        1u8
+                    }
+                };
+                group_rank(a)
+                    .cmp(&group_rank(b))
+                    .then_with(|| a.name.cmp(&b.name))
+            });
             (Backend::ClassicNetcdf(nc), None, entries)
         };
         Ok(Self {
@@ -743,5 +765,18 @@ fn children(
             children: descendants,
         });
     }
+    // Groups first, then datasets (and other entries), each section sorted alphabetically.
+    entries.sort_by(|a, b| {
+        let group_rank = |e: &Entry| {
+            if matches!(e.kind, Kind::Group) {
+                0u8
+            } else {
+                1u8
+            }
+        };
+        group_rank(a)
+            .cmp(&group_rank(b))
+            .then_with(|| a.name.cmp(&b.name))
+    });
     Ok(entries)
 }

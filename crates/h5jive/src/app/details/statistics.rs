@@ -99,6 +99,19 @@ impl App {
                     "Mean",
                     format_stat(statistics.mean, self.settings.display_decimals),
                 );
+                detail_row(
+                    ui,
+                    "Std. deviation",
+                    format_stat(
+                        statistics.standard_deviation,
+                        self.settings.display_decimals,
+                    ),
+                );
+                detail_row(
+                    ui,
+                    "Variance",
+                    format_stat(statistics.variance, self.settings.display_decimals),
+                );
                 let qualifier = if statistics.approximate_quartiles {
                     " (approx.)"
                 } else {
@@ -119,16 +132,21 @@ impl App {
                     &format!("Q3{qualifier}"),
                     format_stat(statistics.third_quartile, self.settings.display_decimals),
                 );
-                detail_row(ui, "# Values", statistics.info.elements.to_string());
-                detail_row(ui, "# Outliers", statistics.outliers.to_string());
-                detail_row(ui, "# Positives", statistics.positive.to_string());
-                detail_row(ui, "# Zeros", statistics.zero.to_string());
-                detail_row(ui, "# Negatives", statistics.negative.to_string());
+                let total = statistics.info.elements;
+                let count =
+                    |value| format_count_percentage(value, total, self.settings.display_decimals);
+                detail_row(ui, "# Values", count(total));
+                detail_row(ui, "# Outliers", count(statistics.outliers));
+                detail_row(ui, "# Positives", count(statistics.positive));
+                detail_row(ui, "# Zeros", count(statistics.zero));
+                detail_row(ui, "# Negatives", count(statistics.negative));
                 detail_row_special(
                     ui,
                     "# NaN",
                     SpecialValue::Nan,
                     statistics.nan,
+                    total,
+                    self.settings.display_decimals,
                     &self.settings.palette,
                 );
                 detail_row_special(
@@ -136,6 +154,8 @@ impl App {
                     "# -Inf",
                     SpecialValue::NegativeInf,
                     statistics.negative_infinity,
+                    total,
+                    self.settings.display_decimals,
                     &self.settings.palette,
                 );
                 detail_row_special(
@@ -143,6 +163,8 @@ impl App {
                     "# +Inf",
                     SpecialValue::PositiveInf,
                     statistics.positive_infinity,
+                    total,
+                    self.settings.display_decimals,
                     &self.settings.palette,
                 );
                 detail_row_special(
@@ -150,10 +172,20 @@ impl App {
                     "# Fills",
                     SpecialValue::Fill,
                     statistics.fill,
+                    total,
+                    self.settings.display_decimals,
                     &self.settings.palette,
                 );
             } else {
-                detail_row(ui, "# Values", statistics.info.elements.to_string());
+                detail_row(
+                    ui,
+                    "# Values",
+                    format_count_percentage(
+                        statistics.info.elements,
+                        statistics.info.elements,
+                        self.settings.display_decimals,
+                    ),
+                );
             }
         }
         if statistics.approximate_quartiles {

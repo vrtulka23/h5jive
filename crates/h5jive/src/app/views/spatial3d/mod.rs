@@ -6,10 +6,75 @@ mod rendering;
 #[cfg(test)]
 mod tests;
 
-use rendering::*;
+pub(crate) use rendering::*;
+
+fn volume_keys_compatible(cached: &VolumeKey, selected: &VolumeKey) -> bool {
+    cached.file == selected.file
+        && cached.path == selected.path
+        && cached.slice.axes == selected.slice.axes
+        && cached.slice.hidden == selected.slice.hidden
+        && cached.slice.pinned == selected.slice.pinned
+}
+
+fn volume_cell_size(data: &ExactVolumeData) -> f64 {
+    (0..3)
+        .map(|axis| {
+            (data.bounds[axis][1] - data.bounds[axis][0]) as f64
+                / data.dimensions[axis].max(1) as f64
+        })
+        .product()
+}
 
 impl App {
     fn poll_volume(&mut self, key: &VolumeKey, shape: &[usize]) {
+        let overview_key = VolumeKey {
+            file: key.file,
+            path: key.path.clone(),
+            slice: self.applied_volume.as_ref().unwrap().clone(),
+        };
+        if let Some((working, receiver)) = &self.volume_job {
+            match receiver.try_recv() {
+                Ok(data) => {
+                    if working == &overview_key {
+                        self.volume_overview_cache = Some((working.clone(), data.clone()));
+                    } else if let Ok(volume) = &data {
+                        self.volume_refined_cache
+                            .retain(|(cached, _)| cached != working);
+                        self.volume_refined_cache
+                            .push((working.clone(), Arc::clone(volume)));
+                        if self.volume_refined_cache.len() > 4 {
+                            self.volume_refined_cache.remove(0);
+                        }
+                    }
+                    if working == key
+                        || !self
+                            .volume_cache
+                            .as_ref()
+                            .is_some_and(|(cached, _)| cached == key)
+                    {
+                        self.volume_cache = Some((working.clone(), data));
+                    }
+                    self.volume_job = None;
+                }
+                Err(mpsc::TryRecvError::Disconnected) => {
+                    let failure = (working.clone(), Err("3D worker stopped".into()));
+                    if working == &overview_key {
+                        self.volume_overview_cache = Some(failure.clone());
+                    }
+                    self.volume_cache = Some(failure);
+                    self.volume_job = None;
+                }
+                Err(mpsc::TryRecvError::Empty) => {}
+            }
+        }
+        if self
+            .volume_cache
+            .as_ref()
+            .is_some_and(|(cached, _)| cached == &overview_key)
+            && self.volume_overview_cache.is_none()
+        {
+            self.volume_overview_cache = self.volume_cache.clone();
+        }
         if self
             .volume_cache
             .as_ref()
@@ -17,40 +82,63 @@ impl App {
         {
             return;
         }
-        self.volume_cache = None;
-        if self
-            .volume_job
-            .as_ref()
-            .is_some_and(|(working, _)| working != key)
+        if let Some((_, data)) = self
+            .volume_refined_cache
+            .iter()
+            .find(|(cached, _)| cached == key)
         {
-            self.volume_job = None;
+            self.volume_cache = Some((key.clone(), Ok(Arc::clone(data))));
+            return;
         }
-        if let Some((_, receiver)) = &self.volume_job {
-            match receiver.try_recv() {
-                Ok(data) => {
-                    self.volume_cache = Some((key.clone(), data));
-                    self.volume_job = None;
-                }
-                Err(mpsc::TryRecvError::Disconnected) => {
-                    self.volume_cache = Some((key.clone(), Err("3D worker stopped".into())));
-                    self.volume_job = None;
-                }
-                Err(mpsc::TryRecvError::Empty) => {}
-            }
+        if self
+            .volume_overview_cache
+            .as_ref()
+            .is_some_and(|(cached, _)| cached == key)
+        {
+            return;
         }
-        if self.volume_cache.is_none() && self.volume_job.is_none() {
-            let path = self.file_paths[key.file].clone();
-            let dataset_path = key.path.clone();
+        if !self
+            .volume_cache
+            .as_ref()
+            .is_some_and(|(cached, _)| cached == key)
+            && self.volume_job.is_none()
+        {
+            let load_key = if key != &overview_key
+                && !self
+                    .volume_overview_cache
+                    .as_ref()
+                    .is_some_and(|(cached, _)| cached == &overview_key)
+            {
+                &overview_key
+            } else {
+                key
+            };
+            let path = self.file_paths[load_key.file].clone();
+            let dataset_path = load_key.path.clone();
             let shape = shape.to_vec();
-            let slice = key.slice.clone();
+            let slice = load_key.slice.clone();
+            let preview_limit = self.settings.volume_preview_max_voxels;
+            let generation = Arc::clone(&self.view_load_generation);
+            let expected = generation.load(Ordering::Relaxed);
             let (sender, receiver) = mpsc::channel();
             thread::spawn(move || {
+                if generation.load(Ordering::Relaxed) != expected {
+                    return;
+                }
                 let result = open_dataset_reader(&path).and_then(|file| {
-                    load_exact_volume(&file, &dataset_path, &shape, &slice).map(Arc::new)
+                    load_volume_data_with_cancel(
+                        &file,
+                        &dataset_path,
+                        &shape,
+                        &slice,
+                        preview_limit,
+                        &|| generation.load(Ordering::Relaxed) != expected,
+                    )
+                    .map(Arc::new)
                 });
                 let _ = sender.send(result);
             });
-            self.volume_job = Some((key.clone(), receiver));
+            self.volume_job = Some((load_key.clone(), receiver));
         }
     }
 
@@ -65,12 +153,6 @@ impl App {
         let Some(slice) = self.applied_volume.clone() else {
             return;
         };
-        let key = VolumeKey {
-            file: selection.file,
-            path: selection.path.clone(),
-            slice: slice.clone(),
-        };
-        self.poll_volume(&key, shape);
         let available = ui.content_region_avail();
         if available[0] < 180.0 || available[1] < 150.0 {
             ui.text_wrapped("Enlarge the preview panel to show the volume.");
@@ -138,6 +220,31 @@ impl App {
             scale,
             self.volume_rotation,
         );
+        let source_voxels = slice
+            .axes
+            .iter()
+            .flatten()
+            .try_fold(1usize, |total, &axis| {
+                total.checked_mul(slice.ranges[axis][1] - slice.ranges[axis][0] + 1)
+            });
+        let request_slice = if source_voxels.is_some_and(|total| total <= 64_000_000) {
+            slice.clone()
+        } else {
+            visible_volume_slice(
+                &slice,
+                shape,
+                size,
+                [center[0] - origin[0], center[1] - origin[1]],
+                scale,
+                self.volume_rotation,
+            )
+        };
+        let key = VolumeKey {
+            file: selection.file,
+            path: selection.path.clone(),
+            slice: request_slice,
+        };
+        self.poll_volume(&key, shape);
         draw_volume_box(
             &draw,
             center,
@@ -148,14 +255,34 @@ impl App {
             self.settings.volume_back_brightness,
         );
         let mut displayed_range = None;
-        let cached = self
-            .volume_cache
-            .as_ref()
-            .map(|(_, result)| result.as_ref().map(Arc::clone).map_err(Clone::clone));
-        match cached {
-            Some(Ok(data)) => {
+        let mut layers = self
+            .volume_refined_cache
+            .iter()
+            .rev()
+            .filter(|(cached, _)| volume_keys_compatible(cached, &key))
+            .map(|(cached, data)| (cached.clone(), Arc::clone(data)))
+            .collect::<Vec<_>>();
+        for entry in [&self.volume_cache, &self.volume_overview_cache]
+            .into_iter()
+            .flatten()
+        {
+            if volume_keys_compatible(&entry.0, &key)
+                && !layers.iter().any(|(cached, _)| cached == &entry.0)
+            {
+                if let Ok(data) = &entry.1 {
+                    layers.push((entry.0.clone(), Arc::clone(data)));
+                }
+            }
+        }
+        layers.sort_by(|a, b| volume_cell_size(&a.1).total_cmp(&volume_cell_size(&b.1)));
+        match layers.first().map(|(_, data)| Arc::clone(data)) {
+            Some(data) => {
                 let range = if self.settings.heatmap_auto_range {
-                    data.color_range
+                    self.volume_overview_cache
+                        .as_ref()
+                        .and_then(|(_, result)| result.as_ref().ok())
+                        .and_then(|overview| overview.color_range)
+                        .or(data.color_range)
                 } else {
                     Some((
                         self.settings.heatmap_value_min,
@@ -166,6 +293,7 @@ impl App {
                 let palette = &self.settings.palette;
                 let raster_key = VolumeRasterKey {
                     volume: key.clone(),
+                    layer_keys: layers.iter().map(|(cached, _)| cached.clone()).collect(),
                     size: [
                         size[0].ceil().max(1.0) as u32,
                         size[1].ceil().max(1.0) as u32,
@@ -174,6 +302,7 @@ impl App {
                     scale,
                     rotation: self.volume_rotation.0,
                     opacity: self.volume_opacity,
+                    back_brightness: self.settings.volume_back_brightness,
                     range,
                     logarithmic: self.volume_log_scale,
                     visibility: self.volume_visibility,
@@ -194,7 +323,7 @@ impl App {
                     .volume_raster
                     .as_ref()
                     .is_some_and(|(cached, _)| cached == &raster_key);
-                let texture = self.volume_raster_id(&raster_key);
+                let preview = self.volume_raster_preview(&raster_key, &key);
                 if !raster_is_current {
                     let colors = std::array::from_fn(|index| {
                         continuous_color(
@@ -206,15 +335,15 @@ impl App {
                     });
                     self.request_volume_raster(VolumeRasterRequest {
                         key: raster_key,
-                        data: Arc::clone(&data),
+                        layers: layers.into_iter().map(|(_, data)| data).collect(),
                         colors,
                     });
                 }
-                if let Some(texture) = texture {
+                if let Some((texture, preview_min, preview_max)) = preview {
                     draw.add_image(
                         texture,
-                        origin,
-                        [origin[0] + size[0], origin[1] + size[1]],
+                        [origin[0] + preview_min[0], origin[1] + preview_min[1]],
+                        [origin[0] + preview_max[0], origin[1] + preview_max[1]],
                         [0.0, 0.0],
                         [1.0, 1.0],
                         [1.0; 4],
@@ -223,23 +352,45 @@ impl App {
                     draw.add_text(
                         [origin[0] + 8.0, origin[1] + 28.0],
                         self.settings.palette.text,
-                        "Rendering exact voxel data...",
+                        "Rendering voxel data...",
                     );
                 }
                 draw.add_text(
                     [origin[0] + 8.0, origin[1] + 8.0],
                     self.settings.palette.text,
                     format!(
-                        "{} voxels | left drag: rotate | right drag: move | wheel: zoom",
-                        data.values.len()
+                        "{} voxels{}{} | left drag: rotate | right drag: move | wheel: zoom",
+                        data.values.len(),
+                        if data.sampled {
+                            " (sampled preview)"
+                        } else {
+                            ""
+                        },
+                        if self.volume_job.is_some() {
+                            " (refining)"
+                        } else {
+                            ""
+                        }
                     ),
                 );
             }
-            Some(Err(error)) => draw.add_text(
-                [origin[0] + 8.0, origin[1] + 8.0],
-                self.settings.palette.text,
-                error,
-            ),
+            None if self
+                .volume_cache
+                .as_ref()
+                .is_some_and(|(_, result)| result.is_err()) =>
+            {
+                draw.add_text(
+                    [origin[0] + 8.0, origin[1] + 8.0],
+                    self.settings.palette.text,
+                    self.volume_cache
+                        .as_ref()
+                        .unwrap()
+                        .1
+                        .as_ref()
+                        .err()
+                        .unwrap(),
+                )
+            }
             None => draw.add_text(
                 [origin[0] + 8.0, origin[1] + 8.0],
                 self.settings.palette.text,

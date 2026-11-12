@@ -14,6 +14,8 @@ pub struct DatasetStatistics {
     pub min: Option<f64>,
     pub max: Option<f64>,
     pub mean: Option<f64>,
+    pub variance: Option<f64>,
+    pub standard_deviation: Option<f64>,
     pub median: Option<f64>,
     pub first_quartile: Option<f64>,
     pub third_quartile: Option<f64>,
@@ -95,6 +97,8 @@ pub(super) fn calculate(file: &File, path: &str, sample_limit: usize) -> Result<
         min: None,
         max: None,
         mean: None,
+        variance: None,
+        standard_deviation: None,
         median: None,
         first_quartile: None,
         third_quartile: None,
@@ -107,6 +111,7 @@ pub(super) fn calculate(file: &File, path: &str, sample_limit: usize) -> Result<
     let limit = sample_limit.max(1);
     let mut sample = Vec::with_capacity((result.info.elements.min(limit as u128)) as usize);
     let mut random_state = 0x9E37_79B9_7F4A_7C15_u64;
+    let mut squared_deviations = 0.0_f64;
     for_each_value(file, path, &result.info.shape, |value, fill_value| {
         if value.is_nan() {
             result.nan += 1;
@@ -128,7 +133,9 @@ pub(super) fn calculate(file: &File, path: &str, sample_limit: usize) -> Result<
             result.min = Some(result.min.map_or(value, |current| current.min(value)));
             result.max = Some(result.max.map_or(value, |current| current.max(value)));
             let mean = result.mean.get_or_insert(0.0);
-            *mean += (value - *mean) / result.valid as f64;
+            let delta = value - *mean;
+            *mean += delta / result.valid as f64;
+            squared_deviations += delta * (value - *mean);
             if sample.len() < limit {
                 sample.push(value);
             } else {
@@ -142,6 +149,11 @@ pub(super) fn calculate(file: &File, path: &str, sample_limit: usize) -> Result<
             }
         }
     })?;
+    if result.valid > 0 {
+        let variance = (squared_deviations / result.valid as f64).max(0.0);
+        result.variance = Some(variance);
+        result.standard_deviation = Some(variance.sqrt());
+    }
     if sample.is_empty() {
         return Ok(result);
     }

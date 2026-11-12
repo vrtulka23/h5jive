@@ -16,8 +16,8 @@ the matching bundled native source by default. Check that `SNT3_PREFIX` or
 
 Select a numeric dataset with discoverable latitude and longitude coordinates.
 If you choose **Pixel edges** or **Filled pixels**, the dataset also needs both
-coordinate bounds arrays. The GOME-2 example is at
-`satellite/gome2/so2_slant_column`.
+coordinate bounds arrays. The bundled GOME-2 Band 3 sample is at
+`MODE_NADIR/BAND_3/OBSERVATIONS/radiance`.
 
 ## Generate API documentation
 

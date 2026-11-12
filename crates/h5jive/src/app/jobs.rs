@@ -1,6 +1,82 @@
 use super::*;
 
 impl App {
+    pub(super) fn switch_view(&mut self, view: ViewMode) {
+        if self.view == view {
+            return;
+        }
+        self.view_load_generation.fetch_add(1, Ordering::Relaxed);
+        self.heatmap_tile_job = None;
+        self.heatmap_overview_job = None;
+        self.heatmap_range_job = None;
+        self.volume_job = None;
+        self.volume_raster_job = None;
+        self.map_job = None;
+        self.view = view;
+    }
+
+    pub(super) fn poll_heatmap_tile(&mut self, key: HeatmapKey, shape: &[usize], replacement: f64) {
+        if let Some((running, receiver)) = &self.heatmap_tile_job {
+            match receiver.try_recv() {
+                Ok(image) => {
+                    let running = running.clone();
+                    let image = image.map(Arc::new);
+                    if let Ok(data) = &image {
+                        self.heatmap_tiles.retain(|(cached, _)| cached != &running);
+                        self.heatmap_tiles.push((running.clone(), Arc::clone(data)));
+                        if self.heatmap_tiles.len() > 4 {
+                            self.heatmap_tiles.remove(0);
+                        }
+                    }
+                    self.heatmap_cache = Some((running, image));
+                    self.heatmap_tile_job = None;
+                }
+                Err(mpsc::TryRecvError::Disconnected) => self.heatmap_tile_job = None,
+                Err(mpsc::TryRecvError::Empty) => {}
+            }
+        }
+        if self
+            .heatmap_cache
+            .as_ref()
+            .is_some_and(|(cached, _)| cached == &key)
+        {
+            return;
+        }
+        if let Some((_, image)) = self.heatmap_tiles.iter().find(|(cached, _)| cached == &key) {
+            self.heatmap_cache = Some((key, Ok(Arc::clone(image))));
+            return;
+        }
+        if self.heatmap_tile_job.is_some() {
+            return;
+        }
+        let file_path = self.file_paths[key.file].clone();
+        let dataset_path = key.path.clone();
+        let slice = key.slice.clone();
+        let bounds = key.bounds;
+        let shape = shape.to_vec();
+        let generation = Arc::clone(&self.view_load_generation);
+        let expected = generation.load(Ordering::Relaxed);
+        let (sender, receiver) = mpsc::channel();
+        thread::spawn(move || {
+            if generation.load(Ordering::Relaxed) != expected {
+                return;
+            }
+            let result = open_dataset_reader(&file_path).and_then(|file| {
+                load_heatmap_tile_with_cancel(
+                    &file,
+                    &dataset_path,
+                    &shape,
+                    &slice,
+                    bounds,
+                    replacement,
+                    &|| generation.load(Ordering::Relaxed) != expected,
+                )
+            });
+            let _ = sender.send(result);
+        });
+        self.heatmap_tile_job = Some((key, receiver));
+    }
+
     pub(super) fn poll_heatmap_overview(
         &mut self,
         selection: &Selection,
@@ -46,10 +122,18 @@ impl App {
         let path = selection.path.clone();
         let shape = shape.to_vec();
         let slice = slice.clone();
+        let generation = Arc::clone(&self.view_load_generation);
+        let expected = generation.load(Ordering::Relaxed);
         let (sender, receiver) = mpsc::channel();
         thread::spawn(move || {
-            let result = open_dataset_reader(&file_path)
-                .and_then(|file| load_heatmap_overview(&file, &path, &shape, &slice, grid));
+            if generation.load(Ordering::Relaxed) != expected {
+                return;
+            }
+            let result = open_dataset_reader(&file_path).and_then(|file| {
+                load_heatmap_overview_with_cancel(&file, &path, &shape, &slice, grid, &|| {
+                    generation.load(Ordering::Relaxed) != expected
+                })
+            });
             let _ = sender.send(result);
         });
         self.heatmap_overview_job = Some((key, receiver));
@@ -101,10 +185,18 @@ impl App {
         let path = selection.path.clone();
         let shape = shape.to_vec();
         let slice = slice.clone();
+        let generation = Arc::clone(&self.view_load_generation);
+        let expected = generation.load(Ordering::Relaxed);
         let (sender, receiver) = mpsc::channel();
         thread::spawn(move || {
-            let result = open_dataset_reader(&file_path)
-                .and_then(|file| scan_heatmap_range(&file, &path, &shape, &slice));
+            if generation.load(Ordering::Relaxed) != expected {
+                return;
+            }
+            let result = open_dataset_reader(&file_path).and_then(|file| {
+                scan_heatmap_range_with_cancel(&file, &path, &shape, &slice, &|| {
+                    generation.load(Ordering::Relaxed) != expected
+                })
+            });
             let _ = sender.send(result);
         });
         self.heatmap_range_job = Some((key, receiver));
@@ -180,8 +272,10 @@ impl App {
             .selection
             .as_ref()
             .map(|selection| (selection.file, selection.path.clone()));
-        if details_key != self.details_key {
+        let details_changed = details_key != self.details_key;
+        if details_changed {
             self.details_key = details_key;
+            self.details_default_pending = true;
             self.statistics_cache = None;
             self.statistics_job = None;
             self.distribution_cache = None;
@@ -200,6 +294,7 @@ impl App {
         });
         let selection_changed = key != self.selection_key;
         if selection_changed {
+            self.view_load_generation.fetch_add(1, Ordering::Relaxed);
             self.selection_key = key;
             self.volume_pan = [0.0, 0.0];
             self.profile_zoom = 1.0;
@@ -207,10 +302,15 @@ impl App {
             self.heatmap_tick_view = None;
             self.region_cache.clear();
             self.heatmap_cache = None;
+            self.heatmap_tiles.clear();
+            self.heatmap_tile_job = None;
             self.profile_cache = None;
             self.volume_cache = None;
+            self.volume_overview_cache = None;
+            self.volume_refined_cache.clear();
             self.volume_job = None;
             self.volume_raster = None;
+            self.volume_overview_raster = None;
             self.volume_raster_job = None;
             self.map_cache = None;
             self.map_job = None;
@@ -264,6 +364,12 @@ impl App {
             self.draft_volume_opacity = self.volume_opacity;
             self.draft_volume_log_scale = self.volume_log_scale;
             self.table_column_page = 0;
+        }
+        if details_changed
+            && matches!(self.view, ViewMode::WorldMap | ViewMode::Globe)
+            && self.selected_geo_source().is_none()
+        {
+            self.switch_view(ViewMode::Data);
         }
     }
 }

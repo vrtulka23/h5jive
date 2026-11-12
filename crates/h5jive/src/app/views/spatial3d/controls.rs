@@ -85,8 +85,11 @@ impl App {
                 self.volume_log_scale = self.draft_volume_log_scale;
                 if slice_changed {
                     self.volume_cache = None;
+                    self.volume_overview_cache = None;
+                    self.volume_refined_cache.clear();
                     self.volume_job = None;
                     self.volume_raster = None;
+                    self.volume_overview_raster = None;
                 }
                 self.volume_raster_job = None;
             }

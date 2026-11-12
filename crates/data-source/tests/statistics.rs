@@ -111,6 +111,8 @@ fn exact_quartiles_outlier_and_group_attribute() {
     assert_eq!(statistics.first_quartile, Some(2.0));
     assert_eq!(statistics.third_quartile, Some(3.0));
     assert_eq!(statistics.mean, Some(21.6));
+    assert!((statistics.variance.unwrap() - 1537.04).abs() < 1e-10);
+    assert!((statistics.standard_deviation.unwrap() - 1537.04_f64.sqrt()).abs() < 1e-10);
     assert_eq!(statistics.outliers, 1);
     assert_eq!(statistics.positive, 5);
     let distribution = file
@@ -137,6 +139,7 @@ fn exact_quartiles_outlier_and_group_attribute() {
         (1, 1, 1, 1)
     );
     assert_eq!(special.valid, 3);
+    assert!((special.variance.unwrap() - 8.0 / 3.0).abs() < 1e-10);
     let distribution = file
         .distribution("/measurements/special", &special, 32)
         .unwrap();

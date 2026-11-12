@@ -145,15 +145,25 @@ impl DatasetBrowser {
         }
     }
 
-    pub fn active_scans(&self) -> usize {
+    pub fn active_task_labels(&self) -> Vec<&'static str> {
         self.sources
             .iter()
-            .filter(|source| {
-                source.scanning
-                    || source.metadata_job.is_some()
-                    || source.overpass_receiver.is_some()
+            .filter_map(|source| {
+                if source.scanning {
+                    Some("index")
+                } else if source.metadata_job.is_some() {
+                    Some("metadata")
+                } else if source.overpass_receiver.is_some()
+                    || source.overpass_cache_receiver.is_some()
+                {
+                    Some("overpasses")
+                } else if source.availability_job.is_some() {
+                    Some("source check")
+                } else {
+                    None
+                }
             })
-            .count()
+            .collect()
     }
 
     pub fn poll(&mut self, sources: &[DatasetSource]) {
@@ -904,6 +914,7 @@ mod tests {
             let products = scan_source(source, &sender, &AtomicBool::new(false)).unwrap();
             let expected = match source.id.as_str() {
                 "mock_fdr_l1a" | "mock_fdr_l1b" => 1,
+                "mock_s5p" => 3,
                 _ => 5,
             };
             assert_eq!(products.len(), expected, "{}", source.id);

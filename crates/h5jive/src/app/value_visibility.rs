@@ -45,11 +45,17 @@ impl ValueVisibility {
             StyleColor::ButtonActive,
             mix_color(all_background, neutral, 0.65),
         );
-        if ui.button_with_size("All", [button_width, 26.0]) {
-            *self = Self::default();
+        let all_enabled = self.all_enabled();
+        let label = if all_enabled { "None" } else { "All" };
+        if ui.button_with_size(label, [button_width, 26.0]) {
+            self.set_all(!all_enabled);
             changed = true;
         }
-        ui.set_item_tooltip("Show all value classes");
+        ui.set_item_tooltip(if all_enabled {
+            "Hide all value classes"
+        } else {
+            "Show all value classes"
+        });
         drop(_all_active);
         drop(_all_hovered);
         drop(_all_button);

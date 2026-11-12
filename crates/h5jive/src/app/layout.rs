@@ -393,23 +393,54 @@ impl App {
     }
 
     fn draw_global_loading_overlay(&self, ui: &Ui, size: [f32; 2], menu_height: f32) {
-        let count = self
-            .file_open_jobs
-            .iter()
-            .filter(|job| job.is_some())
-            .count()
-            + usize::from(self.statistics_job.is_some())
-            + usize::from(self.distribution_job.is_some())
-            + usize::from(self.heatmap_overview_job.is_some())
-            + usize::from(self.heatmap_range_job.is_some())
-            + usize::from(self.volume_job.is_some())
-            + usize::from(self.map_job.is_some());
-        let count = count + self.dataset_browser.active_scans();
-        if count > 0 {
+        let mut tasks = Vec::new();
+        for (slot, job) in self.file_open_jobs.iter().enumerate() {
+            if job.is_some() {
+                tasks.push(if slot == 0 { "file A" } else { "file B" });
+            }
+        }
+        for (active, label) in [
+            (self.statistics_job.is_some(), "stats"),
+            (self.distribution_job.is_some(), "distribution"),
+            (self.heatmap_overview_job.is_some(), "2D image"),
+            (self.heatmap_tile_job.is_some(), "2D tile"),
+            (self.heatmap_range_job.is_some(), "2D range"),
+            (self.volume_job.is_some(), "3D volume"),
+            (self.volume_raster_job.is_some(), "3D render"),
+            (self.map_job.is_some(), "map"),
+        ] {
+            if active {
+                tasks.push(label);
+            }
+        }
+        tasks.extend(self.dataset_browser.active_task_labels());
+        if !tasks.is_empty() {
+            let mut grouped: Vec<(&str, usize)> = Vec::new();
+            for task in tasks {
+                if let Some((_, count)) = grouped.iter_mut().find(|(label, _)| *label == task) {
+                    *count += 1;
+                } else {
+                    grouped.push((task, 1));
+                }
+            }
+            let mut label = String::from("Loading ");
+            for (index, (task, count)) in grouped.iter().take(2).enumerate() {
+                if index > 0 {
+                    label.push_str(" + ");
+                }
+                label.push_str(task);
+                if *count > 1 {
+                    label.push_str(&format!(" ({count})"));
+                }
+            }
+            let remaining: usize = grouped.iter().skip(2).map(|(_, count)| count).sum();
+            if remaining > 0 {
+                label.push_str(&format!(" +{remaining}"));
+            }
             draw_loading_indicator(
                 ui,
                 [size[0] - 6.0, menu_height * 0.5],
-                count,
+                &label,
                 &self.settings.palette,
             );
         }
@@ -465,6 +496,7 @@ impl App {
         }
     }
     pub(super) fn draw_view_selector(&mut self, ui: &Ui) {
+        let geo_available = self.selected_geo_source().is_some();
         let available = ui.content_region_avail()[0];
         let width = ((available - 5.0 * self.settings.view_button_gap) / 6.0).max(20.0);
         for (index, mode) in ViewMode::ALL.into_iter().enumerate() {
@@ -478,8 +510,9 @@ impl App {
             let hovered = ui.is_item_hovered();
             let min = ui.item_rect_min();
             let max = ui.item_rect_max();
-            if clicked {
-                self.view = mode;
+            let enabled = geo_available || !matches!(mode, ViewMode::WorldMap | ViewMode::Globe);
+            if clicked && enabled {
+                self.switch_view(mode);
             }
             draw_view_icon(
                 ui,
@@ -487,10 +520,19 @@ impl App {
                 min,
                 max,
                 self.view == mode,
-                hovered,
+                hovered && enabled,
                 &self.settings.palette,
             );
-            ui.set_item_tooltip(format!("{} - {}", mode.title(), mode.description()));
+            if !enabled {
+                let overlay = self.settings.palette.panel;
+                ui.get_window_draw_list()
+                    .add_rect(min, max, [overlay[0], overlay[1], overlay[2], 0.70])
+                    .filled(true)
+                    .build();
+                ui.set_item_tooltip("Select a geolocated numeric dataset to enable this view");
+            } else {
+                ui.set_item_tooltip(format!("{} - {}", mode.title(), mode.description()));
+            }
         }
     }
     pub(super) fn draw_view_placeholder(&self, ui: &Ui) {
@@ -523,7 +565,6 @@ fn make_file_picker_state(slot: usize, directory: PathBuf) -> FilePickerState {
         slot,
         directory: directory.clone(),
         entries: Vec::new(),
-        filter: String::new(),
         selected: None,
         error: None,
     };
@@ -550,6 +591,19 @@ fn make_file_picker_state(slot: usize, directory: PathBuf) -> FilePickerState {
                     .cmp(&left.is_directory)
                     .then_with(|| left.label.to_lowercase().cmp(&right.label.to_lowercase()))
             });
+            if let Some(parent) = directory
+                .parent()
+                .filter(|path| !path.as_os_str().is_empty())
+            {
+                state.entries.insert(
+                    0,
+                    FilePickerEntry {
+                        path: parent.to_path_buf(),
+                        label: "..".to_string(),
+                        is_directory: true,
+                    },
+                );
+            }
         }
         Err(error) => state.error = Some(error.to_string()),
     }
@@ -681,21 +735,11 @@ impl App {
                 if ui.button("Refresh") {
                     navigate = Some(picker.directory.clone());
                 }
-                ui.set_next_item_width(-1.0);
-                ui.input_text("Filter this folder", &mut picker.filter)
-                    .build();
                 ui.separator();
                 ui.child_window("##file_picker_entries")
                     .size([0.0, -72.0])
                     .build(ui, || {
                         for entry in &picker.entries {
-                            if !entry
-                                .label
-                                .to_lowercase()
-                                .contains(&picker.filter.to_lowercase())
-                            {
-                                continue;
-                            }
                             let selected = picker.selected.as_ref() == Some(&entry.path);
                             let icon_position = ui.cursor_screen_pos();
                             ui.dummy([17.0, ui.text_line_height()]);
@@ -820,9 +864,11 @@ impl App {
     }
 
     fn reset_file_selection(&mut self) {
+        self.view_load_generation.fetch_add(1, Ordering::Relaxed);
         self.selection = None;
         self.selection_key = None;
         self.details_key = None;
+        self.details_default_pending = true;
         self.statistics_cache = None;
         self.statistics_job = None;
         self.distribution_cache = None;
@@ -834,6 +880,8 @@ impl App {
         self.axis_names.clear();
         self.region_cache.clear();
         self.heatmap_cache = None;
+        self.heatmap_tiles.clear();
+        self.heatmap_tile_job = None;
         self.heatmap_overview_cache = None;
         self.heatmap_overview_job = None;
         self.heatmap_range_cache = None;
@@ -842,8 +890,11 @@ impl App {
         self.heatmap_colormap = None;
         self.profile_cache = None;
         self.volume_cache = None;
+        self.volume_overview_cache = None;
+        self.volume_refined_cache.clear();
         self.volume_job = None;
         self.volume_raster = None;
+        self.volume_overview_raster = None;
         self.volume_raster_job = None;
         self.draft_volume = None;
         self.applied_volume = None;

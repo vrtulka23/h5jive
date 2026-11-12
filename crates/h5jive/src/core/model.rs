@@ -7,6 +7,7 @@ pub(crate) struct MapKey {
     pub(crate) path: String,
     pub(crate) time: Option<usize>,
     pub(crate) spectral: usize,
+    pub(crate) max_points: usize,
 }
 
 pub(crate) struct MapPoint {
@@ -20,6 +21,7 @@ pub(crate) struct MapPoint {
 pub(crate) struct MapData {
     pub(crate) points: Vec<MapPoint>,
     pub(crate) range: Option<(f64, f64)>,
+    pub(crate) aggregated: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -323,6 +325,7 @@ pub(crate) struct HeatmapImage {
     pub(crate) values: Vec<f64>,
     pub(crate) plotted: Vec<f64>,
     pub(crate) fill_value: Option<f64>,
+    pub(crate) range: Option<(f64, f64)>,
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct HeatmapOverviewKey {
@@ -385,4 +388,5 @@ pub(crate) struct ExactVolumeData {
     pub(crate) strides: [usize; 3],
     pub(crate) bounds: [[f32; 2]; 3],
     pub(crate) color_range: Option<(f64, f64)>,
+    pub(crate) sampled: bool,
 }

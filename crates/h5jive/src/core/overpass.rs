@@ -511,7 +511,8 @@ mod tests {
     #[test]
     fn repeated_check_reuses_the_coordinate_result_cache() {
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples");
-        let product = root.join("space_observation.nc");
+        let product_name = "gome2_band3_20130106_gome.nc";
+        let product = root.join(product_name);
         let temporary =
             std::env::temp_dir().join(format!("h5jive_overpass_test_{}", std::process::id()));
         let source = DatasetSource {
@@ -520,10 +521,10 @@ mod tests {
             root,
             format: "CF".into(),
             tags: vec![],
-            product_regex: "[.]nc$".into(),
+            product_regex: "_gome[.]nc$".into(),
             cache_path: temporary.join("index.json"),
             overpass: OverpassDiscovery {
-                coordinate_group: String::new(),
+                coordinate_group: "GEODATA".into(),
                 latitude: "latitude".into(),
                 longitude: "longitude".into(),
                 group_depth: 0,
@@ -535,8 +536,8 @@ mod tests {
             bounds: [-180.0, -90.0, 180.0, 90.0],
         };
         let product = Product {
-            filename: "space_observation.nc".into(),
-            relative_path: "space_observation.nc".into(),
+            filename: product_name.into(),
+            relative_path: product_name.into(),
             year: String::new(),
             month: String::new(),
             day: String::new(),

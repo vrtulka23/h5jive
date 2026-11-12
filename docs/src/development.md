@@ -11,7 +11,7 @@
   rendering, settings, and background job coordination. Views call the core
   routines to obtain data for display.
 - `settings/` contains DIPL configuration, schemas, and appearance profiles.
-- `examples/` contains reproducible demo files and the GOME-2 orbit source data.
+- `examples/` contains the generated array demo and a compact GOME-2 Band 3 sample.
 - `website/` is the static Astro project page; `docs/` is this mdBook guide.
 
 ## Build and API reference
@@ -28,7 +28,13 @@ Run the reproducible demo generator with:
 cargo run -p h5jive --example generate_demo -- examples/space_demo.hdf5
 ```
 
-The generator also writes the classic NetCDF companion next to the HDF5 file.
+The Band 3 sample is regenerated from a local Level 1B product with:
+
+```sh
+cargo run -p h5jive --example generate_gome2_band3 -- \
+  ../mock_datasets/GOME2/01/06/20130106101404Z_32260_gome.nc \
+  examples/gome2_band3_20130106_gome.nc
+```
 
 ## Performance checks
 

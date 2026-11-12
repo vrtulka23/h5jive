@@ -18,9 +18,12 @@ show_pics bool = true
   ?descr "Show PICS region markers when the flat map opens."
   !setup
 max_points int = 30000
-  ?descr "Maximum geolocated samples retained in a world map preview."
-  !condition ({.} >= 1000 && {.} <= 200000)
+  ?descr "Geolocated display cells at whole-world zoom for map and globe; higher zoom uses more cells."
+  !condition ({.} >= 1000 && {.} <= 2000000)
   ?performance_impact "Higher limits retain more swath samples and increase map draw time."
+zoom_detail_factor float = 4.0
+  ?descr "Multiplier for geolocated display cells each time map or globe zoom doubles."
+  !condition ({.} >= 1 && {.} <= 8)
 point_radius float = 2.0
   ?descr "Radius of satellite sample points on the map in pixels."
   !condition ({.} >= 0.5 && {.} <= 8)

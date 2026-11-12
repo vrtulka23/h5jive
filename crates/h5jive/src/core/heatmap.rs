@@ -46,6 +46,7 @@ pub(crate) fn heatmap_tile_bounds(
 }
 
 /// Read only the visible cells; plotting replacements do not alter stored values.
+#[cfg(test)]
 pub(crate) fn load_heatmap_tile(
     file: &File,
     path: &str,
@@ -54,6 +55,21 @@ pub(crate) fn load_heatmap_tile(
     bounds: [usize; 4],
     replacement: f64,
 ) -> Result<HeatmapImage, String> {
+    load_heatmap_tile_with_cancel(file, path, shape, slice, bounds, replacement, &|| false)
+}
+
+pub(crate) fn load_heatmap_tile_with_cancel(
+    file: &File,
+    path: &str,
+    shape: &[usize],
+    slice: &TableSlice,
+    bounds: [usize; 4],
+    replacement: f64,
+    cancelled: &dyn Fn() -> bool,
+) -> Result<HeatmapImage, String> {
+    if cancelled() {
+        return Err("2D loading cancelled".into());
+    }
     let [r0, r1, c0, c1] = bounds;
     let (start, count) = slice.region(shape, r0, r1, c0, c1);
     let region = file
@@ -62,6 +78,9 @@ pub(crate) fn load_heatmap_tile(
     let mut values = Vec::with_capacity((r1 - r0) * (c1 - c0));
     let mut plotted = Vec::with_capacity(values.capacity());
     for row in r0..r1 {
+        if cancelled() {
+            return Err("2D loading cancelled".into());
+        }
         for column in c0..c1 {
             let value = region.data[slice.region_offset(&count, row, column, &start)];
             if SpecialValue::from_value(value, region.fill_value).is_some() {
@@ -72,12 +91,15 @@ pub(crate) fn load_heatmap_tile(
             values.push(value);
         }
     }
+    let mut range = None;
+    extend_finite_range(&mut range, &values, region.fill_value);
     Ok(HeatmapImage {
         bounds,
         grid: [r1 - r0, c1 - c0],
         values,
         plotted,
         fill_value: region.fill_value,
+        range,
     })
 }
 
@@ -86,12 +108,24 @@ pub(crate) fn overview_sample_index(bin: usize, source_len: usize, bins: usize) 
         .min((source_len - 1) as u128) as usize
 }
 
+#[cfg(test)]
 pub(crate) fn load_heatmap_overview(
     file: &File,
     path: &str,
     shape: &[usize],
     slice: &TableSlice,
     grid: [usize; 2],
+) -> Result<HeatmapImage, String> {
+    load_heatmap_overview_with_cancel(file, path, shape, slice, grid, &|| false)
+}
+
+pub(crate) fn load_heatmap_overview_with_cancel(
+    file: &File,
+    path: &str,
+    shape: &[usize],
+    slice: &TableSlice,
+    grid: [usize; 2],
+    cancelled: &dyn Fn() -> bool,
 ) -> Result<HeatmapImage, String> {
     let rows = slice.rows(shape);
     let columns = slice.columns(shape);
@@ -107,10 +141,16 @@ pub(crate) fn load_heatmap_overview(
     let tile_columns = columns.min(256);
     let tile_rows = rows.min((65_536 / tile_columns).max(1));
     for row_start in (0..rows).step_by(tile_rows) {
+        if cancelled() {
+            return Err("2D loading cancelled".into());
+        }
         let row_end = (row_start + tile_rows).min(rows);
         let first_row = sample_rows.partition_point(|&row| row < row_start);
         let last_row = sample_rows.partition_point(|&row| row < row_end);
         for column_start in (0..columns).step_by(tile_columns) {
+            if cancelled() {
+                return Err("2D loading cancelled".into());
+            }
             let column_end = (column_start + tile_columns).min(columns);
             let first_column = sample_columns.partition_point(|&column| column < column_start);
             let last_column = sample_columns.partition_point(|&column| column < column_end);
@@ -139,20 +179,34 @@ pub(crate) fn load_heatmap_overview(
             }
         }
     }
+    let mut range = None;
+    extend_finite_range(&mut range, &values, fill_value);
     Ok(HeatmapImage {
         bounds: [0, rows, 0, columns],
         grid,
         values,
         plotted,
         fill_value,
+        range,
     })
 }
 
+#[cfg(test)]
 pub(crate) fn scan_heatmap_range(
     file: &File,
     path: &str,
     shape: &[usize],
     slice: &TableSlice,
+) -> Result<Option<(f64, f64)>, String> {
+    scan_heatmap_range_with_cancel(file, path, shape, slice, &|| false)
+}
+
+pub(crate) fn scan_heatmap_range_with_cancel(
+    file: &File,
+    path: &str,
+    shape: &[usize],
+    slice: &TableSlice,
+    cancelled: &dyn Fn() -> bool,
 ) -> Result<Option<(f64, f64)>, String> {
     let rows = slice.rows(shape);
     let columns = slice.columns(shape);
@@ -163,7 +217,13 @@ pub(crate) fn scan_heatmap_range(
     let tile_rows = rows.min((65_536 / tile_columns).max(1));
     let mut range = None;
     for row in (0..rows).step_by(tile_rows) {
+        if cancelled() {
+            return Err("2D loading cancelled".into());
+        }
         for column in (0..columns).step_by(tile_columns) {
+            if cancelled() {
+                return Err("2D loading cancelled".into());
+            }
             let (start, count) = slice.region(
                 shape,
                 row,

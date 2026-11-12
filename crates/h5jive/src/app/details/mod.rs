@@ -13,6 +13,17 @@ impl App {
             .build(ui, || {
                 let _content_padding = ui.push_style_var(StyleVar::WindowPadding([0.0, 0.0]));
                 if let Some(_tabs) = ui.tab_bar("details_tabs") {
+                    let flags = if self.details_default_pending {
+                        TabItemFlags::SET_SELECTED
+                    } else {
+                        TabItemFlags::NONE
+                    };
+                    if let Some(_tab) = ui.tab_item_with_flags("Attributes", None, flags) {
+                        ui.child_window("attributes_content")
+                            .size([0.0, 0.0])
+                            .build(ui, || self.draw_attributes_tab(ui));
+                    }
+                    self.details_default_pending = false;
                     if let Some(_tab) = ui.tab_item("Statistics") {
                         ui.child_window("statistics_content")
                             .size([0.0, 0.0])
@@ -24,13 +35,6 @@ impl App {
                         ui.child_window("distribution_content")
                             .size([0.0, 0.0])
                             .build(ui, || self.draw_distribution_tab(ui));
-                    }
-                    if let Some(_tab) = ui.tab_item("Attributes") {
-                        ui.child_window("attributes_content")
-                            .size([0.0, 0.0])
-                            .build(ui, || {
-                                self.draw_attributes_tab(ui);
-                            });
                     }
                     if let Some(_tab) = ui.tab_item("Coordinates") {
                         ui.child_window("coordinates_content")

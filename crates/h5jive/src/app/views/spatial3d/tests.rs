@@ -1,4 +1,68 @@
 use super::*;
+
+#[test]
+fn zoomed_volume_requests_only_visible_indices_and_pan_moves_the_request() {
+    let shape = [512, 512, 512];
+    let slice = VolumeSlice::new(&shape, false, PinnedDefault::Start);
+    let rotation = VolumeRotation::identity();
+    let overview = visible_volume_slice(
+        &slice,
+        &shape,
+        [400.0, 400.0],
+        [200.0, 200.0],
+        [220.0; 3],
+        rotation,
+    );
+    assert_eq!(overview.ranges, slice.ranges);
+    let zoomed = visible_volume_slice(
+        &slice,
+        &shape,
+        [400.0, 400.0],
+        [200.0, 200.0],
+        [880.0; 3],
+        rotation,
+    );
+    assert!(zoomed.ranges[0][1] - zoomed.ranges[0][0] < 384);
+    assert!(zoomed.ranges[1][1] - zoomed.ranges[1][0] < 384);
+    assert_eq!(zoomed.ranges[2], slice.ranges[2]);
+    let panned = visible_volume_slice(
+        &slice,
+        &shape,
+        [400.0, 400.0],
+        [320.0, 200.0],
+        [880.0; 3],
+        rotation,
+    );
+    assert!(panned.ranges[0][0] > zoomed.ranges[0][0]);
+}
+
+#[test]
+fn rotated_volume_crop_contains_every_projected_visible_voxel() {
+    let shape = [64, 64, 64];
+    let slice = VolumeSlice::new(&shape, false, PinnedDefault::Start);
+    let rotation = VolumeRotation::from_angles(0.7, 0.5);
+    let size = [240.0, 220.0];
+    let center = [120.0, 110.0];
+    let scale = [900.0; 3];
+    let crop = visible_volume_slice(&slice, &shape, size, center, scale, rotation);
+    for x in 0..64 {
+        for y in 0..64 {
+            for z in 0..64 {
+                let point = [x, y, z].map(|index| 0.5 - (index as f32 + 0.5) / 64.0);
+                let screen = project_rotated(point, center, scale, rotation).0;
+                if screen[0] >= 0.0
+                    && screen[0] < size[0]
+                    && screen[1] >= 0.0
+                    && screen[1] < size[1]
+                {
+                    assert!((crop.ranges[0][0]..=crop.ranges[0][1]).contains(&x));
+                    assert!((crop.ranges[1][0]..=crop.ranges[1][1]).contains(&y));
+                    assert!((crop.ranges[2][0]..=crop.ranges[2][1]).contains(&z));
+                }
+            }
+        }
+    }
+}
 #[test]
 fn planar_projections_look_along_the_remaining_axis() {
     let center = [0.0, 0.0];
@@ -222,6 +286,34 @@ fn exact_volume_preserves_every_native_cell_and_axis_order() {
         let index = x * exact.strides[0] + y * exact.strides[1] + z * exact.strides[2];
         assert_eq!(exact.values[index], source.data[0] as f32);
     }
+}
+
+#[test]
+fn s5p_large_radiance_uses_a_bounded_volume_preview_when_available() {
+    let directory =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../mock_datasets/S5P");
+    let Some(path) = std::fs::read_dir(directory).ok().and_then(|entries| {
+        entries
+            .filter_map(Result::ok)
+            .map(|entry| entry.path())
+            .find(|path| {
+                path.file_name()
+                    .is_some_and(|name| name.to_string_lossy().starts_with("S5P_OFFL_L1B_RA_BD3_"))
+            })
+    }) else {
+        return;
+    };
+    let file = File::open(&path).unwrap();
+    let dataset = "/BAND3_RADIANCE/STANDARD_MODE/OBSERVATIONS/radiance";
+    let shape = file.dataset_info(dataset).unwrap().shape;
+    assert!(file.axis_names(dataset).unwrap()[0].contains("time"));
+    let slice = VolumeSlice::new(&shape, true, PinnedDefault::Middle);
+    let volume = load_volume_data(&file, dataset, &shape, &slice, 100_000).unwrap();
+    assert!(volume.sampled);
+    assert!(volume.values.len() <= 100_000);
+    assert_eq!(volume.values.len(), volume.specials.len());
+    assert!(volume.color_range.is_some_and(|(low, high)| low < high));
+    assert!(volume.dimensions.iter().all(|&length| length > 1));
 }
 
 #[test]

@@ -1,4 +1,5 @@
 use super::super::*;
+use super::world_map::geospatial_point_budget;
 use super::{coastlines, draw_geo_controls, observation_color, pixel_hover_distance};
 
 #[derive(Clone, Copy)]
@@ -120,7 +121,17 @@ impl App {
         let has_bounds = source.as_ref().is_some_and(|s| {
             s.geolocation.latitude_bounds.is_some() && s.geolocation.longitude_bounds.is_some()
         });
-        let key = self.ensure_geo_data(source.as_ref(), options);
+        let max_points = if let Some(source) = source.as_ref() {
+            geospatial_point_budget(
+                self.settings.map_max_points,
+                self.settings.map_zoom_detail_factor,
+                self.globe_zoom,
+                source.shape.iter().take(3).product(),
+            )
+        } else {
+            self.settings.map_max_points
+        };
+        let key = self.ensure_geo_data(source.as_ref(), options, max_points);
         let available = ui.content_region_avail();
         let legend_width = if key.is_some() {
             self.settings.heatmap_legend_width.min(available[0] * 0.22)
@@ -345,7 +356,12 @@ impl App {
                     self.globe_yaw,
                     self.globe_pitch,
                 );
-                if p.depth < 0.0 {
+                if p.depth < 0.0
+                    || (p.point[0] < cursor[0] - 32.0
+                        || p.point[0] > cursor[0] + area[0] + 32.0
+                        || p.point[1] < cursor[1] - 32.0
+                        || p.point[1] > cursor[1] + area[1] + 32.0)
+                {
                     continue;
                 }
                 let mut col = observation_color(
@@ -481,7 +497,7 @@ impl App {
         }
         drop(clip);
         drop(draw);
-        if let Some(Ok(_)) = map_data {
+        if let Some(Ok(data)) = map_data {
             draw_heatmap_legend(
                 ui,
                 plot_ctx,
@@ -498,9 +514,14 @@ impl App {
             );
             if let Some((p, _)) = nearest.filter(|_| !hovered_pics) {
                 ui.tooltip_text(format!(
-                    "Lat {:.3}°, Lon {:.3}°\nValue: {}",
+                    "Lat {:.3}°, Lon {:.3}°\n{}: {}",
                     p.latitude,
                     p.longitude,
+                    if data.aggregated {
+                        "Mean value"
+                    } else {
+                        "Value"
+                    },
                     p.special.map_or_else(
                         || format_value(p.value, self.settings.display_decimals),
                         |v| v.label().into()

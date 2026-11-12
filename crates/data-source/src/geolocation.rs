@@ -37,9 +37,24 @@ impl ScanFilter {
     pub fn allows(self, direction: Option<ScanDirectionClass>) -> bool {
         match self {
             Self::Both => true,
-            Self::Forward => direction == Some(ScanDirectionClass::Forward),
-            Self::Backward => direction == Some(ScanDirectionClass::Backward),
+            Self::Forward => direction.is_none() || direction == Some(ScanDirectionClass::Forward),
+            Self::Backward => {
+                direction.is_none() || direction == Some(ScanDirectionClass::Backward)
+            }
         }
+    }
+}
+
+#[cfg(test)]
+mod scan_filter_tests {
+    use super::{ScanDirectionClass, ScanFilter};
+
+    #[test]
+    fn datasets_without_scan_flags_remain_visible() {
+        assert!(ScanFilter::Forward.allows(None));
+        assert!(ScanFilter::Backward.allows(None));
+        assert!(!ScanFilter::Forward.allows(Some(ScanDirectionClass::Backward)));
+        assert!(!ScanFilter::Backward.allows(Some(ScanDirectionClass::Forward)));
     }
 }
 

@@ -1,39 +1,60 @@
-use h5jive_data::File;
+use h5jive_data::{File, GeolocationRule, ScanDirectionRule, ScanFilter};
+
+const RADIANCE: &str = "/MODE_NADIR/BAND_3/OBSERVATIONS/radiance";
 
 #[test]
-fn satellite_examples_expose_curvilinear_geolocation() {
-    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples");
-    for (name, radiance, latitude, longitude, shape, start, count) in [
-        (
-            "space_demo.hdf5",
-            "/satellite/synthetic_radiance",
-            "/satellite/latitude",
-            "/satellite/longitude",
-            [8, 32, 48],
-            [2, 10, 8],
-            [1, 1, 2],
-        ),
-        (
-            "space_observation.nc",
-            "/so2_slant_column",
-            "/latitude",
-            "/longitude",
-            [1, 10461, 1],
-            [0, 10, 0],
-            [1, 2, 1],
-        ),
-    ] {
-        let file = File::open(&root.join(name)).unwrap();
-        let geo = file.geolocation(radiance).unwrap().unwrap();
-        assert_eq!(geo.latitude, latitude);
-        assert_eq!(geo.longitude, longitude);
-        assert_eq!(file.dataset_info(radiance).unwrap().shape, shape);
-        let lat = file.region(&geo.latitude, &start, &count).unwrap().data;
-        let lon = file.region(&geo.longitude, &start, &count).unwrap().data;
-        assert!(lat.iter().all(|value| (-90.0..=90.0).contains(value)));
-        assert!(lon.iter().all(|value| (-180.0..=180.0).contains(value)));
-        assert_ne!(lon[0], lon[1]);
-        assert!(file.geolocation(latitude).unwrap().is_none());
-        assert!(file.geolocation(longitude).unwrap().is_none());
-    }
+fn bundled_band3_has_real_geolocation_bounds_and_scan_flags() {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../examples/gome2_band3_20130106_gome.nc");
+    let file = File::open(&path).unwrap();
+    assert_eq!(file.dataset_info(RADIANCE).unwrap().shape, [1, 625, 32, 64]);
+    let geo = file.geolocation(RADIANCE).unwrap().unwrap();
+    assert_eq!(geo.latitude, "/MODE_NADIR/BAND_3/GEODATA/latitude");
+    assert_eq!(geo.longitude, "/MODE_NADIR/BAND_3/GEODATA/longitude");
+    assert!(geo.latitude_bounds.is_some());
+    assert!(geo.longitude_bounds.is_some());
+    let rule = GeolocationRule {
+        file_glob: "*_gome.nc".into(),
+        platform: "MetOp M0?".into(),
+        sensor: "GOME-2".into(),
+        product_type: "GO2_L1B___".into(),
+        observation_group: "OBSERVATIONS".into(),
+        coordinate_group: "GEODATA".into(),
+        latitude: "latitude".into(),
+        longitude: "longitude".into(),
+        latitude_bounds: "latitude_bounds".into(),
+        longitude_bounds: "longitude_bounds".into(),
+        scan_direction: Some(ScanDirectionRule {
+            group: "coordinate".into(),
+            variable: "scan_direction".into(),
+            forward_values: vec![1],
+            backward_values: vec![2],
+            default_filter: ScanFilter::Forward,
+        }),
+    };
+    let geo = file
+        .geolocation_with_rules(RADIANCE, &[rule])
+        .unwrap()
+        .unwrap();
+    let scan = geo.scan_direction.unwrap();
+    assert_eq!(scan.default_filter, ScanFilter::Forward);
+    let flags = file
+        .region(&scan.path, &[0, 0, 0], &[1, 625, 32])
+        .unwrap()
+        .data;
+    assert!(flags.contains(&1.0));
+    assert!(flags.contains(&2.0));
+    let lat = file
+        .region(&geo.latitude, &[0, 100, 0], &[1, 1, 2])
+        .unwrap()
+        .data;
+    let lon = file
+        .region(&geo.longitude, &[0, 100, 0], &[1, 1, 2])
+        .unwrap()
+        .data;
+    assert!(lat.iter().all(|value| (-90.0..=90.0).contains(value)));
+    assert!(lon.iter().all(|value| (-180.0..=180.0).contains(value)));
+    assert_ne!(lon[0], lon[1]);
+    assert!(file.geolocation(&geo.latitude).unwrap().is_none());
+    assert!(file.geolocation(&geo.longitude).unwrap().is_none());
 }

@@ -1,0 +1,14 @@
+# Sentinel-5P TROPOMI Level 1B radiance bands share this group layout.
+dataset_formats[s5p_tropomi_l1b_radiance] : dataset_format
+  name = "Sentinel-5P TROPOMI Level 1B radiance"
+  identification
+    file_glob = "S5P_*_L1B_RA_BD?_*.nc"
+    platform = "Sentinel-5P"
+    sensor = "TROPOMI"
+    product_type = "L1B_RA_BD?"
+  observation_group = "OBSERVATIONS"
+  coordinate_group = "GEODATA"
+  latitude = "latitude"
+  longitude = "longitude"
+  latitude_bounds = "latitude_bounds"
+  longitude_bounds = "longitude_bounds"

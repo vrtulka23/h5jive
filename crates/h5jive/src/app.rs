@@ -43,7 +43,10 @@ use std::{
     collections::HashMap,
     env,
     path::PathBuf,
-    sync::{mpsc, Arc},
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        mpsc, Arc,
+    },
     thread,
 };
 
@@ -82,6 +85,7 @@ struct App {
     selection: Option<Selection>,
     startup_tab: Option<usize>,
     details_key: Option<(usize, String)>,
+    details_default_pending: bool,
     statistics_cache: Option<Result<DatasetStatistics, String>>,
     statistics_job: Option<mpsc::Receiver<Result<DatasetStatistics, String>>>,
     distribution_cache: Option<Result<DatasetDistribution, String>>,
@@ -93,7 +97,9 @@ struct App {
     selection_key: Option<(usize, String)>,
     axis_names: Vec<String>,
     region_cache: Vec<(RegionKey, Result<Region, String>)>,
-    heatmap_cache: Option<(HeatmapKey, Result<HeatmapImage, String>)>,
+    heatmap_cache: Option<(HeatmapKey, Result<Arc<HeatmapImage>, String>)>,
+    heatmap_tiles: Vec<(HeatmapKey, Arc<HeatmapImage>)>,
+    heatmap_tile_job: Option<(HeatmapKey, mpsc::Receiver<Result<HeatmapImage, String>>)>,
     heatmap_overview_cache: Option<(HeatmapOverviewKey, Result<HeatmapImage, String>)>,
     heatmap_overview_job: Option<(
         HeatmapOverviewKey,
@@ -108,11 +114,14 @@ struct App {
     heatmap_colormap: Option<([[f32; 4]; 3], String)>,
     profile_cache: Option<Result<ProfileData, String>>,
     volume_cache: Option<(VolumeKey, Result<Arc<ExactVolumeData>, String>)>,
+    volume_overview_cache: Option<(VolumeKey, Result<Arc<ExactVolumeData>, String>)>,
+    volume_refined_cache: Vec<(VolumeKey, Arc<ExactVolumeData>)>,
     volume_job: Option<(
         VolumeKey,
         mpsc::Receiver<Result<Arc<ExactVolumeData>, String>>,
     )>,
     volume_raster: Option<(VolumeRasterKey, RegisteredVolumeRaster)>,
+    volume_overview_raster: Option<(VolumeRasterKey, RegisteredVolumeRaster)>,
     volume_raster_job: Option<(VolumeRasterKey, mpsc::Receiver<Vec<u8>>)>,
     draft_volume: Option<VolumeSlice>,
     applied_volume: Option<VolumeSlice>,
@@ -157,6 +166,7 @@ struct App {
     dataset_browser: DatasetBrowser,
     browser_footer_height: f32,
     view: ViewMode,
+    view_load_generation: Arc<AtomicU64>,
     value_visibility: ValueVisibility,
     volume_visibility: ValueVisibility,
     sidebar_width: f32,
@@ -178,7 +188,9 @@ impl Application for App {
     fn frame(&mut self, frame: &mut FrameContext<'_>) -> Result<(), RunError> {
         self.advance_export();
         self.ensure_earth_texture(frame.gpu());
-        self.poll_volume_raster(frame.gpu());
+        if self.view == ViewMode::Spatial3d {
+            self.poll_volume_raster(frame.gpu());
+        }
         let ui = frame.ui();
         let plot_ctx = frame.addons().implot().expect("ImPlot add-on enabled");
         let plot_ui = ui.implot(plot_ctx);
@@ -202,7 +214,6 @@ struct FilePickerState {
     slot: usize,
     directory: PathBuf,
     entries: Vec<FilePickerEntry>,
-    filter: String,
     selected: Option<PathBuf>,
     error: Option<String>,
 }
@@ -281,6 +292,7 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
         startup_tab: selection.as_ref().map(|selected| selected.file),
         selection,
         details_key: None,
+        details_default_pending: true,
         statistics_cache: None,
         statistics_job: None,
         distribution_cache: None,
@@ -293,6 +305,8 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
         axis_names: Vec::new(),
         region_cache: Vec::new(),
         heatmap_cache: None,
+        heatmap_tiles: Vec::new(),
+        heatmap_tile_job: None,
         heatmap_overview_cache: None,
         heatmap_overview_job: None,
         heatmap_range_cache: None,
@@ -301,8 +315,11 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
         heatmap_colormap: None,
         profile_cache: None,
         volume_cache: None,
+        volume_overview_cache: None,
+        volume_refined_cache: Vec::new(),
         volume_job: None,
         volume_raster: None,
+        volume_overview_raster: None,
         volume_raster_job: None,
         draft_volume: None,
         applied_volume: None,
@@ -349,6 +366,7 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
         dataset_browser: DatasetBrowser::new(&settings.dataset_sources),
         browser_footer_height: 105.0,
         view: settings.default_view,
+        view_load_generation: Arc::new(AtomicU64::new(0)),
         value_visibility: ValueVisibility::default(),
         volume_visibility: ValueVisibility {
             fill: false,

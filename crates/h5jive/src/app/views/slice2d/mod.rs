@@ -6,7 +6,148 @@ mod legend;
 pub(crate) use layout::*;
 pub(crate) use legend::*;
 
+fn draw_native_heatmap_tile(
+    ui: &Ui,
+    plot_ui: &PlotUi<'_>,
+    image: &HeatmapImage,
+    rows: usize,
+    visible: [usize; 4],
+    limits: [f64; 4],
+    range: (f64, f64),
+    visibility: ValueVisibility,
+    palette: &Palette,
+) {
+    let [r0, r1, c0, c1] = image.bounds;
+    let (min, max) = range;
+    let scale_max = if max == min {
+        max + f64::EPSILON.max(max.abs() * 1e-12)
+    } else {
+        max
+    };
+    let label = format!("native tile {r0} {r1} {c0} {c1}");
+    HeatmapPlot::new(&label, &image.plotted, r1 - r0, c1 - c0)
+        .with_item_flags(ItemFlags::NO_LEGEND)
+        .with_scale(min, scale_max)
+        .with_bounds(c0 as f64, (rows - r1) as f64, c1 as f64, (rows - r0) as f64)
+        .without_value_labels()
+        .plot(plot_ui);
+    let draw = ui.get_window_draw_list();
+    let upper_left = plot_ui.plot_to_pixels_axes(
+        ImPlotPoint {
+            x: limits[0],
+            y: limits[3],
+        },
+        XAxis::X1,
+        YAxis::Y1,
+    );
+    let lower_right = plot_ui.plot_to_pixels_axes(
+        ImPlotPoint {
+            x: limits[1],
+            y: limits[2],
+        },
+        XAxis::X1,
+        YAxis::Y1,
+    );
+    let _clip = draw.push_clip_rect(upper_left, lower_right, true);
+    for row in r0.max(visible[0])..r1.min(visible[1]) {
+        for column in c0.max(visible[2])..c1.min(visible[3]) {
+            let value = image.values[(row - r0) * (c1 - c0) + column - c0];
+            let special = SpecialValue::from_value(value, image.fill_value);
+            if visibility.allows_class(value, special) && special.is_none() {
+                continue;
+            }
+            let first = plot_ui.plot_to_pixels_axes(
+                ImPlotPoint {
+                    x: column as f64,
+                    y: (rows - row) as f64,
+                },
+                XAxis::X1,
+                YAxis::Y1,
+            );
+            let last = plot_ui.plot_to_pixels_axes(
+                ImPlotPoint {
+                    x: (column + 1) as f64,
+                    y: (rows - row - 1) as f64,
+                },
+                XAxis::X1,
+                YAxis::Y1,
+            );
+            let color = if visibility.allows_class(value, special) {
+                special.unwrap().color(palette)
+            } else {
+                palette.background
+            };
+            draw.add_rect(first, last, color).filled(true).build();
+        }
+    }
+}
+
 impl App {
+    fn draw_cached_heatmap_tiles(
+        &self,
+        ui: &Ui,
+        plot_ui: &PlotUi<'_>,
+        selection: &Selection,
+        slice: &TableSlice,
+        rows: usize,
+        visible: [usize; 4],
+        limits: [f64; 4],
+        range: (f64, f64),
+    ) {
+        for (key, image) in &self.heatmap_tiles {
+            let [r0, r1, c0, c1] = key.bounds;
+            if key.file == selection.file
+                && key.path == selection.path
+                && &key.slice == slice
+                && r0 < visible[1]
+                && visible[0] < r1
+                && c0 < visible[3]
+                && visible[2] < c1
+            {
+                draw_native_heatmap_tile(
+                    ui,
+                    plot_ui,
+                    image,
+                    rows,
+                    visible,
+                    limits,
+                    range,
+                    self.value_visibility,
+                    &self.settings.palette,
+                );
+            }
+        }
+        if plot_ui.is_plot_hovered() {
+            let mouse = plot_ui.plot_mouse_position_axes(XAxis::X1, YAxis::Y1);
+            if mouse.x >= 0.0 && mouse.y >= 0.0 && mouse.y < rows as f64 {
+                let column = mouse.x.floor() as usize;
+                let row = rows - 1 - mouse.y.floor() as usize;
+                if let Some((key, image)) = self.heatmap_tiles.iter().rev().find(|(key, _)| {
+                    key.file == selection.file
+                        && key.path == selection.path
+                        && &key.slice == slice
+                        && row >= key.bounds[0]
+                        && row < key.bounds[1]
+                        && column >= key.bounds[2]
+                        && column < key.bounds[3]
+                }) {
+                    let [r0, _, c0, c1] = key.bounds;
+                    let value = image.values[(row - r0) * (c1 - c0) + column - c0];
+                    let special = SpecialValue::from_value(value, image.fill_value);
+                    if self.value_visibility.allows_class(value, special) {
+                        ui.set_tooltip(format!(
+                            "Row {row}, column {column}: {}",
+                            special.map_or_else(
+                                || format_value(value, self.settings.display_decimals),
+                                |special| special.label().to_owned()
+                            )
+                        ));
+                    }
+                }
+            }
+        }
+    }
+
     pub(crate) fn draw_heatmap(
         &mut self,
         ui: &Ui,
@@ -24,23 +165,38 @@ impl App {
         }
         let rows = slice.rows(shape);
         let columns = slice.columns(shape);
-        self.poll_heatmap_range(selection, shape, &slice);
+        let max_cells = self.settings.heatmap_max_cells.min(1_000_000);
+        let large_plane = rows.saturating_mul(columns) > max_cells;
+        if !large_plane {
+            self.poll_heatmap_range(selection, shape, &slice);
+        } else {
+            self.heatmap_range_job = None;
+        }
         let mut display_range = if self.settings.heatmap_auto_range {
-            self.heatmap_range_cache
-                .as_ref()
-                .and_then(|(_, result)| result.as_ref().ok().copied().flatten())
+            if large_plane {
+                self.heatmap_overview_cache
+                    .as_ref()
+                    .and_then(|(key, result)| {
+                        if key.file != selection.file
+                            || key.path != selection.path
+                            || key.slice != slice
+                        {
+                            return None;
+                        }
+                        result.as_ref().ok().and_then(|image| image.range)
+                    })
+            } else {
+                self.heatmap_range_cache
+                    .as_ref()
+                    .and_then(|(_, result)| result.as_ref().ok().copied().flatten())
+            }
         } else {
             Some((
                 self.settings.heatmap_value_min,
                 self.settings.heatmap_value_max,
             ))
         };
-        let range_provisional = self.settings.heatmap_auto_range
-            && self
-                .heatmap_range_cache
-                .as_ref()
-                .is_none_or(|(_, result)| result.is_err());
-        let max_cells = self.settings.heatmap_max_cells.min(1_000_000);
+        let range_provisional = self.settings.heatmap_auto_range && display_range.is_none();
         let available = ui.content_region_avail();
         let legend_width = self
             .settings
@@ -163,6 +319,20 @@ impl App {
             [limits.X.Min, limits.X.Max, limits.Y.Min, limits.Y.Max],
         );
         let visible_count = (visible[1] - visible[0]).saturating_mul(visible[3] - visible[2]);
+        if display_range.is_none() && range_provisional {
+            display_range = self.heatmap_tiles.iter().rev().find_map(|(cached, image)| {
+                let [r0, r1, c0, c1] = cached.bounds;
+                (cached.file == selection.file
+                    && cached.path == selection.path
+                    && cached.slice == slice
+                    && r0 < visible[1]
+                    && visible[0] < r1
+                    && c0 < visible[3]
+                    && visible[2] < c1)
+                    .then_some(image.range)
+                    .flatten()
+            });
+        }
         if visible_count > 0 && visible_count <= max_cells {
             let bounds = heatmap_tile_bounds(rows, columns, visible, max_cells);
             let key = HeatmapKey {
@@ -171,91 +341,32 @@ impl App {
                 slice: slice.clone(),
                 bounds,
             };
-            if self
+            self.poll_heatmap_tile(
+                key.clone(),
+                shape,
+                display_range.map_or(0.0, |(min, _)| min),
+            );
+            let tile = self
                 .heatmap_cache
                 .as_ref()
-                .is_none_or(|(cached, _)| cached != &key)
-            {
-                self.heatmap_cache = Some((
-                    key,
-                    load_heatmap_tile(
-                        &self.files[selection.file],
-                        &selection.path,
-                        shape,
-                        &slice,
-                        bounds,
-                        display_range.map_or(0.0, |(min, _)| min),
-                    ),
-                ));
-            }
-            if let Ok(image) = &self.heatmap_cache.as_ref().unwrap().1 {
+                .filter(|(cached, _)| cached == &key)
+                .map(|(_, result)| result);
+            if let Some(Ok(image)) = tile {
                 let [r0, r1, c0, c1] = image.bounds;
                 if display_range.is_none() && range_provisional {
-                    extend_finite_range(&mut display_range, &image.values, image.fill_value);
+                    display_range = image.range;
                 }
-                let (min, max) = display_range.unwrap_or((0.0, 1.0));
-                let scale_max = if max == min {
-                    max + f64::EPSILON.max(max.abs() * 1e-12)
-                } else {
-                    max
-                };
-                HeatmapPlot::new("values", &image.plotted, r1 - r0, c1 - c0)
-                    .with_item_flags(ItemFlags::NO_LEGEND)
-                    .with_scale(min, scale_max)
-                    .with_bounds(c0 as f64, (rows - r1) as f64, c1 as f64, (rows - r0) as f64)
-                    .without_value_labels()
-                    .plot(plot_ui);
-                let draw = ui.get_window_draw_list();
-                let upper_left = plot_ui.plot_to_pixels_axes(
-                    ImPlotPoint {
-                        x: limits.X.Min,
-                        y: limits.Y.Max,
-                    },
-                    XAxis::X1,
-                    YAxis::Y1,
+                draw_native_heatmap_tile(
+                    ui,
+                    plot_ui,
+                    image,
+                    rows,
+                    visible,
+                    [limits.X.Min, limits.X.Max, limits.Y.Min, limits.Y.Max],
+                    display_range.unwrap_or((0.0, 1.0)),
+                    self.value_visibility,
+                    &self.settings.palette,
                 );
-                let lower_right = plot_ui.plot_to_pixels_axes(
-                    ImPlotPoint {
-                        x: limits.X.Max,
-                        y: limits.Y.Min,
-                    },
-                    XAxis::X1,
-                    YAxis::Y1,
-                );
-                let _clip = draw.push_clip_rect(upper_left, lower_right, true);
-                for row in r0..r1 {
-                    for column in c0..c1 {
-                        let value = image.values[(row - r0) * (c1 - c0) + column - c0];
-                        let special = SpecialValue::from_value(value, image.fill_value);
-                        if self.value_visibility.allows_class(value, special) && special.is_none() {
-                            continue;
-                        }
-                        let first = plot_ui.plot_to_pixels_axes(
-                            ImPlotPoint {
-                                x: column as f64,
-                                y: (rows - row) as f64,
-                            },
-                            XAxis::X1,
-                            YAxis::Y1,
-                        );
-                        let last = plot_ui.plot_to_pixels_axes(
-                            ImPlotPoint {
-                                x: (column + 1) as f64,
-                                y: (rows - row - 1) as f64,
-                            },
-                            XAxis::X1,
-                            YAxis::Y1,
-                        );
-                        let color = if self.value_visibility.allows_class(value, special) {
-                            special.unwrap().color(&self.settings.palette)
-                        } else {
-                            self.settings.palette.background
-                        };
-                        draw.add_rect(first, last, color).filled(true).build();
-                    }
-                }
-                drop(_clip);
-                drop(draw);
                 if plot_ui.is_plot_hovered() {
                     let mouse = plot_ui.plot_mouse_position_axes(XAxis::X1, YAxis::Y1);
                     if mouse.x >= 0.0
@@ -284,7 +395,45 @@ impl App {
                         }
                     }
                 }
-            } else if let Err(error) = &self.heatmap_cache.as_ref().unwrap().1 {
+            } else {
+                if let Some(Ok(image)) = self
+                    .heatmap_overview_cache
+                    .as_ref()
+                    .filter(|(cached, _)| {
+                        cached.file == selection.file
+                            && cached.path == selection.path
+                            && cached.slice == slice
+                    })
+                    .map(|(_, result)| result)
+                {
+                    let (min, max) = display_range.unwrap_or((0.0, 1.0));
+                    let scale_max = if max == min {
+                        max + f64::EPSILON.max(max.abs() * 1e-12)
+                    } else {
+                        max
+                    };
+                    HeatmapPlot::new(
+                        "overview while loading",
+                        &image.plotted,
+                        image.grid[0],
+                        image.grid[1],
+                    )
+                    .with_item_flags(ItemFlags::NO_LEGEND)
+                    .with_scale(min, scale_max)
+                    .with_bounds(0.0, 0.0, columns as f64, rows as f64)
+                    .without_value_labels()
+                    .plot(plot_ui);
+                }
+                self.draw_cached_heatmap_tiles(
+                    ui,
+                    plot_ui,
+                    selection,
+                    &slice,
+                    rows,
+                    visible,
+                    [limits.X.Min, limits.X.Max, limits.Y.Min, limits.Y.Max],
+                    display_range.unwrap_or((0.0, 1.0)),
+                );
                 let pos = plot_ui.plot_to_pixels_axes(
                     ImPlotPoint {
                         x: limits.X.Min,
@@ -296,7 +445,10 @@ impl App {
                 ui.get_window_draw_list().add_text(
                     [pos[0] + 10.0, pos[1] + 10.0],
                     self.settings.palette.text,
-                    error,
+                    match tile {
+                        Some(Err(error)) => error.as_str(),
+                        _ => "Loading 2D tile...",
+                    },
                 );
             }
         } else if visible_count > max_cells {
@@ -315,7 +467,7 @@ impl App {
             {
                 Some(Ok(image)) => {
                     if display_range.is_none() && range_provisional {
-                        extend_finite_range(&mut display_range, &image.values, image.fill_value);
+                        display_range = image.range;
                     }
                     let (min, max) = display_range.unwrap_or((0.0, 1.0));
                     HeatmapPlot::new("overview", &image.plotted, image.grid[0], image.grid[1])
@@ -419,6 +571,16 @@ impl App {
                     );
                 }
             }
+            self.draw_cached_heatmap_tiles(
+                ui,
+                plot_ui,
+                selection,
+                &slice,
+                rows,
+                visible,
+                [limits.X.Min, limits.X.Max, limits.Y.Min, limits.Y.Max],
+                display_range.unwrap_or((0.0, 1.0)),
+            );
         }
         drop(_plot);
         ui.set_cursor_screen_pos([

@@ -97,11 +97,12 @@ the [getting started guide](docs/src/getting-started.md).
 ```sh
 ./h5jive.sh --build
 ./h5jive.sh --run
-./h5jive.sh --run examples/space_demo.hdf5:/satellite/gome2/so2_slant_column
+./h5jive.sh --run examples/gome2_band3_20130106_gome.nc:/MODE_NADIR/BAND_3/OBSERVATIONS/radiance
 ```
 
 The repository includes a deterministic [HDF5 demo](examples/space_demo.hdf5)
-and [NetCDF demo](examples/space_observation.nc). You can inspect a file tree
+and a [GOME-2 Band 3 sample](examples/gome2_band3_20130106_gome.nc) extracted
+from a real Level 1B product. You can inspect a file tree
 without opening a window:
 
 ```sh

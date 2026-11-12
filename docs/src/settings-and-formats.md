@@ -102,7 +102,7 @@ validation step, not the link between variables. Conventional coordinate and
 bounds names remain a fallback for older files without those attributes.
 
 NetCDF groups can put observations and geolocation in sibling groups. The
-bundled GOME, SCIAMACHY, GOME-2, and FDR4ATMOS formats use `OBSERVATIONS`
+bundled GOME, SCIAMACHY, GOME-2, Sentinel-5P TROPOMI, and FDR4ATMOS formats use `OBSERVATIONS`
 and sibling `GEODATA` groups under each band. Each format has its own DIPL
 entry in `settings/dataset/formats/`. Its `identification` subnode specifies
 patterns for root `platform`, `sensor`, and `product_type` attributes, plus a
@@ -132,5 +132,23 @@ have separate `pinned_default` settings under `viewer.views.world_map` and
 controls apply when **Update** is clicked. Axis names come from NetCDF or HDF5
 dimension metadata. Synthetic dimension scales are omitted from value labels.
 
-The bundled GOME-2 demo contains measured SO₂ slant-column retrievals, pixel
-centers, and four footprint corners copied from an orbit extract.
+The bundled GOME-2 Band 3 sample contains radiance channels, pixel centers,
+four footprint corners, and scan direction copied from a Level 1B product.
+The local Sentinel-5P source indexes TROPOMI Level 1B radiance bands under
+`../mock_datasets/S5P`. Their radiance arrays have time, scanline, ground-pixel,
+and spectral axes; the sibling `GEODATA` arrays provide pixel centers and four
+corners. These products do not contain a per-pixel forward/backward flag, so the
+scan-direction controls are unavailable.
+
+For any geolocated dataset with four-corner pixel bounds, the map and globe
+combine neighboring source pixels into display cells when the pixel count
+exceeds the current display budget. Each cell uses the source block's outer
+geographic corners and the mean of its valid values. The corner directions are
+derived from nearby pixel centers, so formats can use different corner orders.
+Cells containing multiple scan directions are marked mixed and appear in Both
+mode; zooming in separates them into smaller cells.
+As zoom increases, the cells shrink; at full detail, each source pixel is drawn
+with its own bounds. Datasets without bounds keep point sampling. Set
+`viewer.views.world_map.max_points` in `settings/viewers/world_map.dip` to
+control the whole-world cell count and `zoom_detail_factor` to control how
+quickly detail grows with zoom. Both settings apply to map and globe views.

@@ -22,6 +22,11 @@ fn find<'a>(entry: &'a Entry, path: &str) -> &'a Entry {
 fn demo_opens_with_expected_axes_and_sentinel_regions() {
     let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/space_demo.hdf5");
     let file = File::open(&path).expect("open committed demo");
+    assert!(file
+        .tree
+        .children
+        .iter()
+        .all(|entry| entry.name != "satellite"));
     let info = file.dataset_info("/observations/swath_2d").unwrap();
     assert_eq!(info.shape, [32, 48]);
     assert_eq!(info.elements, 1536);

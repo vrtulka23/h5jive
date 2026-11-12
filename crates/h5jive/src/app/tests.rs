@@ -37,17 +37,14 @@ fn test_settings() -> &'static Settings {
 #[test]
 fn startup_dataset_suffix_selects_a_real_dataset() {
     let demo = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/space_demo.hdf5");
-    let (file_path, dataset) = parse_input_spec(&format!(
-        "{}:/satellite/gome2/so2_slant_column",
-        demo.display()
-    ))
-    .unwrap();
+    let (file_path, dataset) =
+        parse_input_spec(&format!("{}:/observations/swath_2d", demo.display())).unwrap();
     let file = File::open(&file_path).unwrap();
     let selected = resolve_startup_selection(&[file], &[(file_path, dataset)])
         .unwrap()
         .unwrap();
     assert_eq!(selected.file, 0);
-    assert_eq!(selected.path, "/satellite/gome2/so2_slant_column");
+    assert_eq!(selected.path, "/observations/swath_2d");
 }
 
 #[test]
@@ -59,7 +56,7 @@ fn startup_dataset_suffix_rejects_missing_and_group_paths() {
         .unwrap_err()
         .contains("not found"));
     let file = File::open(&file_path).unwrap();
-    let inputs = [(file_path, Some("/satellite/gome2".to_owned()))];
+    let inputs = [(file_path, Some("/observations".to_owned()))];
     assert!(resolve_startup_selection(&[file], &inputs)
         .unwrap_err()
         .contains("not a dataset"));
@@ -85,7 +82,7 @@ fn startup_dataset_suffix_keeps_windows_drive_and_plain_paths() {
 #[test]
 fn dataset_formats_load_from_dipl() {
     let rules = &test_settings().dataset_rules;
-    assert_eq!(rules.len(), 5);
+    assert_eq!(rules.len(), 6);
     assert!(rules.iter().any(|rule| {
         rule.file_glob == "ER2_RPRO_GOM_L1B*.nc"
             && rule.platform == "ERS-2"
@@ -101,6 +98,12 @@ fn dataset_formats_load_from_dipl() {
     assert_eq!(scan.forward_values, [1]);
     assert_eq!(scan.backward_values, [2]);
     assert_eq!(scan.default_filter, ScanFilter::Forward);
+    assert!(rules.iter().any(|rule| {
+        rule.file_glob == "S5P_*_L1B_RA_BD?_*.nc"
+            && rule.sensor == "TROPOMI"
+            && rule.observation_group == "OBSERVATIONS"
+            && rule.coordinate_group == "GEODATA"
+    }));
     let scia = rules
         .iter()
         .find(|rule| rule.sensor == "SCIAMACHY")
@@ -111,6 +114,57 @@ fn dataset_formats_load_from_dipl() {
     assert_eq!(scan.forward_values, [0]);
     assert_eq!(scan.backward_values, [1]);
     assert_eq!(scan.default_filter, ScanFilter::Forward);
+}
+
+#[test]
+fn s5p_mock_source_indexes_local_band_products_when_available() {
+    let source = test_settings()
+        .dataset_sources
+        .iter()
+        .find(|source| source.id == "mock_s5p")
+        .unwrap();
+    if !source.root.is_dir() {
+        return;
+    }
+    let (sender, _receiver) = std::sync::mpsc::channel();
+    let products =
+        super::scan_source(source, &sender, &std::sync::atomic::AtomicBool::new(false)).unwrap();
+    for band in [3, 4, 5] {
+        let prefix = format!("S5P_OFFL_L1B_RA_BD{band}_20260130");
+        let product = products
+            .iter()
+            .find(|product| product.filename.starts_with(&prefix))
+            .unwrap();
+        assert_eq!(product.year, "2026");
+        assert_eq!(product.month, "01");
+        assert_eq!(product.day, "30");
+        assert_eq!(product.orbit, "43003");
+    }
+}
+
+#[test]
+fn s5p_radiance_reads_a_zoomed_2d_tile_when_available() {
+    let directory = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../mock_datasets/S5P");
+    let Some(path) = std::fs::read_dir(directory).ok().and_then(|entries| {
+        entries
+            .filter_map(Result::ok)
+            .map(|entry| entry.path())
+            .find(|path| {
+                path.file_name()
+                    .is_some_and(|name| name.to_string_lossy().starts_with("S5P_OFFL_L1B_RA_BD3_"))
+            })
+    }) else {
+        return;
+    };
+    let file = File::open(&path).unwrap();
+    let dataset = "/BAND3_RADIANCE/STANDARD_MODE/OBSERVATIONS/radiance";
+    let shape = file.dataset_info(dataset).unwrap().shape;
+    let slice = TableSlice::with_leading_time(&shape, true, PinnedDefault::Middle);
+    let image =
+        load_heatmap_tile(&file, dataset, &shape, &slice, [1800, 1832, 200, 264], 0.0).unwrap();
+    assert_eq!(image.grid, [32, 64]);
+    assert_eq!(image.values.len(), 2048);
+    assert!(image.values.iter().any(|value| value.is_finite()));
 }
 
 #[test]
@@ -197,6 +251,19 @@ fn mock_product_formats_discover_geolocation_when_available() {
                 "SCIAMACHY" => "/MODE_NADIR/BAND_09/OBSERVATIONS/radiance",
                 "GOME2" => "/MODE_NADIR/BAND_1A/OBSERVATIONS/radiance",
                 "FDR" => "/GOME/NIR/OBSERVATIONS/radiance_fdr",
+                "S5P" => match file_path
+                    .file_name()
+                    .unwrap()
+                    .to_string_lossy()
+                    .split("_L1B_RA_BD")
+                    .nth(1)
+                    .and_then(|suffix| suffix.chars().next())
+                {
+                    Some('3') => "/BAND3_RADIANCE/STANDARD_MODE/OBSERVATIONS/radiance",
+                    Some('4') => "/BAND4_RADIANCE/STANDARD_MODE/OBSERVATIONS/radiance",
+                    Some('5') => "/BAND5_RADIANCE/STANDARD_MODE/OBSERVATIONS/radiance",
+                    _ => continue,
+                },
                 _ => continue,
             };
             let file = File::open(&file_path).unwrap();
@@ -281,6 +348,10 @@ fn geospatial_views_start_at_the_middle_of_the_fourth_axis() {
     let shape = [1, 219, 3, 1024];
     let mut map = GeoViewControls::new(true);
     let mut globe = GeoViewControls::new(true);
+    for controls in [&map, &globe] {
+        assert_eq!(controls.applied.opacity, 0.5);
+        assert_eq!(controls.applied.pixel_style, 2);
+    }
     assert_eq!(test_settings().map_pinned_default, PinnedDefault::Middle);
     assert_eq!(test_settings().globe_pinned_default, PinnedDefault::Middle);
     map.sync_source(
