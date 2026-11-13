@@ -1,7 +1,6 @@
 ?descr "H5Jive viewer settings"
 ?authors "H5Jive contributors"
 ?license "MIT"
-?version "0.1.1"
 ?url "https://github.com/vrtulka23/h5jive"
 application
   title str = "H5Jive"
