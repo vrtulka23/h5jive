@@ -46,15 +46,16 @@ Each source declares its own format link, for example
 `format` node; the link target is declared in the source because different
 repositories can use different formats.
 
-The bundled mock registrations use `root = "./"` as a portable default. The
-paths to `../mock_datasets` are set in `settings/overrides.dip`; edit those
-assignments for another host. Relative roots are resolved from the `settings`
-directory. A native release includes a blank override file beside its
-executable; the user installer preserves local edits when upgrading. The
-browser scans registered roots in background workers and stores
-one index per source under `settings/.cache/datasets/`. It loads a cached index
-on startup, scans automatically when no cache exists, and offers **Refresh
-index** and **Cancel scan**. Scanning reads directory entries and file metadata;
+The bundled mock registrations use `root = "./"` as a portable default. Put
+your local dataset roots in `settings/overrides.dip`; the app creates this
+Git-ignored file on first launch if it is missing. Relative roots are resolved
+from the `settings` directory. A native
+release includes a blank override file beside its executable; the user
+installer preserves local edits when upgrading. The browser stores one index
+per source under `settings/.cache/datasets/` and loads a cached index on
+startup. If no cache exists, select the source and click **Refresh index** to
+start a background scan. **Cancel scan** stops it. Scanning reads directory
+entries and file metadata;
 it does not open every product. Missing mounts are marked red while their
 cached products remain listed. The table supports searching, sorting, and
 column resizing. **Open as A/B** assigns the selected product to the inspector

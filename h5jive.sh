@@ -7,6 +7,7 @@ cd "$(dirname "$0")"
 usage() {
   cat <<'EOF'
 Usage: ./h5jive.sh [-b|--build] [-r|--run] [--view-VIEW] [--backtrace|--no-backtrace] [-c|--clean] [FILE_A[:/DATASET] [FILE_B[:/DATASET]]]
+       ./h5jive.sh --website
 
   -b, --build   Build the release viewer; run it if file paths or --run are supplied
   -r, --run     Run the existing build; use the bundled demo if no files are supplied
@@ -15,6 +16,7 @@ Usage: ./h5jive.sh [-b|--build] [-r|--run] [--view-VIEW] [--backtrace|--no-backt
   --view-VIEW   Open the selected dataset in a specific view (requires :/DATASET)
                 VIEW: data, 1d-profiles, 2d-slice, 3d, world-map, globe
   -c, --clean   Remove Cargo build output and exit
+  --website     Start the local website preview server (Ctrl+C to stop)
   -h, --help    Show this help
 
 With no options or file paths, this help is shown. Supply one or two HDF5 or
@@ -26,6 +28,7 @@ EOF
 build=false
 run=false
 clean=false
+website=false
 backtrace_override=
 view_override=
 files=()
@@ -34,6 +37,7 @@ while (($#)); do
     -b|--build) build=true ;;
     -r|--run) run=true ;;
     -c|--clean) clean=true ;;
+    --website) website=true ;;
     --backtrace) backtrace_override=1 ;;
     --no-backtrace) backtrace_override=0 ;;
     --view-data|--view-1d-profiles|--view-2d-slice|--view-3d|--view-world-map|--view-globe)
@@ -49,6 +53,23 @@ while (($#)); do
   esac
   shift
 done
+
+if "$website"; then
+  if "$build" || "$run" || "$clean" || [[ -n $backtrace_override || -n $view_override ]] || ((${#files[@]} > 0)); then
+    echo "--website cannot be combined with viewer options or input files." >&2
+    exit 2
+  fi
+  if ! command -v npm >/dev/null 2>&1; then
+    echo "npm is required to run the website preview." >&2
+    exit 1
+  fi
+  if [[ ! -d website/node_modules ]]; then
+    echo "Website dependencies are missing. Run: cd website && npm install" >&2
+    exit 1
+  fi
+  cd website
+  exec npm run dev -- --host 127.0.0.1
+fi
 
 if ((${#files[@]} > 2)); then
   echo "H5Jive accepts at most two input files." >&2

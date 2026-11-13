@@ -1,10 +1,11 @@
 ---
+import { viewPages } from '../data/views';
+
 const features = [
   { n: '01', title: 'Inspect the structure', body: 'Move through groups, datasets, coordinate axes, attributes, and statistics without losing the context of the file.' },
   { n: '02', title: 'Read data in its shape', body: 'Switch between tables, profiles, 2D slices, and 3D voxel previews. Pin dimensions and choose the axes that matter.' },
   { n: '03', title: 'See where it happened', body: 'Map satellite observations with real pixel footprints when latitude and longitude bounds are available.' },
 ];
-const views = ['Table', 'Profiles', '2D slice', '3D volume', 'World map'];
 ---
 
 <!doctype html>
@@ -17,6 +18,7 @@ const views = ['Table', 'Profiles', '2D slice', '3D volume', 'World map'];
     <link rel="icon" type="image/png" href="./h5jive-icon.png" />
     <link rel="stylesheet" href="./site.css" />
     <link rel="stylesheet" href="./layout.css" />
+    <script src="./carousel.js" defer></script>
     <title>H5Jive — Dig into your data</title>
   </head>
   <body>
@@ -24,6 +26,7 @@ const views = ['Table', 'Profiles', '2D slice', '3D volume', 'World map'];
       <a class="brand" href="#top" aria-label="H5Jive home"><img class="brand-icon" src="./h5jive.png" width="42" height="42" alt="" /> H5Jive</a>
       <nav aria-label="Main navigation">
         <a href="#capabilities">Capabilities</a>
+        <a href="#views">Views</a>
         <a href="#data">Data</a>
         <a href="./guide/">Guide</a>
         <a class="nav-cta" href="https://github.com/vrtulka23/h5jive">Source code <span aria-hidden="true">↗</span></a>
@@ -47,12 +50,21 @@ const views = ['Table', 'Profiles', '2D slice', '3D volume', 'World map'];
           </div>
         </div>
 
-        <figure class="preview">
-          <div class="map-art">
-            <img src="./screenshot-world.png" width="2564" height="1508" alt="H5Jive world map showing GOME-2 radiance pixels over Earth" loading="eager" decoding="async" />
+        <div class="carousel" role="region" aria-label="H5Jive views" aria-roledescription="carousel">
+          <div class="preview carousel-track" id="view-carousel">
+            {viewPages.map((shot, i) => <figure class="carousel-slide" aria-label={`${i + 1} of ${viewPages.length}: ${shot.title}`}>
+              <div class="map-art"><img src={`./${shot.image}`} width="2564" height="1508" alt={shot.alt} loading={i < 2 ? 'eager' : 'lazy'} decoding="async" /></div>
+              <figcaption><span><b class="dot"></b> H5JIVE <span class="caption-divider">/</span> {shot.title.toUpperCase()}</span><a href={`./views/${shot.slug}/`}>Explore this view <span aria-hidden="true">↗</span></a></figcaption>
+            </figure>)}
           </div>
-          <figcaption><span><b class="dot"></b> GOME-2 BAND 3 <span class="caption-divider">/</span> WORLD MAP</span><span>REAL DATA · REAL PIXEL FOOTPRINTS</span></figcaption>
-        </figure>
+          <div class="carousel-controls">
+            <button class="carousel-arrow" type="button" data-carousel-prev aria-label="Previous view">←</button>
+            <div class="carousel-dots" aria-label="Choose a view">
+              {viewPages.map((shot, i) => <button class="carousel-dot" type="button" data-carousel-index={i} aria-label={`Show ${shot.title.toLowerCase()} view`} aria-current={i === 0 ? 'true' : undefined}><span></span></button>)}
+            </div>
+            <button class="carousel-arrow" type="button" data-carousel-next aria-label="Next view">→</button>
+          </div>
+        </div>
       </section>
 
       <section class="ticker" aria-label="Supported formats and views"><div class="ticker-inner">HDF5 <b>✳</b> NETCDF <b>✳</b> MULTIDIMENSIONAL ARRAYS <b>✳</b> SCAN PIXEL FOOTPRINTS <b>✳</b> HDF5 <b>✳</b> NETCDF <b>✳</b> MULTIDIMENSIONAL ARRAYS <b>✳</b> SCAN PIXEL FOOTPRINTS</div></section>
@@ -68,7 +80,7 @@ const views = ['Table', 'Profiles', '2D slice', '3D volume', 'World map'];
         </div>
       </section>
 
-      <section class="views wrap"><p class="eyebrow">ONE FILE, MANY ANGLES</p><div class="view-chips">{views.map((view, i) => <span class:list={["chip", i === 4 && "selected"]}>{view}<small>0{i+1}</small></span>)}</div></section>
+      <section id="views" class="views wrap"><p class="eyebrow">ONE FILE, MANY ANGLES</p><div class="view-chips">{viewPages.map((view, i) => <a class="chip" href={`./views/${view.slug}/`}>{view.title}<small>0{i+1}</small></a>)}</div></section>
 
       <section class="closing wrap"><img class="closing-icon" src="./h5jive.png" width="82" height="82" alt="" /><div><p class="eyebrow">OPEN THE PROJECT</p><h2>Start with a dataset.<br /><em>See where it leads.</em></h2></div><div class="closing-actions"><a class="button primary" href="./guide/">Read the guide <span>→</span></a><a class="text-link" href="https://github.com/vrtulka23/h5jive">Browse source <span>↗</span></a></div></section>
     </main>

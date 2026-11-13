@@ -34,7 +34,11 @@ values. The colored buttons also identify the special-value colors.
   remaining dimensions to selected indexes. When the first dimension is time,
   the table initially shows the next two dimensions and pins the time index.
   If only one dimension remains, it appears as a single column.
-- **Profiles:** plot one or more lines from an array against an index axis.
+- **Profiles:** plot a single line from the selected dataset against an index
+  axis while every other dimension is pinned. Choose a comparison axis and
+  indexes to plot multiple lines from that same dataset. When the first
+  dimension is time, the initial plot axis is the second dimension and time
+  starts pinned.
 - **2D slice:** choose the displayed axes and pinned dimensions; adjust the
   colormap and value range. Large arrays first show a sampled overview; visible
   zoom tiles load in the background. Automatic colors use the overview range

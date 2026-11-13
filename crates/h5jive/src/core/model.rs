@@ -97,15 +97,13 @@ pub(crate) struct ProfileSlice {
     pub(crate) y_indexes: String,
 }
 impl ProfileSlice {
-    pub(crate) fn new(shape: &[usize], default: PinnedDefault) -> Self {
+    pub(crate) fn new(shape: &[usize], first_is_time: bool, default: PinnedDefault) -> Self {
         let pinned = pinned_indices(shape, default);
-        let y_axis = (shape.len() > 1).then_some(1);
-        let y_indexes = y_axis.map_or_else(String::new, |axis| pinned[axis].to_string());
         Self {
-            x_axis: 0,
-            y_axis,
+            x_axis: usize::from(first_is_time && shape.len() >= 2),
+            y_axis: None,
             pinned,
-            y_indexes,
+            y_indexes: String::new(),
         }
     }
 }

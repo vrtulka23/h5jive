@@ -504,6 +504,10 @@ impl Settings {
             std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../settings/DIPfile")
         };
         let project = dunce::simplified(&project);
+        let override_path = project.parent().unwrap().join("overrides.dip");
+        if !override_path.exists() {
+            std::fs::write(&override_path, "# Local settings overrides\n")?;
+        }
         let dip = Project::load(project)?;
         let values = ViewerValues(&dip);
         let default_view = values.string("application.default_view")?;

@@ -1,0 +1,68 @@
+---
+import { viewPages } from '../../data/views';
+
+export function getStaticPaths() {
+  return viewPages.map((view) => ({ params: { mode: view.slug }, props: { view } }));
+}
+
+const { view } = Astro.props;
+const currentIndex = viewPages.findIndex((item) => item.slug === view.slug);
+const previous = viewPages[(currentIndex - 1 + viewPages.length) % viewPages.length];
+const next = viewPages[(currentIndex + 1) % viewPages.length];
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#081b2d" />
+    <meta name="description" content={`${view.title} in H5Jive: ${view.summary}`} />
+    <link rel="icon" type="image/png" href="../../h5jive-icon.png" />
+    <link rel="stylesheet" href="../../site.css" />
+    <link rel="stylesheet" href="../../layout.css" />
+    <link rel="stylesheet" href="../../view-page.css" />
+    <title>{view.title} — H5Jive views</title>
+  </head>
+  <body>
+    <header class="topbar wrap">
+      <a class="brand" href="../../" aria-label="H5Jive home"><img class="brand-icon" src="../../h5jive.png" width="42" height="42" alt="" /> H5Jive</a>
+      <nav aria-label="Main navigation">
+        <a href="../../#capabilities">Capabilities</a>
+        <a href="../../#views">Views</a>
+        <a href="../../guide/">Guide</a>
+        <a class="nav-cta" href="https://github.com/vrtulka23/h5jive">Source code <span aria-hidden="true">↗</span></a>
+      </nav>
+    </header>
+
+    <main>
+      <div class="mode-page wrap">
+        <nav class="mode-breadcrumb" aria-label="Breadcrumb"><a href="../../">Home</a><span aria-hidden="true">/</span><a href="../../#views">Views</a><span aria-hidden="true">/</span><span aria-current="page">{view.title}</span></nav>
+
+        <section class="mode-hero" aria-labelledby="mode-title">
+          <div class="mode-heading"><p class="eyebrow">VIEW 0{currentIndex + 1} / 06 · {view.kicker.toUpperCase()}</p><h1 id="mode-title">{view.title}<span class="mode-title-dot">.</span></h1></div>
+          <p class="mode-summary">{view.summary}</p>
+        </section>
+
+        <figure class="mode-preview"><img src={`../../${view.image}`} width="2564" height="1508" alt={view.alt} decoding="async" /><figcaption><span>H5JIVE <span class="caption-divider">/</span> {view.title.toUpperCase()}</span><span>{view.caption}</span></figcaption></figure>
+
+        <section class="mode-content" aria-labelledby="mode-features">
+          <div class="mode-section-head"><p class="eyebrow">WHAT YOU CAN DO</p><h2 id="mode-features">Explore this view.</h2></div>
+          <div class="mode-points">{view.points.map(([title, body], i) => <article class="mode-point"><span class="mode-number">0{i + 1}</span><h3>{title}</h3><p>{body}</p></article>)}</div>
+        </section>
+
+        <section class="mode-workflow" aria-labelledby="mode-workflow-title">
+          <div><p class="eyebrow">GET STARTED</p><h2 id="mode-workflow-title">A simple path in.</h2></div>
+          <div><ol>{view.workflow.map((step) => <li>{step}</li>)}</ol><p class="mode-note">{view.note}</p></div>
+        </section>
+
+        <nav class="mode-neighbors" aria-label="Other views">
+          <a href={`../${previous.slug}/`}><span>← PREVIOUS VIEW</span><strong>{previous.title}</strong></a>
+          <a href={`../${next.slug}/`}><span>NEXT VIEW →</span><strong>{next.title}</strong></a>
+        </nav>
+        <div class="mode-guide"><p>Want the full list of controls and examples?</p><a class="button primary" href="../../guide/exploring-data.html">Read the exploring data guide <span>→</span></a></div>
+      </div>
+    </main>
+    <footer class="footer wrap"><a class="brand" href="../../"><img class="brand-icon" src="../../h5jive.png" width="32" height="32" alt="" /> H5Jive</a><span>Dig into your data.</span><span>© H5Jive contributors</span></footer>
+  </body>
+</html>

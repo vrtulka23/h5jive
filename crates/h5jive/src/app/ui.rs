@@ -369,6 +369,35 @@ pub(super) fn draw_loading_indicator(ui: &Ui, top_right: [f32; 2], label: &str, 
     }
 }
 
+pub(super) fn draw_error_indicator(ui: &Ui, top_right: [f32; 2], label: &str, palette: &Palette) {
+    let draw = ui.get_foreground_draw_list();
+    let text_size = ui.calc_text_size(label);
+    let height = 25.0;
+    let width = text_size[0] + 42.0;
+    let min = [top_right[0] - width, top_right[1] - height * 0.5];
+    let max = [top_right[0], top_right[1] + height * 0.5];
+    let color = [0.95, 0.38, 0.33, 1.0];
+    let rounding = ui.clone_style().frame_rounding();
+    draw.add_rect(min, max, palette.panel)
+        .rounding(rounding)
+        .filled(true)
+        .build();
+    draw.add_rect(min, max, color)
+        .rounding(rounding)
+        .thickness(1.5)
+        .build();
+    draw.add_text(
+        [min[0] + 14.0, top_right[1] - text_size[1] * 0.5],
+        color,
+        "!",
+    );
+    draw.add_text(
+        [min[0] + 32.0, top_right[1] - text_size[1] * 0.5],
+        palette.text,
+        label,
+    );
+}
+
 pub(crate) fn draw_view_icon(
     ui: &Ui,
     mode: ViewMode,

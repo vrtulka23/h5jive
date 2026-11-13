@@ -401,8 +401,8 @@ impl App {
                 TableSlice::for_heatmap(shape, first_is_time, self.settings.pinned_default)
             });
             self.applied_slice = self.draft_slice.clone();
-            self.draft_profile =
-                selected_shape.map(|shape| ProfileSlice::new(shape, self.settings.pinned_default));
+            self.draft_profile = selected_shape
+                .map(|shape| ProfileSlice::new(shape, first_is_time, self.settings.pinned_default));
             self.applied_profile = self.draft_profile.clone();
             self.draft_volume = selected_shape
                 .map(|shape| VolumeSlice::new(shape, first_is_time, self.settings.pinned_default));

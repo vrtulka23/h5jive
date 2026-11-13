@@ -489,7 +489,7 @@ fn theme_colors_pop_in_reverse_scope_order() {
             ],
         }],
     };
-    let slice = ProfileSlice::new(&[2], PinnedDefault::Start);
+    let slice = ProfileSlice::new(&[2], false, PinnedDefault::Start);
     let mut visibility = ValueVisibility::default();
     ui.window("Profile smoke")
         .size([500.0, 350.0], dear_app::imgui::Condition::Always)
@@ -647,6 +647,18 @@ fn pinned_defaults_choose_start_middle_or_end() {
 
 #[test]
 fn profile_indexes_and_pinned_dimensions_select_distinct_lines() {
+    let default_slice = ProfileSlice::new(&[8, 32, 48, 16], false, PinnedDefault::Start);
+    assert_eq!(default_slice.x_axis, 0);
+    assert_eq!(default_slice.y_axis, None);
+    let time_slice = ProfileSlice::new(&[8, 32, 48, 16], true, PinnedDefault::Middle);
+    assert_eq!(time_slice.x_axis, 1);
+    assert_eq!(time_slice.pinned[0], 4);
+    assert_eq!(time_slice.y_axis, None);
+    assert_eq!(
+        ProfileSlice::new(&[8], true, PinnedDefault::Start).x_axis,
+        0
+    );
+
     assert_eq!(parse_profile_indexes("7, 2, 7", 8).unwrap(), [2, 7]);
     assert!(parse_profile_indexes("8", 8).is_err());
     assert!(parse_profile_indexes("2,", 8).is_err());
@@ -688,6 +700,56 @@ fn profile_indexes_and_pinned_dimensions_select_distinct_lines() {
             .count();
         assert_eq!(line.bins.iter().map(|bin| bin.count).sum::<usize>(), valid);
     }
+
+    let single = ProfileSlice {
+        x_axis: 2,
+        y_axis: None,
+        pinned: vec![2, 7, 0, 4],
+        y_indexes: String::new(),
+    };
+    let single_data = load_profile(
+        &file,
+        "/observations/time_spectral_cube_4d",
+        &shape,
+        &single,
+        &ValueVisibility::default(),
+    )
+    .unwrap();
+    let expected = file
+        .region(
+            "/observations/time_spectral_cube_4d",
+            &[2, 7, 0, 4],
+            &[1, 1, 48, 1],
+        )
+        .unwrap();
+    assert_eq!(single_data.lines.len(), 1);
+    for (bin, &value) in single_data.lines[0].bins.iter().zip(&expected.data) {
+        if value.is_finite() && expected.fill_value != Some(value) {
+            assert_eq!(bin.count, 1);
+            assert_eq!(bin.first, value);
+        } else {
+            assert_eq!(bin.count, 0);
+        }
+    }
+}
+
+#[test]
+fn one_dimensional_profile_plots_source_values_at_indexes() {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/space_demo.hdf5");
+    let file = File::open(&path).unwrap();
+    let dataset = "/observations/time_curve_1d";
+    let slice = ProfileSlice::new(&[8], true, PinnedDefault::Start);
+    let profile = load_profile(&file, dataset, &[8], &slice, &ValueVisibility::default()).unwrap();
+    let source = file.region(dataset, &[0], &[8]).unwrap();
+
+    assert_eq!(profile.x_len, 8);
+    assert_eq!(profile.lines.len(), 1);
+    for (index, &value) in source.data.iter().enumerate() {
+        let bin = &profile.lines[0].bins[index];
+        assert_eq!(bin.count, 1);
+        assert_eq!(bin.first, value);
+    }
+    assert_ne!(profile.lines[0].bins[0].first, 0.0);
 }
 
 #[test]

@@ -84,9 +84,10 @@ h5jive path/to/product.nc:/group/radiance
 Append `:/dataset/path` to a file path to select that dataset when the viewer
 opens. With two files, the first specified dataset is selected initially.
 
-The top mode bar offers a dataset browser, a data inspector, and a comparison
-workspace. The [exploring data guide](docs/src/exploring-data.md) explains the
-available views and controls.
+The top mode bar offers a dataset browser and a data inspector. The comparison
+tab is present, but its tools are not available yet. The
+[exploring data guide](docs/src/exploring-data.md) explains the available views
+and controls.
 
 ## Build from source
 
@@ -98,6 +99,7 @@ the [getting started guide](docs/src/getting-started.md).
 ./h5jive.sh --build
 ./h5jive.sh --run
 ./h5jive.sh --run examples/gome2_band3_20130106_gome.nc:/MODE_NADIR/BAND_3/OBSERVATIONS/radiance
+./h5jive.sh --website
 target/release/h5jive --view-globe examples/gome2_band3_20130106_gome.nc:/MODE_NADIR/BAND_3/OBSERVATIONS/radiance
 ```
 
@@ -128,6 +130,11 @@ The guide is built with mdBook; see [docs/README.md](docs/README.md). The
 [Pages workflow](.github/workflows/pages.yml). Publishing a
 GitHub release or running the [native release workflow](.github/workflows/native-release.yml)
 for an existing tag creates the platform archives and checksum manifest.
+
+The optional Blue Marble map background is credited to
+[NASA Earth Observatory](https://science.nasa.gov/earth/earth-observatory/blue-marble-next-generation/).
+The default Natural Earth map background uses
+[public-domain Natural Earth data](https://www.naturalearthdata.com/about/terms-of-use/).
 
 H5Jive is maintained by Ondrej Pêgo Jaura and released under the
 [MIT license](LICENSE).

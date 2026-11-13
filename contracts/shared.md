@@ -13,6 +13,8 @@
 - World map and globe are available only when geolocation is supported. If a
   new dataset lacks geolocation while either is active, the app switches to
   Data view.
+- The 3D, 2D, 1D, and Data view buttons are disabled until a dataset is
+  selected. Selecting a group does not enable them.
 - A command-line `--view-*` option selects the requested view for an explicit
   `FILE:/DATASET` selection; unsupported geospatial selections fall back to
   Data view.

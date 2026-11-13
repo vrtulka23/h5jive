@@ -230,6 +230,7 @@ impl App {
             self.draw_about_dialog(ui);
             self.draw_file_picker(ui);
             self.draw_global_loading_overlay(ui, size, top_menu_height);
+            self.draw_global_error_overlay(ui, size, menu_height);
             return;
         }
         if self.workspace_mode != WorkspaceMode::DataInspector {
@@ -238,6 +239,7 @@ impl App {
             self.draw_about_dialog(ui);
             self.draw_file_picker(ui);
             self.draw_global_loading_overlay(ui, size, top_menu_height);
+            self.draw_global_error_overlay(ui, size, menu_height);
             return;
         }
         let side = self.sidebar_width.clamp(
@@ -249,7 +251,7 @@ impl App {
         ui.window("Input files and dataset tree")
             .position([0.0, menu_height], Condition::Always)
             .size([side, panel_height], Condition::Always)
-            .flags(flags | WindowFlags::NO_SCROLLBAR)
+            .flags(flags | WindowFlags::NO_TITLE_BAR | WindowFlags::NO_SCROLLBAR)
             .build(|| {
                 let selector_reserve = self.view_selector_height;
                 let panel_bottom =
@@ -360,46 +362,44 @@ impl App {
                 .max(self.settings.sidebar_min_width),
         ) + self.settings.splitter_width;
         self.view_rect = [side, menu_height, (size[0] - side).max(1.0), panel_height];
-        ui.window(format!(
-            "Viewing window: {}###viewing_window",
-            self.view.title()
-        ))
-        .position([side, menu_height], Condition::Always)
-        .size([(size[0] - side).max(1.0), panel_height], Condition::Always)
-        .flags(flags)
-        .build(|| {
-            let available = ui.content_region_avail();
-            let _wrapper_padding = ui.push_style_var(StyleVar::WindowPadding([0.0, 0.0]));
-            ui.child_window("##active_view_content")
-                .size([0.0, available[1]])
-                .build(ui, || {
-                    if self.view == ViewMode::Spatial3d {
-                        self.draw_volume_view(ui, plot_ui, plot_ctx);
-                        return;
-                    }
-                    if self.view == ViewMode::Profiles1d {
-                        self.draw_profile_view(ui);
-                        return;
-                    }
-                    if self.view == ViewMode::WorldMap {
-                        self.draw_world_map_view(ui, plot_ctx);
-                        return;
-                    }
-                    if self.view == ViewMode::Globe {
-                        self.draw_globe_view(ui, plot_ctx);
-                        return;
-                    }
-                    if !matches!(self.view, ViewMode::Data | ViewMode::Slice2d) {
-                        self.draw_view_placeholder(ui);
-                        return;
-                    }
-                    self.draw_data_view(ui, plot_ui, plot_ctx);
-                });
-        });
+        ui.window("###viewing_window")
+            .position([side, menu_height], Condition::Always)
+            .size([(size[0] - side).max(1.0), panel_height], Condition::Always)
+            .flags(flags | WindowFlags::NO_TITLE_BAR)
+            .build(|| {
+                let available = ui.content_region_avail();
+                let _wrapper_padding = ui.push_style_var(StyleVar::WindowPadding([0.0, 0.0]));
+                ui.child_window("##active_view_content")
+                    .size([0.0, available[1]])
+                    .build(ui, || {
+                        if self.view == ViewMode::Spatial3d {
+                            self.draw_volume_view(ui, plot_ui, plot_ctx);
+                            return;
+                        }
+                        if self.view == ViewMode::Profiles1d {
+                            self.draw_profile_view(ui);
+                            return;
+                        }
+                        if self.view == ViewMode::WorldMap {
+                            self.draw_world_map_view(ui, plot_ctx);
+                            return;
+                        }
+                        if self.view == ViewMode::Globe {
+                            self.draw_globe_view(ui, plot_ctx);
+                            return;
+                        }
+                        if !matches!(self.view, ViewMode::Data | ViewMode::Slice2d) {
+                            self.draw_view_placeholder(ui);
+                            return;
+                        }
+                        self.draw_data_view(ui, plot_ui, plot_ctx);
+                    });
+            });
         self.draw_about_dialog(ui);
         self.draw_file_picker(ui);
         self.draw_export_dialog(ui);
         self.draw_global_loading_overlay(ui, size, top_menu_height);
+        self.draw_global_error_overlay(ui, size, menu_height);
     }
 
     fn draw_global_loading_overlay(&self, ui: &Ui, size: [f32; 2], menu_height: f32) {
@@ -462,6 +462,32 @@ impl App {
                 &self.settings.palette,
             );
         }
+    }
+
+    fn draw_global_error_overlay(&self, ui: &Ui, size: [f32; 2], menu_height: f32) {
+        if self.workspace_mode != WorkspaceMode::DataInspector || self.view != ViewMode::Profiles1d
+        {
+            return;
+        }
+        if let Some(error) = self.profile_index_error() {
+            draw_error_indicator(
+                ui,
+                [size[0] - 10.0, menu_height + 18.0],
+                &format!("Profile indexes: {error}"),
+                &self.settings.palette,
+            );
+        }
+    }
+
+    fn profile_index_error(&self) -> Option<String> {
+        let draft = self.draft_profile.as_ref()?;
+        let axis = draft.y_axis?;
+        let selection = self.selection.as_ref()?;
+        let entry = find_entry(&self.files[selection.file].tree, &selection.path)?;
+        let Kind::Dataset { shape, .. } = &entry.kind else {
+            return None;
+        };
+        parse_profile_indexes(&draft.y_indexes, *shape.get(axis)?).err()
     }
 
     fn heatmap_tile_loading_label(&self) -> Option<&'static str> {
@@ -568,9 +594,8 @@ impl App {
                 WorkspaceMode::DatasetBrowser => {
                     ui.text("Dataset browser");
                     ui.separator();
-                    ui.text_wrapped("This mode will list products found in local dataset folders configured through DIPL. Each dataset will have a root path and a product filename pattern; matching products will be assignable to file A or B.");
+                    ui.text_wrapped("Browse indexed products from the local dataset sources configured through DIPL. Open a selected product as file A or B.");
                     ui.spacing();
-                    ui.text("Dataset scanning and product selection are not available yet.");
                     if ui.button("Open data inspector") {
                         self.workspace_mode = WorkspaceMode::DataInspector;
                     }
@@ -610,6 +635,12 @@ impl App {
         }
     }
     pub(super) fn draw_view_selector(&mut self, ui: &Ui) {
+        let dataset_available = self.selection.as_ref().is_some_and(|selection| {
+            self.files.get(selection.file).is_some_and(|file| {
+                find_entry(&file.tree, &selection.path)
+                    .is_some_and(|entry| matches!(entry.kind, Kind::Dataset { .. }))
+            })
+        });
         let geo_available = self.selected_geo_source().is_some();
         let available = ui.content_region_avail()[0];
         let width = ((available - 5.0 * self.settings.view_button_gap) / 6.0).max(20.0);
@@ -624,7 +655,11 @@ impl App {
             let hovered = ui.is_item_hovered();
             let min = ui.item_rect_min();
             let max = ui.item_rect_max();
-            let enabled = geo_available || !matches!(mode, ViewMode::WorldMap | ViewMode::Globe);
+            let enabled = if matches!(mode, ViewMode::WorldMap | ViewMode::Globe) {
+                geo_available
+            } else {
+                dataset_available
+            };
             if clicked && enabled {
                 self.switch_view(mode);
             }
@@ -643,7 +678,11 @@ impl App {
                     .add_rect(min, max, [overlay[0], overlay[1], overlay[2], 0.70])
                     .filled(true)
                     .build();
-                ui.set_item_tooltip("Select a geolocated numeric dataset to enable this view");
+                ui.set_item_tooltip(if matches!(mode, ViewMode::WorldMap | ViewMode::Globe) {
+                    "Select a geolocated numeric dataset to enable this view"
+                } else {
+                    "Select a dataset from the tree to enable this view"
+                });
             } else {
                 ui.set_item_tooltip(format!("{} - {}", mode.title(), mode.description()));
             }

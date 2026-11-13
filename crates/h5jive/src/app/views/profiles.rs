@@ -61,7 +61,7 @@ impl App {
             return;
         };
         let labels = axis_option_labels(&self.axis_names, shape);
-        let side_by_side = draft.y_axis.is_some() && ui.content_region_avail()[0] >= 360.0;
+        let side_by_side = shape.len() > 1 && ui.content_region_avail()[0] >= 360.0;
         ui.text("X");
         ui.same_line();
         ui.set_next_item_width(if side_by_side {
@@ -77,30 +77,48 @@ impl App {
                 draft.y_indexes = draft.pinned[axis].to_string();
             }
         }
-        if let Some(mut y_axis) = draft.y_axis {
+        if shape.len() > 1 {
             if side_by_side {
                 ui.same_line();
             }
-            ui.text("Y profiles");
+            ui.text("Profiles");
             ui.same_line();
+            let profile_axes = (0..shape.len())
+                .filter(|&axis| axis != draft.x_axis)
+                .collect::<Vec<_>>();
+            let mut profile_options = vec!["Single (pin other axes)".to_string()];
+            profile_options.extend(
+                profile_axes
+                    .iter()
+                    .map(|&axis| format!("Compare across {}", axis_name(&self.axis_names, axis))),
+            );
+            let mut profile_option = draft
+                .y_axis
+                .and_then(|axis| profile_axes.iter().position(|&candidate| candidate == axis))
+                .map_or(0, |index| index + 1);
             ui.set_next_item_width(if side_by_side {
                 ui.content_region_avail()[0].max(80.0)
             } else {
                 (ui.content_region_avail()[0] * 0.65).max(60.0)
             });
-            if ui.combo_simple_string("##profile_y_axis", &mut y_axis, &labels) {
-                if y_axis == draft.x_axis {
-                    draft.x_axis = (0..shape.len()).find(|&axis| axis != y_axis).unwrap();
+            if ui.combo_simple_string("##profile_line_axis", &mut profile_option, &profile_options)
+            {
+                draft.y_axis = profile_option
+                    .checked_sub(1)
+                    .map(|index| profile_axes[index]);
+                if let Some(axis) = draft.y_axis {
+                    draft.y_indexes = draft.pinned[axis].to_string();
                 }
-                draft.y_axis = Some(y_axis);
-                draft.y_indexes = draft.pinned[y_axis].to_string();
             }
+            ui.set_item_tooltip("Single plots one line with every other axis pinned. Compare plots lines at the selected indexes of another axis.");
+        }
+        if draft.y_axis.is_some() {
             ui.set_next_item_width((ui.content_region_avail()[0] * 0.65).max(60.0));
-            ui.input_text("Y indexes", &mut draft.y_indexes).build();
-            ui.set_item_tooltip("Comma-separated Y indexes, for example: 0, 3, 7");
-            if let Err(error) = parse_profile_indexes(&draft.y_indexes, shape[y_axis]) {
-                ui.text_wrapped(error);
-            }
+            ui.input_text("Profile indexes", &mut draft.y_indexes)
+                .build();
+            ui.set_item_tooltip(
+                "Comma-separated indexes on the comparison axis, for example: 0, 3, 7",
+            );
         }
         for (axis, &length) in shape.iter().enumerate() {
             if axis == draft.x_axis || draft.y_axis == Some(axis) {
@@ -341,11 +359,7 @@ pub(crate) fn draw_profile_canvas(
         y1 - fraction as f32 * (y1 - y0)
     };
     let draw = ui.get_window_draw_list();
-    draw.add_text(
-        [x0, origin[1] + 1.0],
-        palette.text,
-        format!("{} index", axis_name(axis_names, slice.x_axis)),
-    );
+    draw.add_text([x0, origin[1] + 1.0], palette.text, "Value");
     draw.add_line([x0, y0], [x0, y1], palette.text).build();
     draw.add_line([x0, y1], [x1, y1], palette.text).build();
     for step in 0..=4 {
@@ -390,7 +404,11 @@ pub(crate) fn draw_profile_canvas(
             );
         }
     }
-    draw.add_text([x0, y1 + 14.0 + line_height * 2.0], palette.text, "Index");
+    draw.add_text(
+        [x0, y1 + 14.0 + line_height * 2.0],
+        palette.text,
+        format!("{} index", axis_name(axis_names, slice.x_axis)),
+    );
     let clip = draw.push_clip_rect([x0, y0], [x1, y1], true);
     for (line_number, line) in data.lines.iter().enumerate() {
         let color = profile_line_color(palette, line_number);

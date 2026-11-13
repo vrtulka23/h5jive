@@ -158,14 +158,29 @@ impl App {
             }
             ViewMode::Profiles1d => {
                 if let Some(slice) = &self.applied_profile {
-                    let y = slice
-                        .y_axis
-                        .map_or_else(|| "None".into(), |axis| axis_name(&self.axis_names, axis));
                     description.push(format!(
-                        "X: {}; Y: {y}; Y indexes: {}",
-                        axis_name(&self.axis_names, slice.x_axis),
-                        slice.y_indexes
+                        "Profile axis: {}",
+                        axis_name(&self.axis_names, slice.x_axis)
                     ));
+                    if let Some(axis) = slice.y_axis {
+                        description.push(format!(
+                            "Compare across: {}; indexes: {}",
+                            axis_name(&self.axis_names, axis),
+                            slice.y_indexes
+                        ));
+                    }
+                    let pins = slice
+                        .pinned
+                        .iter()
+                        .enumerate()
+                        .filter(|(axis, _)| *axis != slice.x_axis && Some(*axis) != slice.y_axis)
+                        .map(|(axis, index)| {
+                            format!("{}={index}", axis_name(&self.axis_names, axis))
+                        })
+                        .collect::<Vec<_>>();
+                    if !pins.is_empty() {
+                        description.push(format!("Pinned: {}", pins.join(", ")));
+                    }
                 }
             }
             ViewMode::WorldMap | ViewMode::Globe => {
