@@ -36,7 +36,7 @@ fn test_settings() -> &'static Settings {
 
 #[test]
 fn startup_dataset_suffix_selects_a_real_dataset() {
-    let demo = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/space_demo.hdf5");
+    let demo = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/arrays/space_demo.hdf5");
     let (file_path, dataset) =
         parse_input_spec(&format!("{}:/observations/swath_2d", demo.display())).unwrap();
     let file = File::open(&file_path).unwrap();
@@ -68,7 +68,8 @@ fn startup_view_requires_and_uses_an_explicit_dataset() {
 
 #[test]
 fn startup_dataset_suffix_rejects_missing_and_group_paths() {
-    let file_path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/space_demo.hdf5");
+    let file_path =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/arrays/space_demo.hdf5");
     let file = File::open(&file_path).unwrap();
     let inputs = [(file_path.clone(), Some("/missing".to_owned()))];
     assert!(resolve_startup_selection(&[file], &inputs)
@@ -666,7 +667,7 @@ fn profile_indexes_and_pinned_dimensions_select_distinct_lines() {
     assert!(parse_profile_indexes("8", 8).is_err());
     assert!(parse_profile_indexes("2,", 8).is_err());
 
-    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/space_demo.hdf5");
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/arrays/space_demo.hdf5");
     let file = File::open(&path).unwrap();
     let shape = [8, 32, 48, 16];
     let slice = ProfileSlice {
@@ -738,7 +739,7 @@ fn profile_indexes_and_pinned_dimensions_select_distinct_lines() {
 
 #[test]
 fn one_dimensional_profile_plots_source_values_at_indexes() {
-    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/space_demo.hdf5");
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/arrays/space_demo.hdf5");
     let file = File::open(&path).unwrap();
     let dataset = "/observations/time_curve_1d";
     let slice = ProfileSlice::new(&[8], true, PinnedDefault::Start);
@@ -819,7 +820,7 @@ fn heatmap_preserves_native_cells_and_special_values() {
         assert_eq!(SpecialValue::from_value(value, fill), Some(special));
         assert_ne!(special.color(palette), palette.heatmap_mid);
     }
-    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/space_demo.hdf5");
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/arrays/space_demo.hdf5");
     let file = File::open(&path).unwrap();
     let shape = [32, 48];
     let slice = TableSlice::new(&shape, PinnedDefault::Start);
@@ -946,7 +947,7 @@ fn special_colors_are_separate_from_each_other_and_viridis_stops() {
 
 #[test]
 fn full_heatmap_overview_samples_source_cells_without_averaging() {
-    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/space_demo.hdf5");
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/arrays/space_demo.hdf5");
     let file = File::open(&path).unwrap();
     let shape = [32, 48];
     let slice = TableSlice::new(&shape, PinnedDefault::Start);
@@ -984,7 +985,7 @@ fn full_heatmap_overview_samples_source_cells_without_averaging() {
 
 #[test]
 fn heatmap_range_scans_selected_plane_and_ignores_special_values() {
-    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/space_demo.hdf5");
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/arrays/space_demo.hdf5");
     let file = File::open(&path).unwrap();
     let shape = [32, 48];
     let slice = TableSlice::new(&shape, PinnedDefault::Start);

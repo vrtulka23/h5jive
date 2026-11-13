@@ -14,8 +14,8 @@ does not mean an automated test already covers it.
    completes. Use a large local product for performance checks when relevant.
 4. Update the contract when the intended behavior changes.
 
-The bundled `examples/space_demo.hdf5` and
-`examples/gome2_band3_20130106_gome.nc` provide stable fixtures. Local full
+The bundled `examples/arrays/space_demo.hdf5` and
+`examples/satellite/gome2_band3_20130106_gome.nc` provide stable fixtures. Local full
 S5P and GOME-2 products are useful for manual scale checks but must not be
 required by the ordinary test suite.
 

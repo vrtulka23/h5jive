@@ -1,5 +1,22 @@
 use super::*;
 
+/// Draw a sampled or native heatmap with the same ImPlot settings in core views and plugins.
+pub(super) fn plot_heatmap_grid(
+    plot_ui: &PlotUi<'_>,
+    label: &str,
+    values: &[f64],
+    grid: [usize; 2],
+    range: (f64, f64),
+    bounds: [f64; 4],
+) {
+    HeatmapPlot::new(label, values, grid[0], grid[1])
+        .with_item_flags(ItemFlags::NO_LEGEND)
+        .with_scale(range.0, range.1)
+        .with_bounds(bounds[0], bounds[1], bounds[2], bounds[3])
+        .without_value_labels()
+        .plot(plot_ui);
+}
+
 pub(super) fn control_action_width(ui: &Ui, settings: &Settings) -> f32 {
     settings
         .update_button_width
@@ -117,8 +134,8 @@ mod navigation_tests {
 
     #[test]
     fn selected_group_and_dataset_render_without_scope_errors() {
-        let path =
-            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/space_demo.hdf5");
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../examples/arrays/space_demo.hdf5");
         let file = File::open(&path).unwrap();
         let settings = Settings::load().unwrap();
         let mut context = Context::create();

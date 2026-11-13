@@ -24,12 +24,14 @@ fn draw_native_heatmap_tile(
         max
     };
     let label = format!("native tile {r0} {r1} {c0} {c1}");
-    HeatmapPlot::new(&label, &image.plotted, r1 - r0, c1 - c0)
-        .with_item_flags(ItemFlags::NO_LEGEND)
-        .with_scale(min, scale_max)
-        .with_bounds(c0 as f64, r0 as f64, c1 as f64, r1 as f64)
-        .without_value_labels()
-        .plot(plot_ui);
+    plot_heatmap_grid(
+        plot_ui,
+        &label,
+        &image.plotted,
+        [r1 - r0, c1 - c0],
+        (min, scale_max),
+        [c0 as f64, r0 as f64, c1 as f64, r1 as f64],
+    );
     let draw = ui.get_window_draw_list();
     let upper_left = plot_ui.plot_to_pixels_axes(
         ImPlotPoint {
@@ -424,17 +426,14 @@ impl App {
                     } else {
                         max
                     };
-                    HeatmapPlot::new(
+                    plot_heatmap_grid(
+                        plot_ui,
                         "overview while loading",
                         &image.plotted,
-                        image.grid[0],
-                        image.grid[1],
-                    )
-                    .with_item_flags(ItemFlags::NO_LEGEND)
-                    .with_scale(min, scale_max)
-                    .with_bounds(0.0, 0.0, columns as f64, rows as f64)
-                    .without_value_labels()
-                    .plot(plot_ui);
+                        image.grid,
+                        (min, scale_max),
+                        [0.0, 0.0, columns as f64, rows as f64],
+                    );
                 }
                 self.draw_cached_heatmap_tiles(
                     ui,
@@ -482,12 +481,14 @@ impl App {
                         display_range = image.range;
                     }
                     let (min, max) = display_range.unwrap_or((0.0, 1.0));
-                    HeatmapPlot::new("overview", &image.plotted, image.grid[0], image.grid[1])
-                        .with_item_flags(ItemFlags::NO_LEGEND)
-                        .with_scale(min, max)
-                        .with_bounds(0.0, 0.0, columns as f64, rows as f64)
-                        .without_value_labels()
-                        .plot(plot_ui);
+                    plot_heatmap_grid(
+                        plot_ui,
+                        "overview",
+                        &image.plotted,
+                        image.grid,
+                        (min, max),
+                        [0.0, 0.0, columns as f64, rows as f64],
+                    );
                     let draw = ui.get_window_draw_list();
                     let lower_right = plot_ui.plot_to_pixels_axes(
                         ImPlotPoint {

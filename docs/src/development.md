@@ -13,7 +13,8 @@
 - `crates/h5jive/src/plugins/` contains optional Plugin Lab tools. See
   [Plugin Lab](plugin-lab.md) for the extension contract and demo.
 - `settings/` contains DIPL configuration, schemas, and appearance profiles.
-- `examples/` contains the generated array demo and a compact GOME-2 Band 3 sample.
+- `examples/arrays/`, `examples/satellite/`, and `examples/plugins/` keep the
+  general, geospatial, and Plugin Lab fixtures separate.
 - `website/` is the static Astro project page; `docs/` is this mdBook guide.
 
 ## Build and API reference
@@ -27,7 +28,7 @@ cargo doc --workspace --no-deps
 Run the reproducible demo generator with:
 
 ```sh
-cargo run -p h5jive --example generate_demo -- examples/space_demo.hdf5
+cargo run -p h5jive --example generate_demo -- examples/arrays/space_demo.hdf5
 ```
 
 The Band 3 sample is regenerated from a local Level 1B product with:
@@ -35,7 +36,7 @@ The Band 3 sample is regenerated from a local Level 1B product with:
 ```sh
 cargo run -p h5jive --example generate_gome2_band3 -- \
   ../mock_datasets/GOME2/01/06/20130106101404Z_32260_gome.nc \
-  examples/gome2_band3_20130106_gome.nc
+  examples/satellite/gome2_band3_20130106_gome.nc
 ```
 
 ## Performance checks

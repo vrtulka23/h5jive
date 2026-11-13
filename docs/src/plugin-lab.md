@@ -1,7 +1,7 @@
 # Plugin Lab
 
-Plugin Lab is H5Jive's collection of optional, source-level extensions. Its
-first plugin compares paths in the loaded files A and B. It labels a path
+Plugin Lab is H5Jive's collection of optional, source-level extensions. The
+path comparison plugin compares paths in the loaded files A and B. It labels a path
 **Same** when object kind, dataset shape and datatype, and displayed attribute
 values match, **Different** when they do not, and **Only A/B** when the path is
 absent from one file. Dataset values are not compared. Attribute comparison uses
@@ -15,7 +15,7 @@ From the repository root:
 
 ```sh
 cargo run -p h5jive --example generate_plugin_demo
-cargo run -p h5jive -- examples/plugin_demo_a.hdf5 examples/plugin_demo_b.hdf5
+cargo run -p h5jive -- examples/plugins/path_comparison/plugin_demo_a.hdf5 examples/plugins/path_comparison/plugin_demo_b.hdf5
 ```
 
 Open **Plugin Lab** in the top mode bar. Both files are loaded through H5Jive's
@@ -27,6 +27,27 @@ present on only one side, or metadata that could not be read. Hover an icon for
 the fields that differ. Use the count buttons to filter paths by status. Path
 details start collapsed; click a path or chevron on either side to reveal metadata on both sides.
 The metadata scan runs in the background.
+
+## Compare dataset values
+
+The second plugin compares numerical datasets from either loaded file: A/B,
+A/A, and B/B are all supported. It shows only datasets with the same shape as
+the first selection in the second picker. Choose **Left − Right** or
+**Left ÷ Right**, then select two displayed dimensions; every other dimension
+gets a pinned index. The 2D view uses the same bounded sampling and heatmap
+drawing components as the inspector while keeping its own selection and cache.
+Invalid values, fill values, and ratio cells with a zero denominator are
+excluded. For large planes, the preview samples matching positions from both
+datasets, up to `plugins.value_comparison.preview_max_cells` in DIPL.
+
+The [value comparison demo](../../examples/plugins/value_comparison/README.md)
+contains known differences, ratios, a 3D array for pinning, and an incompatible
+shape. Generate it with:
+
+```sh
+cargo run -p h5jive --example generate_value_comparison_demo
+cargo run -p h5jive -- examples/plugins/value_comparison/value_demo_a.hdf5 examples/plugins/value_comparison/value_demo_b.hdf5
+```
 
 ## Add a plugin
 

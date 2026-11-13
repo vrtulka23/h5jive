@@ -87,8 +87,8 @@ available in the sidebar.
 
 ## Try the examples
 
-The array demo generator writes `examples/space_demo.hdf5` with 1D–4D
-datasets. The bundled `examples/gome2_band3_20130106_gome.nc` contains a
+The array demo generator writes `examples/arrays/space_demo.hdf5` with 1D–4D
+datasets. The bundled `examples/satellite/gome2_band3_20130106_gome.nc` contains a
 sample extracted from a real GOME-2 Level 1B product. Select
 `MODE_NADIR/BAND_3/OBSERVATIONS/radiance` and open the world map or globe to
 inspect its geolocated pixels. The sample retains all 625 scan lines, 32 ground

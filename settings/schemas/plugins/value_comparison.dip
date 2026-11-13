@@ -1,0 +1,4 @@
+?descr "Compare two same-shaped numeric datasets as a difference or ratio."
+preview_max_cells int = 65536
+  ?descr "Maximum number of sampled cells in the 2D comparison preview."
+  !condition ({.} >= 1024 && {.} <= 262144)

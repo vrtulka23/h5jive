@@ -30,7 +30,7 @@ mod tests {
     #[test]
     fn bundled_band3_has_values_and_footprints() {
         let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../examples/gome2_band3_20130106_gome.nc");
+            .join("../../examples/satellite/gome2_band3_20130106_gome.nc");
         let file = File::open(&path).unwrap();
         let dataset = "/MODE_NADIR/BAND_3/OBSERVATIONS/radiance";
         let geo = file
@@ -65,7 +65,7 @@ mod tests {
     #[test]
     fn gome2_binning_uses_its_native_corner_orientation() {
         let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../examples/gome2_band3_20130106_gome.nc");
+            .join("../../examples/satellite/gome2_band3_20130106_gome.nc");
         let file = File::open(&path).unwrap();
         let dataset = "/MODE_NADIR/BAND_3/OBSERVATIONS/radiance";
         let geo = file
@@ -171,7 +171,7 @@ mod tests {
     #[test]
     fn batched_and_row_reads_produce_the_same_map() {
         let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../examples/gome2_band3_20130106_gome.nc");
+            .join("../../examples/satellite/gome2_band3_20130106_gome.nc");
         let file = File::open(&path).unwrap();
         let dataset = "/MODE_NADIR/BAND_3/OBSERVATIONS/radiance";
         let geo = file.geolocation(dataset).unwrap().unwrap();

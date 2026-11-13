@@ -87,7 +87,7 @@ if ! "$build" && ! "$run" && ((${#files[@]} == 0)) && [[ -z $view_override ]]; t
 fi
 
 if "$run" && ((${#files[@]} == 0)) && [[ -z $view_override ]]; then
-  files=("$PWD/examples/space_demo.hdf5")
+  files=("$PWD/examples/arrays/space_demo.hdf5")
 fi
 
 dataset_selected=false

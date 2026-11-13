@@ -510,7 +510,7 @@ mod tests {
 
     #[test]
     fn repeated_check_reuses_the_coordinate_result_cache() {
-        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples");
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/satellite");
         let product_name = "gome2_band3_20130106_gome.nc";
         let product = root.join(product_name);
         let temporary =

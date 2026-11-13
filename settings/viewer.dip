@@ -17,3 +17,5 @@ viewer : h5jive_settings
     {viewer_plugins?}
     path_comparison
       {plugin_path_comparison?}
+    value_comparison
+      {plugin_value_comparison?}

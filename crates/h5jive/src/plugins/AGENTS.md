@@ -2,7 +2,9 @@
 
 These notes apply to new modules in this directory. Read
 `docs/src/plugin-lab.md` for the contributor workflow and
-`path_comparison.rs` for a small working example.
+`path_comparison.rs` and `value_comparison.rs` for working examples. Keep
+each plugin's selection, worker, and preview state independent of inspector
+state. Share stateless data and drawing helpers when behavior overlaps.
 
 1. Keep plugin analysis, UI, and state in its own module here. Register the
    plugin in `mod.rs` through `PLUGINS`, with a unique key, title, description,

@@ -137,7 +137,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let output = PathBuf::from(
         arguments
             .next()
-            .unwrap_or_else(|| "examples/space_demo.hdf5".into()),
+            .unwrap_or_else(|| "examples/arrays/space_demo.hdf5".into()),
     );
     if arguments.next().is_some() {
         return Err("expected at most one output path".into());

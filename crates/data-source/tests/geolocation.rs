@@ -5,7 +5,7 @@ const RADIANCE: &str = "/MODE_NADIR/BAND_3/OBSERVATIONS/radiance";
 #[test]
 fn bundled_band3_has_real_geolocation_bounds_and_scan_flags() {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../examples/gome2_band3_20130106_gome.nc");
+        .join("../../examples/satellite/gome2_band3_20130106_gome.nc");
     let file = File::open(&path).unwrap();
     assert_eq!(file.dataset_info(RADIANCE).unwrap().shape, [1, 625, 32, 64]);
     let geo = file.geolocation(RADIANCE).unwrap().unwrap();

@@ -279,7 +279,7 @@ fn smaller_datasets_can_pin_one_axis() {
 fn exact_volume_preserves_every_native_cell_and_axis_order() {
     let path = std::path::Path::new(concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/../../examples/space_demo.hdf5"
+        "/../../examples/arrays/space_demo.hdf5"
     ));
     let file = File::open(path).unwrap();
     let shape = [8, 32, 48, 16];

@@ -40,6 +40,9 @@ schemas[]
 schemas[]
   name = "path_comparison_plugin_settings"
   file = "schemas/plugins/path_comparison.dip"
+schemas[]
+  name = "value_comparison_plugin_settings"
+  file = "schemas/plugins/value_comparison.dip"
 
 sources[]
   name = "viewer_data"
@@ -65,6 +68,9 @@ sources[]
 sources[]
   name = "plugin_path_comparison"
   filepath = "plugins/path_comparison.dip"
+sources[]
+  name = "plugin_value_comparison"
+  filepath = "plugins/value_comparison.dip"
 
 code[]
   file = "viewer.dip"

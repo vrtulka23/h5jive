@@ -474,14 +474,17 @@ impl State {
             Ok(Ok(rows)) => {
                 self.rows = Some(rows);
                 self.job = None;
+                self.needs_redraw = true;
             }
             Ok(Err(error)) => {
                 self.error = Some(error);
                 self.job = None;
+                self.needs_redraw = true;
             }
             Err(mpsc::TryRecvError::Disconnected) => {
                 self.error = Some("Comparison worker stopped unexpectedly".into());
                 self.job = None;
+                self.needs_redraw = true;
             }
             Err(mpsc::TryRecvError::Empty) => {}
         }
@@ -760,7 +763,8 @@ mod tests {
     use dear_app::imgui::{Condition, Context};
 
     fn demo_files() -> ([PathBuf; 2], [File; 2]) {
-        let examples = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples");
+        let examples = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../examples/plugins/path_comparison");
         let paths = ["plugin_demo_a.hdf5", "plugin_demo_b.hdf5"].map(|name| examples.join(name));
         let files = paths.each_ref().map(|path| File::open(path).unwrap());
         (paths, files)

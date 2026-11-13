@@ -111,3 +111,6 @@ plugins
   path_comparison_enabled bool = true
     ?descr "Show the A/B path comparison plugin in Plugin Lab."
   path_comparison : path_comparison_plugin_settings
+  value_comparison_enabled bool = true
+    ?descr "Show the dataset value comparison plugin in Plugin Lab."
+  value_comparison : value_comparison_plugin_settings

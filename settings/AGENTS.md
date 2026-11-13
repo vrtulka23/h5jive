@@ -26,6 +26,6 @@ setting.
    defaults. Preserve existing setting names and defaults unless a migration
    is intentional, since users may already have overrides.
 6. Validate a change by loading the project without starting the GUI, for
-   example `cargo run -p h5jive -- --inspect examples/plugin_demo_a.hdf5`.
+   example `cargo run -p h5jive -- --inspect examples/plugins/path_comparison/plugin_demo_a.hdf5`.
    Run relevant Rust tests; the full suite uses
    `cargo test -p h5jive -- --test-threads=1` because DIPL tests share state.

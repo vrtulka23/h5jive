@@ -121,13 +121,14 @@ fn write(path: &Path, is_b: bool) -> Result<(), Box<dyn Error>> {
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
-    let output = Path::new("examples");
+    let output = Path::new("examples/plugins/path_comparison");
+    std::fs::create_dir_all(output)?;
     for (name, is_b) in [("plugin_demo_a.hdf5", false), ("plugin_demo_b.hdf5", true)] {
         let path = output.join(name);
         let pending = path.with_extension("hdf5.new");
         write(&pending, is_b)?;
         std::fs::rename(pending, path)?;
     }
-    println!("Generated examples/plugin_demo_a.hdf5 and examples/plugin_demo_b.hdf5");
+    println!("Generated examples/plugins/path_comparison/plugin_demo_a.hdf5 and examples/plugins/path_comparison/plugin_demo_b.hdf5");
     Ok(())
 }

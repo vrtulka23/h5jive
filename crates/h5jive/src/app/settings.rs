@@ -420,6 +420,8 @@ impl ViewerValues<'_> {
 pub(super) struct Settings {
     pub(super) path_comparison_enabled: bool,
     pub(super) path_comparison_show_groups: bool,
+    pub(super) value_comparison_enabled: bool,
+    pub(super) value_comparison_max_cells: usize,
     pub(super) dataset_rules: Vec<GeolocationRule>,
     pub(super) dataset_sources: Vec<DatasetSource>,
     pub(super) profiles: Vec<ThemeProfile>,
@@ -557,6 +559,9 @@ impl Settings {
         let settings = Self {
             path_comparison_enabled: values.boolean("plugins.path_comparison_enabled")?,
             path_comparison_show_groups: values.boolean("plugins.path_comparison.show_groups")?,
+            value_comparison_enabled: values.boolean("plugins.value_comparison_enabled")?,
+            value_comparison_max_cells: values
+                .count("plugins.value_comparison.preview_max_cells")?,
             dataset_rules: read_dataset_rules(&dip)?,
             dataset_sources: read_dataset_sources(&dip, project.parent().unwrap())?,
             profiles,

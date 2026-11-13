@@ -54,12 +54,12 @@ import { pluginPages } from '../../data/plugins';
         <div class="lab-section-heading"><div><p class="eyebrow">THE COLLECTION</p><h2>Available plugins.</h2></div><p>Enable each tool centrally with DIPL. Plugins are compiled from source and kept separate from the core views.</p></div>
         <div class="lab-plugin-list">
           {pluginPages.map((plugin, index) => <article class="lab-plugin-card">
-            <div class="lab-plugin-mark" aria-hidden="true"><span>A</span><i>⇄</i><span>B</span></div>
-            <div class="lab-plugin-main"><p class="lab-plugin-index">PLUGIN {String(index + 1).padStart(2, '0')}</p><h3>{plugin.name}</h3><p>{plugin.summary}</p><ul>{plugin.details.map((detail) => <li>{detail}</li>)}</ul><div class="lab-plugin-links"><a href={plugin.source}>View source <span>↗</span></a><a href="https://github.com/vrtulka23/h5jive/tree/main/examples">Try the demo <span>↗</span></a></div></div>
+            <div class="lab-plugin-mark" aria-hidden="true"><span>{plugin.mark[0]}</span><i>{plugin.mark[1]}</i><span>{plugin.mark[2]}</span></div>
+            <div class="lab-plugin-main"><p class="lab-plugin-index">PLUGIN {String(index + 1).padStart(2, '0')}</p><h3>{plugin.name}</h3><p>{plugin.summary}</p><ul>{plugin.details.map((detail) => <li>{detail}</li>)}</ul><div class="lab-plugin-links"><a href={plugin.source}>View source <span>↗</span></a><a href={plugin.demo}>Try the demo <span>↗</span></a></div></div>
             <div class="lab-plugin-setting"><span>DIPL SWITCH</span><code>{plugin.setting}</code><small>settings/plugins.dip</small></div>
           </article>)}
         </div>
-        <p class="lab-catalog-note">The first plugin compares object kinds, shapes, datatypes, and displayed attribute values. Dataset values are not compared; some large or unsupported attributes are summarized by the metadata reader.</p>
+        <p class="lab-catalog-note">Path comparison checks metadata; value comparison calculates differences or ratios for same-shaped numeric arrays. Large 2D planes use a bounded, matching-position preview.</p>
       </section>
 
       <section id="create" class="lab-create">

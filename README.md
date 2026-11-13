@@ -16,7 +16,7 @@ products, inspect dataset metadata and statistics, and view tables, profiles,
 
 **Plugin Lab** is the third workspace mode. It hosts optional tools that reuse
 H5Jive's file access and visualizations. Try the bundled
-[A/B path comparison demo](examples/README.md), or use the
+[path comparison and value comparison demos](examples/README.md), or use the
 [contributor guide](docs/src/plugin-lab.md) to build and share a plugin through
 the [Plugin Lab catalog](plugins/README.md).
 
@@ -118,22 +118,22 @@ the [getting started guide](docs/src/getting-started.md).
 ```sh
 ./h5jive.sh --build
 ./h5jive.sh --run
-./h5jive.sh --run examples/gome2_band3_20130106_gome.nc:/MODE_NADIR/BAND_3/OBSERVATIONS/radiance
+./h5jive.sh --run examples/satellite/gome2_band3_20130106_gome.nc:/MODE_NADIR/BAND_3/OBSERVATIONS/radiance
 ./h5jive.sh --website
-target/release/h5jive --view-globe examples/gome2_band3_20130106_gome.nc:/MODE_NADIR/BAND_3/OBSERVATIONS/radiance
+target/release/h5jive --view-globe examples/satellite/gome2_band3_20130106_gome.nc:/MODE_NADIR/BAND_3/OBSERVATIONS/radiance
 ```
 
 Both the script and executable accept `--view-data`, `--view-1d-profiles`,
 `--view-2d-slice`, `--view-3d`, `--view-world-map`, and `--view-globe` when a
 `FILE:/DATASET` selection is supplied.
 
-The repository includes a deterministic [HDF5 demo](examples/space_demo.hdf5)
-and a [GOME-2 Band 3 sample](examples/gome2_band3_20130106_gome.nc) extracted
+The repository includes a deterministic [HDF5 demo](examples/arrays/space_demo.hdf5)
+and a [GOME-2 Band 3 sample](examples/satellite/gome2_band3_20130106_gome.nc) extracted
 from a real Level 1B product. You can inspect a file tree
 without opening a window:
 
 ```sh
-cargo run -p h5jive -- --inspect examples/space_demo.hdf5
+cargo run -p h5jive -- --inspect examples/arrays/space_demo.hdf5
 ```
 
 ## Documentation

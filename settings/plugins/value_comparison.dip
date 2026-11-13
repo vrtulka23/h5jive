@@ -1,0 +1,2 @@
+# Settings owned by the dataset value comparison plugin.
+preview_max_cells int = 65536

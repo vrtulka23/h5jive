@@ -58,7 +58,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         }));
     let output = PathBuf::from(
         args.next()
-            .unwrap_or_else(|| "examples/gome2_band3_20130106_gome.nc".into()),
+            .unwrap_or_else(|| "examples/satellite/gome2_band3_20130106_gome.nc".into()),
     );
     if args.next().is_some() {
         return Err("expected at most a source path and output path".into());

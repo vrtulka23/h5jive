@@ -20,7 +20,7 @@ fn find<'a>(entry: &'a Entry, path: &str) -> &'a Entry {
 
 #[test]
 fn demo_opens_with_expected_axes_and_sentinel_regions() {
-    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/space_demo.hdf5");
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/arrays/space_demo.hdf5");
     let file = File::open(&path).expect("open committed demo");
     assert!(file
         .tree
@@ -147,7 +147,7 @@ fn demo_opens_with_expected_axes_and_sentinel_regions() {
 
 #[test]
 fn reads_only_requested_four_dimensional_region() {
-    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/space_demo.hdf5");
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/arrays/space_demo.hdf5");
     let file = File::open(&path).unwrap();
     let dataset = "/observations/time_spectral_cube_4d";
     let region = file.region(dataset, &[2, 4, 7, 3], &[1, 2, 3, 1]).unwrap();

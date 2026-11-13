@@ -235,7 +235,7 @@ impl App {
         }
         if self.workspace_mode != WorkspaceMode::DataInspector {
             self.view_rect = [0.0; 4];
-            self.draw_workspace_placeholder(ui, menu_height, panel_height, flags);
+            self.draw_workspace_placeholder(ui, plot_ui, menu_height, panel_height, flags);
             self.draw_about_dialog(ui);
             self.draw_file_picker(ui);
             self.draw_global_loading_overlay(ui, size, top_menu_height);
@@ -585,7 +585,14 @@ impl App {
             std::cmp::Ordering::Equal => "map",
         })
     }
-    fn draw_workspace_placeholder(&mut self, ui: &Ui, top: f32, height: f32, flags: WindowFlags) {
+    fn draw_workspace_placeholder(
+        &mut self,
+        ui: &Ui,
+        plot_ui: &PlotUi<'_>,
+        top: f32,
+        height: f32,
+        flags: WindowFlags,
+    ) {
         ui.window(format!("{}###workspace_content", self.workspace_mode.title()))
             .position([0.0, top], Condition::Always)
             .size([ui.io().display_size()[0], height], Condition::Always)
@@ -604,6 +611,7 @@ impl App {
                     if let Some(selection) =
                         self.plugins.draw(
                             ui,
+                            plot_ui,
                             &self.files,
                             &self.file_paths,
                             &self.settings,
