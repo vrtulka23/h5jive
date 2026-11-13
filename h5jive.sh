@@ -113,7 +113,8 @@ if [[ -n $backtrace_override ]]; then
   export RUST_BACKTRACE=$backtrace_override
 fi
 
-run_args=()
-if [[ -n $view_override ]]; then run_args+=("$view_override"); fi
-exec target/release/h5jive "${run_args[@]}" "${files[@]}"
+if [[ -n $view_override ]]; then
+  exec target/release/h5jive "$view_override" "${files[@]}"
+fi
+exec target/release/h5jive "${files[@]}"
 
