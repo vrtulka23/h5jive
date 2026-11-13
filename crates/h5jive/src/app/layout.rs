@@ -600,22 +600,19 @@ impl App {
                         self.workspace_mode = WorkspaceMode::DataInspector;
                     }
                 }
-                WorkspaceMode::Comparison => {
-                    ui.text("Comparison");
-                    ui.separator();
-                    for slot in 0..2 {
-                        let label = if slot == 0 { "A" } else { "B" };
-                        let value = self.file_paths.get(slot).map_or_else(
-                            || "No file loaded".to_owned(),
-                            |path| path.display().to_string(),
-                        );
-                        ui.text_wrapped(format!("File {label}: {value}"));
-                    }
-                    ui.spacing();
-                    ui.text_wrapped("This mode will compare compatible datasets, show both files on the world map and globe, and inspect pixel intersections with PICS.");
-                    ui.text("Comparison tools are not available yet.");
-                    if ui.button("Open data inspector") {
+                WorkspaceMode::PluginLab => {
+                    if let Some(selection) =
+                        self.plugins.draw(
+                            ui,
+                            &self.files,
+                            &self.file_paths,
+                            &self.settings,
+                            self.selection.as_ref(),
+                        )
+                    {
+                        self.selection = Some(selection);
                         self.workspace_mode = WorkspaceMode::DataInspector;
+                        self.switch_view(ViewMode::Data);
                     }
                 }
                 WorkspaceMode::DataInspector => {}
@@ -992,6 +989,7 @@ impl App {
                         self.file_paths.push(path);
                     }
                     self.file_path_inputs[slot] = self.file_paths[slot].display().to_string();
+                    self.plugins.invalidate();
                     self.file_error = None;
                     self.reset_file_selection();
                 }

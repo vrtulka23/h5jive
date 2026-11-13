@@ -4,15 +4,15 @@ use super::*;
 pub(super) enum WorkspaceMode {
     DatasetBrowser,
     DataInspector,
-    Comparison,
+    PluginLab,
 }
 impl WorkspaceMode {
-    pub(super) const ALL: [Self; 3] = [Self::DatasetBrowser, Self::DataInspector, Self::Comparison];
+    pub(super) const ALL: [Self; 3] = [Self::DatasetBrowser, Self::DataInspector, Self::PluginLab];
     pub(super) fn title(self) -> &'static str {
         match self {
             Self::DatasetBrowser => "Dataset browser",
             Self::DataInspector => "Data inspector",
-            Self::Comparison => "Comparison",
+            Self::PluginLab => "Plugin Lab",
         }
     }
 }
@@ -418,6 +418,8 @@ impl ViewerValues<'_> {
 }
 
 pub(super) struct Settings {
+    pub(super) path_comparison_enabled: bool,
+    pub(super) path_comparison_show_groups: bool,
     pub(super) dataset_rules: Vec<GeolocationRule>,
     pub(super) dataset_sources: Vec<DatasetSource>,
     pub(super) profiles: Vec<ThemeProfile>,
@@ -486,7 +488,7 @@ pub(super) struct Settings {
 }
 impl Settings {
     pub(super) fn load() -> Result<Self, Box<dyn std::error::Error>> {
-        let project = std::path::Path::new("settings/DIPfile");
+        let local_project = std::path::Path::new("settings/DIPfile");
         // An extracted release keeps its editable settings beside the executable.
         let executable = std::env::current_exe()?;
         // Windows canonicalize() and current_exe() add a \\?\ verbatim prefix
@@ -496,8 +498,12 @@ impl Settings {
         let bundled = executable
             .parent()
             .map(|directory| directory.join("settings/DIPfile"));
-        let project = if project.exists() {
-            project.to_path_buf()
+        let project = if let Some(settings_dir) = std::env::var_os("H5JIVE_SETTINGS_DIR") {
+            std::path::PathBuf::from(settings_dir).join("DIPfile")
+        } else if let Some(packaged) = packaged_settings_project(&executable)? {
+            packaged
+        } else if local_project.exists() {
+            local_project.to_path_buf()
         } else if let Some(bundled) = bundled.filter(|path| path.exists()) {
             bundled
         } else {
@@ -549,6 +555,8 @@ impl Settings {
             .ok_or_else(|| format!("Appearance profile {profile_name} is not loaded"))?;
         let palette = profiles[active_profile].palette.clone();
         let settings = Self {
+            path_comparison_enabled: values.boolean("plugins.path_comparison_enabled")?,
+            path_comparison_show_groups: values.boolean("plugins.path_comparison.show_groups")?,
             dataset_rules: read_dataset_rules(&dip)?,
             dataset_sources: read_dataset_sources(&dip, project.parent().unwrap())?,
             profiles,
@@ -622,5 +630,104 @@ impl Settings {
             palette,
         };
         Ok(settings)
+    }
+}
+
+fn packaged_settings_project(
+    executable: &std::path::Path,
+) -> Result<Option<std::path::PathBuf>, Box<dyn std::error::Error>> {
+    use std::path::{Path, PathBuf};
+
+    let package = if cfg!(target_os = "linux") {
+        std::env::var_os("APPDIR").map(|dir| PathBuf::from(dir).join("usr/share/h5jive/settings"))
+    } else if cfg!(target_os = "macos") {
+        executable
+            .parent()
+            .and_then(Path::parent)
+            .map(|contents| contents.join("Resources/settings"))
+    } else {
+        None
+    };
+    let Some(package) = package.filter(|dir| dir.join("DIPfile").is_file()) else {
+        return Ok(None);
+    };
+    let home = std::env::var_os("HOME").ok_or("HOME is needed for packaged settings")?;
+    let destination = if cfg!(target_os = "macos") {
+        PathBuf::from(home).join("Library/Application Support/H5Jive/settings")
+    } else {
+        std::env::var_os("XDG_DATA_HOME")
+            .map(PathBuf::from)
+            .filter(|dir| dir.is_absolute())
+            .unwrap_or_else(|| PathBuf::from(home).join(".local/share"))
+            .join("h5jive/settings")
+    };
+    copy_packaged_settings(&package, &destination)?;
+    Ok(Some(destination.join("DIPfile")))
+}
+
+fn copy_packaged_settings(
+    source: &std::path::Path,
+    destination: &std::path::Path,
+) -> std::io::Result<()> {
+    std::fs::create_dir_all(destination)?;
+    for entry in std::fs::read_dir(source)? {
+        let entry = entry?;
+        let name = entry.file_name();
+        if name == "overrides.dip" || name == ".cache" {
+            continue;
+        }
+        let target = destination.join(name);
+        if entry.file_type()?.is_dir() {
+            copy_packaged_settings(&entry.path(), &target)?;
+        } else if entry.file_type()?.is_file() {
+            std::fs::copy(entry.path(), target)?;
+        }
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod package_tests {
+    use super::copy_packaged_settings;
+
+    #[test]
+    fn packaged_defaults_update_without_replacing_user_overrides_or_cache() {
+        let root = std::env::temp_dir().join(format!(
+            "h5jive-package-settings-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let source = root.join("source");
+        let destination = root.join("user");
+        std::fs::create_dir_all(source.join("schemas")).unwrap();
+        std::fs::create_dir_all(destination.join(".cache")).unwrap();
+        std::fs::write(source.join("DIPfile"), "first").unwrap();
+        std::fs::write(source.join("overrides.dip"), "bundled").unwrap();
+        std::fs::write(source.join("schemas/viewer.dip"), "schema").unwrap();
+        std::fs::write(destination.join("overrides.dip"), "user").unwrap();
+        std::fs::write(destination.join(".cache/index.json"), "cached").unwrap();
+        copy_packaged_settings(&source, &destination).unwrap();
+        std::fs::write(source.join("DIPfile"), "second").unwrap();
+        copy_packaged_settings(&source, &destination).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(destination.join("DIPfile")).unwrap(),
+            "second"
+        );
+        assert_eq!(
+            std::fs::read_to_string(destination.join("overrides.dip")).unwrap(),
+            "user"
+        );
+        assert_eq!(
+            std::fs::read_to_string(destination.join(".cache/index.json")).unwrap(),
+            "cached"
+        );
+        assert_eq!(
+            std::fs::read_to_string(destination.join("schemas/viewer.dip")).unwrap(),
+            "schema"
+        );
+        std::fs::remove_dir_all(root).unwrap();
     }
 }

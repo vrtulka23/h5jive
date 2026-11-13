@@ -10,6 +10,8 @@
 - `crates/h5jive/src/app/` contains the native UI, view controls,
   rendering, settings, and background job coordination. Views call the core
   routines to obtain data for display.
+- `crates/h5jive/src/plugins/` contains optional Plugin Lab tools. See
+  [Plugin Lab](plugin-lab.md) for the extension contract and demo.
 - `settings/` contains DIPL configuration, schemas, and appearance profiles.
 - `examples/` contains the generated array demo and a compact GOME-2 Band 3 sample.
 - `website/` is the static Astro project page; `docs/` is this mdBook guide.

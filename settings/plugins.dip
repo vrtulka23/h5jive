@@ -1,0 +1,2 @@
+# Central switches for Plugin Lab. Add one typed flag per built-in plugin.
+path_comparison_enabled bool = true

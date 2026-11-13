@@ -37,6 +37,9 @@ schemas[]
 schemas[]
   name = "globe_view_settings"
   file = "schemas/views/globe.dip"
+schemas[]
+  name = "path_comparison_plugin_settings"
+  file = "schemas/plugins/path_comparison.dip"
 
 sources[]
   name = "viewer_data"
@@ -56,6 +59,12 @@ sources[]
 sources[]
   name = "viewer_globe"
   filepath = "viewers/globe.dip"
+sources[]
+  name = "viewer_plugins"
+  filepath = "plugins.dip"
+sources[]
+  name = "plugin_path_comparison"
+  filepath = "plugins/path_comparison.dip"
 
 code[]
   file = "viewer.dip"

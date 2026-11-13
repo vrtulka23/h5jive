@@ -105,3 +105,9 @@ views
   spatial_3d : spatial_3d_view_settings
   world_map : world_map_view_settings
   globe : globe_view_settings
+
+plugins
+  ?descr "Built-in plugins; each plugin has its own validated DIPL settings."
+  path_comparison_enabled bool = true
+    ?descr "Show the A/B path comparison plugin in Plugin Lab."
+  path_comparison : path_comparison_plugin_settings

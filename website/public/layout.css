@@ -176,6 +176,7 @@
   display: block;
   padding-block: 100px 110px;
 }
+.plugin-section{border-bottom:1px solid #ffffff1e}.plugin-actions{display:flex;align-items:center;gap:24px;margin-top:34px;flex-wrap:wrap}.plugin-section code{color:#8be0eb}
 
 .section-intro {
   display: grid;

@@ -1,0 +1,75 @@
+---
+import { pluginPages } from '../../data/plugins';
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#081b2d" />
+    <meta name="description" content="Plugin Lab: extend the open source H5Jive scientific data explorer with your own analysis." />
+    <link rel="icon" type="image/png" href="../h5jive-icon.png" />
+    <link rel="stylesheet" href="../site.css" />
+    <link rel="stylesheet" href="../layout.css" />
+    <link rel="stylesheet" href="../plugins.css" />
+    <title>Plugin Lab — H5Jive</title>
+  </head>
+  <body>
+    <header class="topbar wrap">
+      <a class="brand" href="../" aria-label="H5Jive home"><img class="brand-icon" src="../h5jive.png" width="42" height="42" alt="" /> H5Jive</a>
+      <nav aria-label="Main navigation">
+        <a href="../#capabilities">Capabilities</a>
+        <a href="../#views">Views</a>
+        <a href="#catalog" aria-current="page">Plugins</a>
+        <a href="../guide/">Guide</a>
+        <a class="nav-cta" href="https://github.com/vrtulka23/h5jive">Source code <span aria-hidden="true">↗</span></a>
+      </nav>
+    </header>
+
+    <main>
+      <section class="lab-hero wrap">
+        <div class="lab-hero-copy">
+          <p class="eyebrow">H5JIVE / PLUGIN LAB</p>
+          <h1>Bring your analysis<br /><em>into the explorer.</em></h1>
+          <p class="lab-lede">Plugin Lab is a growing collection of optional scientific tools. Start with H5Jive's file browser, data access, and visualizations; add the workflow your research needs.</p>
+          <div class="lab-actions"><a class="button primary" href="#catalog">Explore plugins <span>↓</span></a><a class="text-link" href="#create">Create a plugin <span>→</span></a></div>
+        </div>
+        <div class="lab-flow" aria-label="Plugin Lab builds on H5Jive's core">
+          <div><span>01 / LOAD</span><strong>HDF5 + NetCDF</strong><small>Use the same file slots A and B</small></div>
+          <div><span>02 / EXTEND</span><strong>Your analysis</strong><small>Keep each tool in its own module</small></div>
+          <div><span>03 / EXPLORE</span><strong>Core views</strong><small>Open a result in the inspector</small></div>
+        </div>
+      </section>
+
+      <section class="lab-benefits">
+        <div class="wrap lab-benefit-grid">
+          <article><span>BUILT WITH DEAR IMGUI</span><h2>Native, responsive UI</h2><p>Plugin panels use the same immediate mode desktop interface as H5Jive's data inspector.</p></article>
+          <article><span>NO ADMIN RIGHTS</span><h2>Install in your space</h2><p>Release installers place H5Jive in your user directory, with no administrator permission needed.</p></article>
+          <article><span>X11 SUPPORT</span><h2>Work remotely</h2><p>On Linux, H5Jive can use OpenGL for SSH forwarded X11 sessions when a compatible graphics stack is available.</p></article>
+        </div>
+      </section>
+
+      <section id="catalog" class="wrap lab-catalog">
+        <div class="lab-section-heading"><div><p class="eyebrow">THE COLLECTION</p><h2>Available plugins.</h2></div><p>Enable each tool centrally with DIPL. Plugins are compiled from source and kept separate from the core views.</p></div>
+        <div class="lab-plugin-list">
+          {pluginPages.map((plugin, index) => <article class="lab-plugin-card">
+            <div class="lab-plugin-mark" aria-hidden="true"><span>A</span><i>⇄</i><span>B</span></div>
+            <div class="lab-plugin-main"><p class="lab-plugin-index">PLUGIN {String(index + 1).padStart(2, '0')}</p><h3>{plugin.name}</h3><p>{plugin.summary}</p><ul>{plugin.details.map((detail) => <li>{detail}</li>)}</ul><div class="lab-plugin-links"><a href={plugin.source}>View source <span>↗</span></a><a href="https://github.com/vrtulka23/h5jive/tree/main/examples">Try the demo <span>↗</span></a></div></div>
+            <div class="lab-plugin-setting"><span>DIPL SWITCH</span><code>{plugin.setting}</code><small>settings/plugins.dip</small></div>
+          </article>)}
+        </div>
+        <p class="lab-catalog-note">The first plugin compares object kinds, shapes, datatypes, and displayed attribute values. Dataset values are not compared; some large or unsupported attributes are summarized by the metadata reader.</p>
+      </section>
+
+      <section id="create" class="lab-create">
+        <div class="wrap lab-create-grid"><div><p class="eyebrow">FOR SCIENTISTS AND BUILDERS</p><h2>Make the tool<br />you wish existed.</h2><p>You can start with a sample file and a question, even if Rust is new to you. Download the source, add a focused plugin module, give it a DIPL switch, and share it through the Plugin Lab catalog.</p><div class="lab-actions"><a class="button primary" href="https://github.com/vrtulka23/h5jive">Download source <span>↗</span></a><a class="text-link" href="../guide/plugin-lab.html">Read the full plugin guide <span>→</span></a></div></div>
+          <div class="lab-steps"><div><b>01</b><p><strong>Start with one result.</strong> Describe the calculation or comparison you need and the dataset it should use.</p></div><div><b>02</b><p><strong>Build inside Plugin Lab.</strong> Use the shared file API, keep UI and state in <code>src/plugins/</code>, and return a selection to reuse core views.</p></div><div><b>03</b><p><strong>Test and submit.</strong> Add a small demo, check known results, then open a pull request for the <a href="https://github.com/vrtulka23/h5jive/tree/main/plugins">small app store</a>.</p></div></div>
+        </div>
+      </section>
+
+      <section class="wrap lab-agent"><div><p class="eyebrow">WORKING WITH AN AI CODING AGENT</p><h2>A useful first prompt.</h2><p>Give the agent your goal, a small file, and an expected result. Review the generated code and compare its output with a value you already know.</p></div><blockquote>“Add a Plugin Lab tool that computes the mean of my selected numeric dataset. Reuse H5Jive's data access and inspector views. Keep the code in <code>src/plugins/</code>, add a separate DIPL settings file and central enabled switch, create a small demo, and test the result against a known mean.”</blockquote><p class="lab-agent-note">Future coding agents can follow the repository's <a href="https://github.com/vrtulka23/h5jive/blob/main/crates/h5jive/src/plugins/AGENTS.md">plugin notes</a>; humans can start with the <a href="../guide/plugin-lab.html">Plugin Lab guide</a>.</p></section>
+    </main>
+    <footer class="footer wrap"><a class="brand" href="../"><img class="brand-icon" src="../h5jive.png" width="32" height="32" alt="" /> H5Jive</a><span>Dig into your data.</span><span>© H5Jive contributors</span></footer>
+  </body>
+</html>

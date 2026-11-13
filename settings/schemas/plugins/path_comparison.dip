@@ -1,0 +1,3 @@
+?descr "Compare the group and dataset paths in loaded files A and B."
+show_groups bool = true
+  ?descr "Include groups as well as datasets in the comparison."

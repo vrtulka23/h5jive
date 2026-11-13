@@ -6,6 +6,8 @@ mod geo_texture;
 mod jobs;
 mod layout;
 mod model;
+#[path = "plugins/mod.rs"]
+mod plugins;
 mod settings;
 mod ui;
 mod value_visibility;
@@ -174,6 +176,7 @@ struct App {
     heatmap_nav_override: Option<(HeatmapRangeKey, [f64; 4])>,
     view_selector_height: f32,
     workspace_mode: WorkspaceMode,
+    plugins: plugins::PluginLab,
     dataset_browser: DatasetBrowser,
     browser_footer_height: f32,
     view: ViewMode,
@@ -207,6 +210,11 @@ impl Application for App {
         let plot_ui = ui.implot(plot_ctx);
         self.draw(ui, &plot_ui, plot_ctx);
         if self.pending_export.is_some() {
+            let _ = frame.wake_handle().request_redraw_at(
+                std::time::Instant::now() + std::time::Duration::from_millis(80),
+            );
+        }
+        if self.plugins.is_busy() {
             let _ = frame.wake_handle().request_redraw_at(
                 std::time::Instant::now() + std::time::Duration::from_millis(80),
             );
@@ -378,6 +386,7 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
         heatmap_nav_override: None,
         view_selector_height: settings.view_button_height + 4.0,
         workspace_mode: WorkspaceMode::DataInspector,
+        plugins: plugins::PluginLab::default(),
         dataset_browser: DatasetBrowser::new(&settings.dataset_sources),
         browser_footer_height: 105.0,
         view: view_override.unwrap_or(settings.default_view),

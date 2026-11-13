@@ -186,10 +186,39 @@ jobs:
           (cd "$(mktemp -d)" && "$bundle_exe" --inspect)
           (cd bundle && zip -qr ../dist/${{ matrix.archive }} .)
 
+      - name: Build Linux AppImage
+        if: runner.os == 'Linux'
+        run: sh .github/scripts/package-linux-appimage.sh
+
+      - name: Build macOS disk image
+        if: runner.os == 'macOS'
+        run: sh .github/scripts/package-macos-dmg.sh ${{ matrix.target == 'x86_64-apple-darwin' && 'x86_64' || 'aarch64' }}
+
+      - name: Install Inno Setup
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: choco install innosetup --yes --no-progress
+
+      - name: Build and smoke test Windows installer
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $version = (Select-String -Path crates/h5jive/Cargo.toml -Pattern '^version = "([^"]+)"' | Select-Object -First 1).Matches.Groups[1].Value
+          $env:H5JIVE_VERSION = $version
+          & 'C:\Program Files (x86)\Inno Setup 6\ISCC.exe' '.github\scripts\h5jive.iss'
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $installer = (Resolve-Path 'dist\h5jive-windows-x86_64-setup.exe').Path
+          $installDir = Join-Path $env:RUNNER_TEMP 'H5JiveInstallerTest'
+          $process = Start-Process -FilePath $installer -ArgumentList @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', "/DIR=`"$installDir`"") -Wait -PassThru
+          if ($process.ExitCode -ne 0) { throw "Installer failed: $($process.ExitCode)" }
+          & (Join-Path $installDir 'h5jive.exe') --inspect
+          if ($LASTEXITCODE -ne 0) { throw 'Installed app could not read its settings.' }
+          if (-not (Test-Path (Join-Path $installDir 'settings\DIPfile'))) { throw 'Installed DIPL settings are missing.' }
+
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.archive }}
-          path: dist/${{ matrix.archive }}
+          path: dist/*
           if-no-files-found: error
 
   attach:
@@ -203,7 +232,7 @@ jobs:
           pattern: h5jive-*
           path: dist
           merge-multiple: true
-      - name: Attach native archives to release
+      - name: Attach native downloads to release
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ needs.prepare.outputs.tag }}

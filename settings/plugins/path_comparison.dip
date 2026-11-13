@@ -1,0 +1,2 @@
+# Settings owned by the path comparison plugin.
+show_groups bool = true

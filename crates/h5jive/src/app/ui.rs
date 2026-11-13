@@ -303,7 +303,7 @@ pub(super) fn draw_workspace_mode_icon(
                 .thickness(1.5)
                 .build();
         }
-        WorkspaceMode::Comparison => {
+        WorkspaceMode::PluginLab => {
             draw.add_rect(p(1.5, 3.0), p(9.0, 16.0), color)
                 .rounding(1.0)
                 .thickness(1.5)

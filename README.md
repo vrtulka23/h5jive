@@ -3,7 +3,7 @@
 **Dig into your data.**
 
 [![Build and test](https://github.com/vrtulka23/h5jive/actions/workflows/build-test.yml/badge.svg)](https://github.com/vrtulka23/h5jive/actions/workflows/build-test.yml)
-[![Native release builds](https://github.com/vrtulka23/h5jive/actions/workflows/native-release.yml/badge.svg)](https://github.com/vrtulka23/h5jive/actions/workflows/native-release.yml)
+[![Native release builds](https://github.com/vrtulka23/h5jive/actions/workflows/native-release.yml/badge.svg?event=release)](https://github.com/vrtulka23/h5jive/actions/workflows/native-release.yml)
 [![Latest release](https://img.shields.io/github/v/release/vrtulka23/h5jive)](https://github.com/vrtulka23/h5jive/releases)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Guide](https://img.shields.io/badge/docs-project%20guide-orange.svg)](docs/README.md)
@@ -14,7 +14,26 @@ H5Jive is a native desktop explorer for HDF5 and NetCDF data. Browse local
 products, inspect dataset metadata and statistics, and view tables, profiles,
 2D slices, 3D volumes, and geolocated satellite swaths on a map or globe.
 
+**Plugin Lab** is the third workspace mode. It hosts optional tools that reuse
+H5Jive's file access and visualizations. Try the bundled
+[A/B path comparison demo](examples/README.md), or use the
+[contributor guide](docs/src/plugin-lab.md) to build and share a plugin through
+the [Plugin Lab catalog](plugins/README.md).
+
 ## Install a release
+
+New [releases](https://github.com/vrtulka23/h5jive/releases) built from this
+revision provide a Windows setup `.exe`, a macOS `.dmg` for each Mac
+architecture, and a Linux AppImage. The Windows setup installs for the current
+user without an administrator password. On macOS, drag `H5Jive.app` from the disk image into
+`~/Applications`. On Linux, make the AppImage executable and run it. These
+packages keep DIPL settings and caches in your user directory; local
+`overrides.dip` values survive app upgrades. The macOS disk images are not yet
+Developer ID signed or notarized, so macOS may ask you to use **Open Anyway**
+in Privacy & Security when opening the app for the first time. If Linux lacks
+FUSE support, run the AppImage with `--appimage-extract-and-run`.
+
+The portable archives and script installers remain available:
 
 Once a release with native assets is published, the installers download the
 archive for your system, verify its SHA-256 checksum, and install it in your
@@ -84,8 +103,9 @@ h5jive path/to/product.nc:/group/radiance
 Append `:/dataset/path` to a file path to select that dataset when the viewer
 opens. With two files, the first specified dataset is selected initially.
 
-The top mode bar offers a dataset browser and a data inspector. The comparison
-tab is present, but its tools are not available yet. The
+The top mode bar offers a dataset browser, a data inspector, and Plugin Lab.
+The first Plugin Lab tool compares two files by path, object kind, dataset
+shape and datatype, and group or dataset attributes. The
 [exploring data guide](docs/src/exploring-data.md) explains the available views
 and controls.
 
