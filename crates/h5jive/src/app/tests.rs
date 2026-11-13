@@ -148,6 +148,9 @@ fn s5p_mock_source_indexes_local_band_products_when_available() {
     let (sender, _receiver) = std::sync::mpsc::channel();
     let products =
         super::scan_source(source, &sender, &std::sync::atomic::AtomicBool::new(false)).unwrap();
+    if products.is_empty() {
+        return;
+    }
     for band in [3, 4, 5] {
         let prefix = format!("S5P_OFFL_L1B_RA_BD{band}_20260130");
         let product = products

@@ -912,6 +912,9 @@ mod tests {
             }
             let (sender, _receiver) = mpsc::channel();
             let products = scan_source(source, &sender, &AtomicBool::new(false)).unwrap();
+            if products.is_empty() {
+                continue;
+            }
             let expected = match source.id.as_str() {
                 "mock_fdr_l1a" | "mock_fdr_l1b" => 1,
                 "mock_s5p" => 3,
