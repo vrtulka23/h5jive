@@ -40,9 +40,10 @@ values. The colored buttons also identify the special-value colors.
   zoom tiles load in the background. Automatic colors use the overview range
   for these arrays, avoiding a second full-plane read.
 - **3D projection:** view voxel data with axis remapping, index ranges, opacity,
-  logarithmic coloring, and orthographic presets. Left drag rotates the object;
+  logarithmic coloring, and preset orientations. Left drag rotates the object;
   right or middle drag, or Shift+left drag, moves it. Use **Center object** to
-  reset its position. The displayed side lengths follow each axis's pixel count.
+  reset its position. A perspective camera makes near faces appear larger than
+  distant faces. The displayed side lengths follow each axis's pixel count.
   The last sharp image stays visible while a new angle renders, and the
   completed image uses native voxel values when the selected volume fits the
   exact loader. Larger selections use a bounded sampled preview, labeled in

@@ -4,10 +4,10 @@ use super::*;
 pub(crate) fn heatmap_visible_bounds(rows: usize, columns: usize, limits: [f64; 4]) -> [usize; 4] {
     let clamp = |v: f64, length: usize| -> usize { v.floor().clamp(0.0, length as f64) as usize };
     [
-        clamp(rows as f64 - limits[3], rows),
-        limits[2]
+        clamp(limits[2], rows),
+        limits[3]
             .is_finite()
-            .then(|| (rows as f64 - limits[2]).ceil().clamp(0.0, rows as f64) as usize)
+            .then(|| limits[3].ceil().clamp(0.0, rows as f64) as usize)
             .unwrap_or(0),
         clamp(limits[0], columns),
         limits[1]
@@ -15,6 +15,17 @@ pub(crate) fn heatmap_visible_bounds(rows: usize, columns: usize, limits: [f64; 
             .then(|| limits[1].ceil().clamp(0.0, columns as f64) as usize)
             .unwrap_or(0),
     ]
+}
+
+fn flip_heatmap_plot_rows(plotted: &mut [f64], columns: usize) {
+    // ImPlot maps its first input row to the top. Reverse only the color
+    // buffer so native row 0 is drawn at y = 0 while values keep source order.
+    let rows = plotted.len() / columns;
+    for row in 0..rows / 2 {
+        for column in 0..columns {
+            plotted.swap(row * columns + column, (rows - 1 - row) * columns + column);
+        }
+    }
 }
 pub(crate) fn heatmap_tile_bounds(
     rows: usize,
@@ -91,6 +102,7 @@ pub(crate) fn load_heatmap_tile_with_cancel(
             values.push(value);
         }
     }
+    flip_heatmap_plot_rows(&mut plotted, c1 - c0);
     let mut range = None;
     extend_finite_range(&mut range, &values, region.fill_value);
     Ok(HeatmapImage {
@@ -138,15 +150,23 @@ pub(crate) fn load_heatmap_overview_with_cancel(
     let mut values = vec![0.0; grid[0] * grid[1]];
     let mut plotted = vec![0.0; values.len()];
     let mut fill_value = None;
-    let tile_columns = columns.min(256);
-    let tile_rows = rows.min((65_536 / tile_columns).max(1));
-    for row_start in (0..rows).step_by(tile_rows) {
+    // Read only the rows represented in the overview. Large compressed datasets
+    // may store one whole scanline per chunk, so reading skipped rows still
+    // decompresses their chunks even when none of their values are used.
+    let tile_columns = columns.min(65_536);
+    let max_tile_rows = (65_536 / tile_columns).max(1);
+    let mut first_row = 0;
+    while first_row < sample_rows.len() {
         if cancelled() {
             return Err("2D loading cancelled".into());
         }
-        let row_end = (row_start + tile_rows).min(rows);
-        let first_row = sample_rows.partition_point(|&row| row < row_start);
-        let last_row = sample_rows.partition_point(|&row| row < row_end);
+        let mut last_row = first_row + 1;
+        while last_row < sample_rows.len()
+            && last_row - first_row < max_tile_rows
+            && sample_rows[last_row] == sample_rows[last_row - 1] + 1
+        {
+            last_row += 1;
+        }
         for column_start in (0..columns).step_by(tile_columns) {
             if cancelled() {
                 return Err("2D loading cancelled".into());
@@ -154,10 +174,16 @@ pub(crate) fn load_heatmap_overview_with_cancel(
             let column_end = (column_start + tile_columns).min(columns);
             let first_column = sample_columns.partition_point(|&column| column < column_start);
             let last_column = sample_columns.partition_point(|&column| column < column_end);
-            if first_row == last_row || first_column == last_column {
+            if first_column == last_column {
                 continue;
             }
-            let (start, count) = slice.region(shape, row_start, row_end, column_start, column_end);
+            let (start, count) = slice.region(
+                shape,
+                sample_rows[first_row],
+                sample_rows[last_row - 1] + 1,
+                sample_columns[first_column],
+                sample_columns[last_column - 1] + 1,
+            );
             let region = file
                 .region(path, &start, &count)
                 .map_err(|err| err.to_string())?;
@@ -178,7 +204,9 @@ pub(crate) fn load_heatmap_overview_with_cancel(
                 }
             }
         }
+        first_row = last_row;
     }
+    flip_heatmap_plot_rows(&mut plotted, grid[1]);
     let mut range = None;
     extend_finite_range(&mut range, &values, fill_value);
     Ok(HeatmapImage {

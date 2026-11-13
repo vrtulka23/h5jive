@@ -48,6 +48,7 @@ use std::{
         mpsc, Arc,
     },
     thread,
+    time::{Duration, Instant},
 };
 
 const TABLE_CELL_PADDING: [f32; 2] = [8.0, 5.0];
@@ -58,6 +59,11 @@ const CONTROL_FRAME_PADDING: [f32; 2] = [6.0, 3.0];
 const CONTROL_INNER_SPACING: [f32; 2] = [6.0, 4.0];
 const VALUE_GRID_HEIGHT: f32 = 4.0 * 26.0 + 3.0 * PANEL_GAP;
 const PLOT_NAV_HEIGHT: f32 = VALUE_GRID_HEIGHT + PANEL_GAP + 58.0;
+const REFINEMENT_IDLE: Duration = Duration::from_millis(150);
+
+fn volume_camera_distance(scale: [f32; 3]) -> f32 {
+    (scale.iter().sum::<f32>() * 2.0).max(1.0)
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum PlotNavAction {
@@ -100,6 +106,8 @@ struct App {
     heatmap_cache: Option<(HeatmapKey, Result<Arc<HeatmapImage>, String>)>,
     heatmap_tiles: Vec<(HeatmapKey, Arc<HeatmapImage>)>,
     heatmap_tile_job: Option<(HeatmapKey, mpsc::Receiver<Result<HeatmapImage, String>>)>,
+    heatmap_refine_generation: Arc<AtomicU64>,
+    heatmap_navigation_at: Option<Instant>,
     heatmap_overview_cache: Option<(HeatmapOverviewKey, Result<HeatmapImage, String>)>,
     heatmap_overview_job: Option<(
         HeatmapOverviewKey,
@@ -120,6 +128,9 @@ struct App {
         VolumeKey,
         mpsc::Receiver<Result<Arc<ExactVolumeData>, String>>,
     )>,
+    volume_refine_generation: Arc<AtomicU64>,
+    volume_raster_generation: Arc<AtomicU64>,
+    volume_navigation_at: Option<Instant>,
     volume_raster: Option<(VolumeRasterKey, RegisteredVolumeRaster)>,
     volume_overview_raster: Option<(VolumeRasterKey, RegisteredVolumeRaster)>,
     volume_raster_job: Option<(VolumeRasterKey, mpsc::Receiver<Vec<u8>>)>,
@@ -200,6 +211,15 @@ impl Application for App {
                 std::time::Instant::now() + std::time::Duration::from_millis(80),
             );
         }
+        for activity in [self.heatmap_navigation_at, self.volume_navigation_at]
+            .into_iter()
+            .flatten()
+        {
+            let deadline = activity + REFINEMENT_IDLE;
+            if deadline > Instant::now() {
+                let _ = frame.wake_handle().request_redraw_at(deadline);
+            }
+        }
         Ok(())
     }
 }
@@ -219,22 +239,12 @@ struct FilePickerState {
 }
 
 pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
-    let mut args: Vec<String> = env::args().skip(1).collect();
-    if args.first().is_some_and(|s| s == "--help" || s == "-h") {
-        println!("H5Jive [--inspect] [FILE_A[:/DATASET]] [FILE_B[:/DATASET]]\nReads HDF5 and NetCDF files. DIPL project: settings/DIPfile; local overrides: settings/overrides.dip");
+    let args: Vec<String> = env::args().skip(1).collect();
+    if args.iter().any(|arg| arg == "--help" || arg == "-h") {
+        println!("H5Jive [--inspect] [--view-VIEW] [FILE_A[:/DATASET]] [FILE_B[:/DATASET]]\nVIEW: data, 1d-profiles, 2d-slice, 3d, world-map, globe (requires :/DATASET)\nReads HDF5 and NetCDF files. DIPL project: settings/DIPfile; local overrides: settings/overrides.dip");
         return Ok(());
     }
-    let inspect = args.first().is_some_and(|s| s == "--inspect");
-    if inspect {
-        args.remove(0);
-    }
-    if args.len() > 2 {
-        return Err("expected at most two file paths".into());
-    }
-    let inputs = args
-        .iter()
-        .map(|arg| parse_input_spec(arg))
-        .collect::<Result<Vec<_>, _>>()?;
+    let (inspect, view_override, inputs) = parse_startup_args(&args)?;
     let settings = Settings::load()?;
     let files: Vec<File> = inputs
         .iter()
@@ -307,6 +317,8 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
         heatmap_cache: None,
         heatmap_tiles: Vec::new(),
         heatmap_tile_job: None,
+        heatmap_refine_generation: Arc::new(AtomicU64::new(0)),
+        heatmap_navigation_at: None,
         heatmap_overview_cache: None,
         heatmap_overview_job: None,
         heatmap_range_cache: None,
@@ -318,6 +330,9 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
         volume_overview_cache: None,
         volume_refined_cache: Vec::new(),
         volume_job: None,
+        volume_refine_generation: Arc::new(AtomicU64::new(0)),
+        volume_raster_generation: Arc::new(AtomicU64::new(0)),
+        volume_navigation_at: None,
         volume_raster: None,
         volume_overview_raster: None,
         volume_raster_job: None,
@@ -365,7 +380,7 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
         workspace_mode: WorkspaceMode::DataInspector,
         dataset_browser: DatasetBrowser::new(&settings.dataset_sources),
         browser_footer_height: 105.0,
-        view: settings.default_view,
+        view: view_override.unwrap_or(settings.default_view),
         view_load_generation: Arc::new(AtomicU64::new(0)),
         value_visibility: ValueVisibility::default(),
         volume_visibility: ValueVisibility {
@@ -379,6 +394,53 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
     };
     run_app(config, app)?;
     Ok(())
+}
+fn parse_startup_args(
+    args: &[String],
+) -> Result<(bool, Option<ViewMode>, Vec<(PathBuf, Option<String>)>), String> {
+    let mut inspect = false;
+    let mut view = None;
+    let mut inputs = Vec::new();
+    let mut literal_paths = false;
+    for arg in args {
+        if !literal_paths && arg == "--" {
+            literal_paths = true;
+            continue;
+        }
+        if !literal_paths && arg == "--inspect" {
+            inspect = true;
+            continue;
+        }
+        if !literal_paths && arg.starts_with("--view-") {
+            let requested = match arg.as_str() {
+                "--view-data" => ViewMode::Data,
+                "--view-1d-profiles" => ViewMode::Profiles1d,
+                "--view-2d-slice" => ViewMode::Slice2d,
+                "--view-3d" => ViewMode::Spatial3d,
+                "--view-world-map" => ViewMode::WorldMap,
+                "--view-globe" => ViewMode::Globe,
+                _ => return Err(format!("unknown view option: {arg}")),
+            };
+            if view.replace(requested).is_some() {
+                return Err("specify only one --view-* option".into());
+            }
+            continue;
+        }
+        if !literal_paths && arg.starts_with('-') {
+            return Err(format!("unknown option: {arg}"));
+        }
+        inputs.push(parse_input_spec(arg)?);
+    }
+    if inputs.len() > 2 {
+        return Err("expected at most two file paths".into());
+    }
+    if view.is_some() && !inputs.iter().any(|(_, dataset)| dataset.is_some()) {
+        return Err("a --view-* option requires FILE:/DATASET".into());
+    }
+    if inspect && view.is_some() {
+        return Err("--inspect cannot be combined with --view-*".into());
+    }
+    Ok((inspect, view, inputs))
 }
 fn parse_input_spec(arg: &str) -> Result<(PathBuf, Option<String>), String> {
     if let Some((file, dataset)) = arg.rsplit_once(":/") {

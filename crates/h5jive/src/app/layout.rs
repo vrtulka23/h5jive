@@ -1,5 +1,15 @@
 use super::*;
 
+fn volume_key_cells(key: &VolumeKey) -> usize {
+    key.slice
+        .axes
+        .iter()
+        .flatten()
+        .fold(1usize, |total, &axis| {
+            total.saturating_mul(key.slice.ranges[axis][1] - key.slice.ranges[axis][0] + 1)
+        })
+}
+
 impl App {
     pub(super) fn draw(&mut self, ui: &Ui, plot_ui: &PlotUi<'_>, plot_ctx: &PlotContext) {
         self.poll_file_open_jobs();
@@ -399,15 +409,23 @@ impl App {
                 tasks.push(if slot == 0 { "file A" } else { "file B" });
             }
         }
+        if let Some(label) = self.map_loading_label() {
+            tasks.push(label);
+        }
+        if let Some(label) = self.heatmap_tile_loading_label() {
+            tasks.push(label);
+        }
+        if let Some(label) = self.volume_loading_label() {
+            tasks.push(label);
+        }
+        if let Some(label) = self.volume_raster_loading_label() {
+            tasks.push(label);
+        }
         for (active, label) in [
+            (self.heatmap_overview_job.is_some(), "2D image"),
+            (self.heatmap_range_job.is_some(), "2D range"),
             (self.statistics_job.is_some(), "stats"),
             (self.distribution_job.is_some(), "distribution"),
-            (self.heatmap_overview_job.is_some(), "2D image"),
-            (self.heatmap_tile_job.is_some(), "2D tile"),
-            (self.heatmap_range_job.is_some(), "2D range"),
-            (self.volume_job.is_some(), "3D volume"),
-            (self.volume_raster_job.is_some(), "3D render"),
-            (self.map_job.is_some(), "map"),
         ] {
             if active {
                 tasks.push(label);
@@ -444,6 +462,102 @@ impl App {
                 &self.settings.palette,
             );
         }
+    }
+
+    fn heatmap_tile_loading_label(&self) -> Option<&'static str> {
+        let (working, _) = self.heatmap_tile_job.as_ref()?;
+        let previous = self
+            .heatmap_cache
+            .as_ref()
+            .filter(|(_, result)| result.is_ok())
+            .map(|(key, _)| key)
+            .or_else(|| self.heatmap_tiles.last().map(|(key, _)| key));
+        let Some(previous) = previous.filter(|previous| {
+            previous.file == working.file
+                && previous.path == working.path
+                && previous.slice == working.slice
+        }) else {
+            return Some(
+                if self
+                    .heatmap_overview_cache
+                    .as_ref()
+                    .is_some_and(|(key, result)| {
+                        key.file == working.file
+                            && key.path == working.path
+                            && key.slice == working.slice
+                            && result.is_ok()
+                    })
+                {
+                    "2D tile (refining resolution)"
+                } else {
+                    "2D tile"
+                },
+            );
+        };
+        let area =
+            |bounds: [usize; 4]| (bounds[1] - bounds[0]).saturating_mul(bounds[3] - bounds[2]);
+        Some(match area(working.bounds).cmp(&area(previous.bounds)) {
+            std::cmp::Ordering::Less => "2D tile (refining resolution)",
+            std::cmp::Ordering::Greater => "2D tile (reducing detail)",
+            std::cmp::Ordering::Equal => "2D region",
+        })
+    }
+
+    fn volume_loading_label(&self) -> Option<&'static str> {
+        let (working, _) = self.volume_job.as_ref()?;
+        let Some((previous, Ok(_))) = self.volume_cache.as_ref().filter(|(key, _)| {
+            key.file == working.file
+                && key.path == working.path
+                && key.slice.axes == working.slice.axes
+        }) else {
+            return Some("3D volume");
+        };
+        Some(
+            match volume_key_cells(working).cmp(&volume_key_cells(previous)) {
+                std::cmp::Ordering::Less => "3D volume (refining resolution)",
+                std::cmp::Ordering::Greater => "3D volume (reducing detail)",
+                std::cmp::Ordering::Equal => "3D region",
+            },
+        )
+    }
+
+    fn volume_raster_loading_label(&self) -> Option<&'static str> {
+        let (working, _) = self.volume_raster_job.as_ref()?;
+        let Some((previous, _)) = self.volume_raster.as_ref().filter(|(key, _)| {
+            key.volume.file == working.volume.file && key.volume.path == working.volume.path
+        }) else {
+            return Some("3D render");
+        };
+        let smallest_layer =
+            |key: &VolumeRasterKey| key.layer_keys.iter().map(volume_key_cells).min();
+        Some(if working.scale[0] > previous.scale[0] * 1.001 {
+            "3D render (refining resolution)"
+        } else if working.scale[0] < previous.scale[0] * 0.999 {
+            "3D render (reducing detail)"
+        } else if smallest_layer(working) < smallest_layer(previous) {
+            "3D render (refining resolution)"
+        } else if smallest_layer(working) > smallest_layer(previous) {
+            "3D render (reducing detail)"
+        } else {
+            "3D render"
+        })
+    }
+
+    fn map_loading_label(&self) -> Option<&'static str> {
+        let (working, _) = self.map_job.as_ref()?;
+        let Some((previous, Ok(_))) = self.map_cache.as_ref().filter(|(key, _)| {
+            key.file == working.file
+                && key.path == working.path
+                && key.time == working.time
+                && key.spectral == working.spectral
+        }) else {
+            return Some("map");
+        };
+        Some(match working.max_points.cmp(&previous.max_points) {
+            std::cmp::Ordering::Greater => "map (refining resolution)",
+            std::cmp::Ordering::Less => "map (reducing detail)",
+            std::cmp::Ordering::Equal => "map",
+        })
     }
     fn draw_workspace_placeholder(&mut self, ui: &Ui, top: f32, height: f32, flags: WindowFlags) {
         ui.window(format!("{}###workspace_content", self.workspace_mode.title()))

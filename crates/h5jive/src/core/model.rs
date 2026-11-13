@@ -245,6 +245,18 @@ impl TableSlice {
         }
         slice
     }
+    pub(crate) fn for_heatmap(
+        shape: &[usize],
+        first_is_time: bool,
+        pinned_default: PinnedDefault,
+    ) -> Self {
+        let mut slice = Self::with_leading_time(shape, first_is_time, pinned_default);
+        if shape.len() >= 2 && slice.row_axis.is_none() {
+            slice.row_axis = Some(0);
+            slice.column_axis = 1;
+        }
+        slice
+    }
     pub(crate) fn rows(&self, shape: &[usize]) -> usize {
         self.row_axis
             .map_or(shape[self.column_axis], |axis| shape[axis])

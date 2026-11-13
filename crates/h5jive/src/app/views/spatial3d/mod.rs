@@ -26,7 +26,7 @@ fn volume_cell_size(data: &ExactVolumeData) -> f64 {
 }
 
 impl App {
-    fn poll_volume(&mut self, key: &VolumeKey, shape: &[usize]) {
+    fn poll_volume(&mut self, key: &VolumeKey, shape: &[usize], allow_refine: bool) {
         let overview_key = VolumeKey {
             file: key.file,
             path: key.path.clone(),
@@ -113,6 +113,9 @@ impl App {
             } else {
                 key
             };
+            if load_key != &overview_key && !allow_refine {
+                return;
+            }
             let path = self.file_paths[load_key.file].clone();
             let dataset_path = load_key.path.clone();
             let shape = shape.to_vec();
@@ -120,9 +123,16 @@ impl App {
             let preview_limit = self.settings.volume_preview_max_voxels;
             let generation = Arc::clone(&self.view_load_generation);
             let expected = generation.load(Ordering::Relaxed);
+            let refinement = Arc::clone(&self.volume_refine_generation);
+            let expected_refinement = refinement.load(Ordering::Relaxed);
+            let is_overview = load_key == &overview_key;
             let (sender, receiver) = mpsc::channel();
             thread::spawn(move || {
-                if generation.load(Ordering::Relaxed) != expected {
+                let cancelled = || {
+                    generation.load(Ordering::Relaxed) != expected
+                        || !is_overview && refinement.load(Ordering::Relaxed) != expected_refinement
+                };
+                if cancelled() {
                     return;
                 }
                 let result = open_dataset_reader(&path).and_then(|file| {
@@ -132,7 +142,7 @@ impl App {
                         &shape,
                         &slice,
                         preview_limit,
-                        &|| generation.load(Ordering::Relaxed) != expected,
+                        &cancelled,
                     )
                     .map(Arc::new)
                 });
@@ -153,6 +163,7 @@ impl App {
         let Some(slice) = self.applied_volume.clone() else {
             return;
         };
+        let previous_camera = (self.volume_zoom, self.volume_pan, self.volume_rotation.0);
         let available = ui.content_region_avail();
         if available[0] < 180.0 || available[1] < 150.0 {
             ui.text_wrapped("Enlarge the preview panel to show the volume.");
@@ -202,6 +213,13 @@ impl App {
             self.volume_zoom = (self.volume_zoom * (1.0 + ui.io().mouse_wheel() * 0.1))
                 .clamp(0.35, self.settings.volume_max_zoom);
         }
+        if previous_camera.0 != self.volume_zoom {
+            self.note_volume_zoom();
+        } else if previous_camera.1 != self.volume_pan
+            || previous_camera.2 != self.volume_rotation.0
+        {
+            self.volume_navigation_at = None;
+        }
         let draw = ui.get_window_draw_list();
         draw.add_rect(
             origin,
@@ -244,7 +262,11 @@ impl App {
             path: selection.path.clone(),
             slice: request_slice,
         };
-        self.poll_volume(&key, shape);
+        self.poll_volume(
+            &key,
+            shape,
+            Self::refinement_settled(self.volume_navigation_at),
+        );
         draw_volume_box(
             &draw,
             center,
@@ -324,7 +346,7 @@ impl App {
                     .as_ref()
                     .is_some_and(|(cached, _)| cached == &raster_key);
                 let preview = self.volume_raster_preview(&raster_key, &key);
-                if !raster_is_current {
+                if !raster_is_current && Self::refinement_settled(self.volume_navigation_at) {
                     let colors = std::array::from_fn(|index| {
                         continuous_color(
                             plot_ctx,
@@ -451,6 +473,13 @@ impl App {
                     (self.volume_zoom * 1.1).clamp(0.35, self.settings.volume_max_zoom);
             }
             PlotNavAction::None => {}
+        }
+        if previous_camera.0 != self.volume_zoom {
+            self.note_volume_zoom();
+        } else if previous_camera.1 != self.volume_pan
+            || previous_camera.2 != self.volume_rotation.0
+        {
+            self.volume_navigation_at = None;
         }
     }
 

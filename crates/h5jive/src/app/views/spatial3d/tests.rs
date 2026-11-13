@@ -63,6 +63,19 @@ fn rotated_volume_crop_contains_every_projected_visible_voxel() {
         }
     }
 }
+
+#[test]
+fn near_face_projects_larger_than_far_face() {
+    let center = [200.0, 150.0];
+    let scale = [200.0; 3];
+    let face_width = |z| {
+        let left = project_rotated([-0.5, 0.0, z], center, scale, VolumeRotation::identity()).0[0];
+        let right = project_rotated([0.5, 0.0, z], center, scale, VolumeRotation::identity()).0[0];
+        right - left
+    };
+    assert!(face_width(0.5) > face_width(-0.5));
+    assert!(face_width(0.5) / face_width(-0.5) > 1.15);
+}
 #[test]
 fn planar_projections_look_along_the_remaining_axis() {
     let center = [0.0, 0.0];

@@ -34,6 +34,28 @@ pub(super) struct VolumeRasterRequest {
     pub(super) colors: [[f32; 4]; 256],
 }
 
+fn raster_has_full_overview(
+    raster: &VolumeRasterKey,
+    selected: &VolumeRasterKey,
+    full_slice: &VolumeSlice,
+) -> bool {
+    raster.layer_keys.iter().any(|layer| {
+        layer.file == selected.volume.file
+            && layer.path == selected.volume.path
+            && &layer.slice == full_slice
+    })
+}
+
+fn prefer_wider_overview(
+    current: &VolumeRasterKey,
+    overview: &VolumeRasterKey,
+    requested: &VolumeRasterKey,
+) -> bool {
+    current.scale[0] > requested.scale[0]
+        && overview.scale[0] < current.scale[0]
+        && overview.rotation == requested.rotation
+}
+
 impl App {
     pub(super) fn poll_volume_raster(&mut self, gpu: &mut GpuApi<'_>) {
         if self
@@ -58,7 +80,15 @@ impl App {
             if let Some((key, _)) = self.volume_raster_job.take() {
                 if let Some(raster) = upload_volume_raster(gpu, &key, &rgba) {
                     if let Some(old) = self.volume_raster.take() {
-                        if self.applied_volume.as_ref() == Some(&old.0.volume.slice) {
+                        let has_full_overview = self
+                            .applied_volume
+                            .as_ref()
+                            .is_some_and(|slice| raster_has_full_overview(&old.0, &key, slice));
+                        let is_wider = self
+                            .volume_overview_raster
+                            .as_ref()
+                            .is_none_or(|(cached, _)| old.0.scale[0] < cached.scale[0]);
+                        if has_full_overview && is_wider {
                             self.volume_overview_raster = Some(old);
                         }
                     }
@@ -88,10 +118,13 @@ impl App {
         let key = request.key.clone();
         let generation = Arc::clone(&self.view_load_generation);
         let expected = generation.load(Ordering::Relaxed);
+        let refinement = Arc::clone(&self.volume_raster_generation);
+        let expected_refinement = refinement.load(Ordering::Relaxed);
         let (sender, receiver) = mpsc::channel();
         thread::spawn(move || {
             let image = render_exact_volume_with_cancel(&request, &|| {
                 generation.load(Ordering::Relaxed) != expected
+                    || refinement.load(Ordering::Relaxed) != expected_refinement
             });
             let _ = sender.send(image);
         });
@@ -129,8 +162,11 @@ impl App {
             .volume_overview_raster
             .as_ref()
             .filter(|(cached, _)| compatible(cached));
-        let (cached, raster) = current
-            .filter(|(cached, _)| covers(cached))
+        let wider_overview = current.zip(overview).and_then(|(current, overview)| {
+            prefer_wider_overview(&current.0, &overview.0, key).then_some(overview)
+        });
+        let (cached, raster) = wider_overview
+            .or_else(|| current.filter(|(cached, _)| covers(cached)))
             .or(overview)
             .or(current)?;
         let (min, max) = volume_preview_rect(cached, key);
@@ -322,21 +358,33 @@ fn volume_ray_interval(
     (exit > entry.max(0.0)).then_some((entry.max(0.0), exit))
 }
 
+fn volume_camera_ray(
+    center: [f32; 2],
+    scale: [f32; 3],
+    rotation: [f32; 4],
+    screen: [f32; 2],
+) -> ([f32; 3], [f32; 3]) {
+    let inverse = [rotation[0], -rotation[1], -rotation[2], -rotation[3]];
+    let camera_distance = volume_camera_distance(scale);
+    let origin = rotate(inverse, [0.0, 0.0, camera_distance]);
+    let direction = rotate(
+        inverse,
+        [
+            (screen[0] - center[0]) / camera_distance,
+            (center[1] - screen[1]) / camera_distance,
+            -1.0,
+        ],
+    );
+    (
+        std::array::from_fn(|axis| origin[axis] / scale[axis].max(1e-6)),
+        std::array::from_fn(|axis| direction[axis] / scale[axis].max(1e-6)),
+    )
+}
+
 fn raycast_pixel(request: &VolumeRasterRequest, x: f32, y: f32) -> [u8; 4] {
     let key = &request.key;
-    let inverse = [
-        key.rotation[0],
-        -key.rotation[1],
-        -key.rotation[2],
-        -key.rotation[3],
-    ];
-    let far = key.scale.iter().copied().sum::<f32>() + 1.0;
-    let camera_origin = [x - key.center[0], key.center[1] - y, far];
-    let origin = rotate(inverse, camera_origin);
-    let direction = rotate(inverse, [0.0, 0.0, -1.0]);
-    let origin = std::array::from_fn::<_, 3, _>(|axis| origin[axis] / key.scale[axis].max(1e-6));
-    let direction =
-        std::array::from_fn::<_, 3, _>(|axis| direction[axis] / key.scale[axis].max(1e-6));
+    let camera_distance = volume_camera_distance(key.scale);
+    let (origin, direction) = volume_camera_ray(key.center, key.scale, key.rotation, [x, y]);
     // The view retains at most four refined crops, an overview, and one
     // in-flight result. Keep intervals on the stack for every screen pixel.
     let mut interval_storage = [None; 8];
@@ -415,9 +463,8 @@ fn raycast_pixel(request: &VolumeRasterRequest, x: f32, y: f32) -> [u8; 4] {
             } else {
                 request.colors[(color_scale.fraction(value) * 255.0).round() as usize]
             };
-            // Camera-space z decreases by one unit for each unit travelled
-            // along the ray, so no per-voxel rotation is needed here.
-            let color = depth_shading.shade(color, far - distance);
+            // The ray's camera-space z decreases by one unit per step.
+            let color = depth_shading.shade(color, camera_distance - distance);
             let contribution = (1.0 - accumulated[3]) * color[3] * key.opacity;
             for channel in 0..3 {
                 accumulated[channel] += color[channel] * contribution;
@@ -464,6 +511,22 @@ fn raycast_pixel(request: &VolumeRasterRequest, x: f32, y: f32) -> [u8; 4] {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn perspective_ray_passes_through_the_projected_voxel() {
+        let point = [0.17, -0.23, 0.31];
+        let center = [240.0, 180.0];
+        let scale = [90.0, 140.0, 200.0];
+        let rotation = VolumeRotation::from_angles(0.7, -0.4);
+        let screen = project_rotated(point, center, scale, rotation).0;
+        let (origin, direction) = volume_camera_ray(center, scale, rotation.0, screen);
+        let scaled = std::array::from_fn(|axis| point[axis] * scale[axis]);
+        let camera_depth = rotation.transform(scaled)[2];
+        let distance = volume_camera_distance(scale) - camera_depth;
+        for axis in 0..3 {
+            assert!((origin[axis] + direction[axis] * distance - point[axis]).abs() < 1e-5);
+        }
+    }
 
     #[test]
     fn refined_voxels_replace_coarse_values_only_inside_their_region() {
@@ -564,6 +627,45 @@ mod tests {
             volume_preview_rect(&old, &new),
             ([0.0, 0.0], [400.0, 300.0])
         );
+    }
+
+    #[test]
+    fn zooming_out_prefers_a_wider_raster_with_the_full_overview() {
+        let full_slice = VolumeSlice::new(&[8, 8, 8], false, PinnedDefault::Start);
+        let overview = VolumeRasterKey {
+            volume: VolumeKey {
+                file: 0,
+                path: "/volume".into(),
+                slice: full_slice.clone(),
+            },
+            layer_keys: vec![VolumeKey {
+                file: 0,
+                path: "/volume".into(),
+                slice: full_slice.clone(),
+            }],
+            size: [400, 300],
+            center: [200.0, 150.0],
+            scale: [100.0; 3],
+            rotation: VolumeRotation::identity().0,
+            opacity: 1.0,
+            back_brightness: 1.0,
+            range: None,
+            logarithmic: false,
+            visibility: ValueVisibility::default(),
+            preset: ColormapPreset::Theme,
+            color_stops: [[0.0; 4]; 3],
+            special_colors: [[0.0; 4]; 4],
+        };
+        let mut cropped = overview.clone();
+        cropped.scale = [200.0; 3];
+        cropped.volume.slice.ranges[0] = [2, 5];
+        let mut zoomed_out = overview.clone();
+        zoomed_out.scale = [80.0; 3];
+        assert!(raster_has_full_overview(&cropped, &zoomed_out, &full_slice));
+        assert!(prefer_wider_overview(&cropped, &overview, &zoomed_out));
+        let current_rect = volume_preview_rect(&cropped, &zoomed_out);
+        let overview_rect = volume_preview_rect(&overview, &zoomed_out);
+        assert!(overview_rect.1[0] - overview_rect.0[0] > current_rect.1[0] - current_rect.0[0]);
     }
 
     #[test]

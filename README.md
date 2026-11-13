@@ -98,7 +98,12 @@ the [getting started guide](docs/src/getting-started.md).
 ./h5jive.sh --build
 ./h5jive.sh --run
 ./h5jive.sh --run examples/gome2_band3_20130106_gome.nc:/MODE_NADIR/BAND_3/OBSERVATIONS/radiance
+target/release/h5jive --view-globe examples/gome2_band3_20130106_gome.nc:/MODE_NADIR/BAND_3/OBSERVATIONS/radiance
 ```
+
+Both the script and executable accept `--view-data`, `--view-1d-profiles`,
+`--view-2d-slice`, `--view-3d`, `--view-world-map`, and `--view-globe` when a
+`FILE:/DATASET` selection is supplied.
 
 The repository includes a deterministic [HDF5 demo](examples/space_demo.hdf5)
 and a [GOME-2 Band 3 sample](examples/gome2_band3_20130106_gome.nc) extracted
@@ -113,6 +118,7 @@ cargo run -p h5jive -- --inspect examples/space_demo.hdf5
 
 - [Getting started](docs/src/getting-started.md): build, launch, and examples
 - [Exploring data](docs/src/exploring-data.md): views and controls
+- [View contracts](contracts/README.md): expected behavior and regression sequences for every view
 - [Settings and data formats](docs/src/settings-and-formats.md): DIPL, dataset sources, and format discovery
 - [Architecture](docs/src/development.md): crates, core logic, UI, and performance checks
 - [Troubleshooting](docs/src/troubleshooting.md): common build and data issues

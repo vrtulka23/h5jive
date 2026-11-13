@@ -1,6 +1,36 @@
 use super::*;
 
 impl App {
+    pub(super) fn refinement_settled(activity: Option<Instant>) -> bool {
+        activity.is_none_or(|at| at.elapsed() >= REFINEMENT_IDLE)
+    }
+
+    pub(super) fn note_heatmap_navigation(&mut self) {
+        self.heatmap_navigation_at = Some(Instant::now());
+        if self.heatmap_tile_job.take().is_some() {
+            self.heatmap_refine_generation
+                .fetch_add(1, Ordering::Relaxed);
+        }
+    }
+
+    pub(super) fn note_volume_zoom(&mut self) {
+        self.volume_navigation_at = Some(Instant::now());
+        let overview = self.applied_volume.as_ref();
+        if self
+            .volume_job
+            .as_ref()
+            .is_some_and(|(key, _)| Some(&key.slice) != overview)
+        {
+            self.volume_refine_generation
+                .fetch_add(1, Ordering::Relaxed);
+            self.volume_job = None;
+        }
+        if self.volume_raster_job.take().is_some() {
+            self.volume_raster_generation
+                .fetch_add(1, Ordering::Relaxed);
+        }
+    }
+
     pub(super) fn switch_view(&mut self, view: ViewMode) {
         if self.view == view {
             return;
@@ -12,10 +42,18 @@ impl App {
         self.volume_job = None;
         self.volume_raster_job = None;
         self.map_job = None;
+        self.heatmap_navigation_at = None;
+        self.volume_navigation_at = None;
         self.view = view;
     }
 
-    pub(super) fn poll_heatmap_tile(&mut self, key: HeatmapKey, shape: &[usize], replacement: f64) {
+    pub(super) fn poll_heatmap_tile(
+        &mut self,
+        key: HeatmapKey,
+        shape: &[usize],
+        replacement: f64,
+        allow_start: bool,
+    ) {
         if let Some((running, receiver)) = &self.heatmap_tile_job {
             match receiver.try_recv() {
                 Ok(image) => {
@@ -46,7 +84,7 @@ impl App {
             self.heatmap_cache = Some((key, Ok(Arc::clone(image))));
             return;
         }
-        if self.heatmap_tile_job.is_some() {
+        if self.heatmap_tile_job.is_some() || !allow_start {
             return;
         }
         let file_path = self.file_paths[key.file].clone();
@@ -56,9 +94,15 @@ impl App {
         let shape = shape.to_vec();
         let generation = Arc::clone(&self.view_load_generation);
         let expected = generation.load(Ordering::Relaxed);
+        let refinement = Arc::clone(&self.heatmap_refine_generation);
+        let expected_refinement = refinement.load(Ordering::Relaxed);
         let (sender, receiver) = mpsc::channel();
         thread::spawn(move || {
-            if generation.load(Ordering::Relaxed) != expected {
+            let cancelled = || {
+                generation.load(Ordering::Relaxed) != expected
+                    || refinement.load(Ordering::Relaxed) != expected_refinement
+            };
+            if cancelled() {
                 return;
             }
             let result = open_dataset_reader(&file_path).and_then(|file| {
@@ -69,7 +113,7 @@ impl App {
                     &slice,
                     bounds,
                     replacement,
-                    &|| generation.load(Ordering::Relaxed) != expected,
+                    &cancelled,
                 )
             });
             let _ = sender.send(result);
@@ -304,11 +348,13 @@ impl App {
             self.heatmap_cache = None;
             self.heatmap_tiles.clear();
             self.heatmap_tile_job = None;
+            self.heatmap_navigation_at = None;
             self.profile_cache = None;
             self.volume_cache = None;
             self.volume_overview_cache = None;
             self.volume_refined_cache.clear();
             self.volume_job = None;
+            self.volume_navigation_at = None;
             self.volume_raster = None;
             self.volume_overview_raster = None;
             self.volume_raster_job = None;
@@ -352,7 +398,7 @@ impl App {
             });
             self.applied_table = self.draft_table.clone();
             self.draft_slice = selected_shape.map(|shape| {
-                TableSlice::with_leading_time(shape, first_is_time, self.settings.pinned_default)
+                TableSlice::for_heatmap(shape, first_is_time, self.settings.pinned_default)
             });
             self.applied_slice = self.draft_slice.clone();
             self.draft_profile =

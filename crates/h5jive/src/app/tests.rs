@@ -3,10 +3,10 @@ use super::{
     format_attribute_value, format_value, heatmap_axis_ticks, heatmap_tile_bounds,
     heatmap_visible_bounds, heatmap_zoom_limits, human_bytes, load_heatmap_overview,
     load_heatmap_tile, load_map_data, load_profile, overview_sample_index, parse_input_spec,
-    parse_profile_indexes, resolve_startup_selection, scan_heatmap_range, AttributeValue,
-    ColormapPreset, File, GeoViewControls, MapViewport, PinnedDefault, ProfileBin, ProfileData,
-    ProfileLine, ProfileSlice, ScanFilter, Selection, Settings, SpecialValue, TableSlice,
-    ThemeColors, ValueVisibility, WorkspaceMode,
+    parse_profile_indexes, parse_startup_args, resolve_startup_selection, scan_heatmap_range,
+    AttributeValue, ColormapPreset, File, GeoViewControls, MapViewport, PinnedDefault, ProfileBin,
+    ProfileData, ProfileLine, ProfileSlice, ScanFilter, Selection, Settings, SpecialValue,
+    TableSlice, ThemeColors, ValueVisibility, ViewMode, WorkspaceMode,
 };
 use h5jive_data::ScanDirectionClass;
 use scinumtools3::Project;
@@ -45,6 +45,25 @@ fn startup_dataset_suffix_selects_a_real_dataset() {
         .unwrap();
     assert_eq!(selected.file, 0);
     assert_eq!(selected.path, "/observations/swath_2d");
+}
+
+#[test]
+fn startup_view_requires_and_uses_an_explicit_dataset() {
+    let input = "data.nc:/group/values".to_owned();
+    for (flag, expected) in [
+        ("--view-data", ViewMode::Data),
+        ("--view-1d-profiles", ViewMode::Profiles1d),
+        ("--view-2d-slice", ViewMode::Slice2d),
+        ("--view-3d", ViewMode::Spatial3d),
+        ("--view-world-map", ViewMode::WorldMap),
+        ("--view-globe", ViewMode::Globe),
+    ] {
+        let (_, view, inputs) = parse_startup_args(&[flag.to_owned(), input.clone()]).unwrap();
+        assert_eq!(view, Some(expected));
+        assert_eq!(inputs[0].1.as_deref(), Some("/group/values"));
+    }
+    assert!(parse_startup_args(&["--view-globe".into(), "data.nc".into()]).is_err());
+    assert!(parse_startup_args(&["--view-globe".into(), "--view-data".into(), input]).is_err());
 }
 
 #[test]
@@ -567,6 +586,17 @@ fn table_and_heatmap_default_to_axes_after_leading_time() {
         two_dimensional.region(&[8, 32], 4, 6, 0, 1),
         ([0, 4].to_vec(), [1, 2].to_vec())
     );
+    let heatmap = TableSlice::for_heatmap(&[8, 32], true, PinnedDefault::Start);
+    assert_eq!((heatmap.row_axis, heatmap.column_axis), (Some(0), 1));
+    assert_eq!(
+        heatmap.region(&[8, 32], 4, 6, 7, 10),
+        ([4, 7].to_vec(), [2, 3].to_vec())
+    );
+    let cube_heatmap = TableSlice::for_heatmap(&shape, true, PinnedDefault::Start);
+    assert_eq!(
+        (cube_heatmap.row_axis, cube_heatmap.column_axis),
+        (Some(1), 2)
+    );
 }
 
 #[test]
@@ -707,7 +737,7 @@ fn heatmap_ticks_follow_the_visible_cells() {
     );
     assert_eq!(
         heatmap_axis_ticks(visible[0], visible[1], 6),
-        [66, 67, 68, 69]
+        [30, 31, 32, 33]
     );
     assert!(heatmap_axis_ticks(0, 0, 6).is_empty());
 }
@@ -744,6 +774,18 @@ fn heatmap_preserves_native_cells_and_special_values() {
     for (got, expected) in image.values.iter().zip(region.data.iter()) {
         assert!(got == expected || got.is_nan() && expected.is_nan());
     }
+    for row in 0..4 {
+        for column in 0..5 {
+            let value = image.values[row * 5 + column];
+            let plotted = image.plotted[(3 - row) * 5 + column];
+            let expected = if SpecialValue::from_value(value, image.fill_value).is_some() {
+                -1.0
+            } else {
+                value
+            };
+            assert_eq!(plotted, expected);
+        }
+    }
     assert!(image
         .values
         .iter()
@@ -771,7 +813,7 @@ fn heatmap_preserves_native_cells_and_special_values() {
     assert_eq!(cube.values[0], expected.data[0]);
     assert_eq!(cube.values.len(), 6);
     assert_eq!(
-        heatmap_visible_bounds(32, 48, [7.0, 12.0, 24.0, 28.0]),
+        heatmap_visible_bounds(32, 48, [7.0, 12.0, 4.0, 8.0]),
         [4, 8, 7, 12]
     );
     let tile = heatmap_tile_bounds(32, 48, [4, 8, 7, 12], 65536);
@@ -857,7 +899,21 @@ fn full_heatmap_overview_samples_source_cells_without_averaging() {
             let actual = image.values[row_bin * 12 + column_bin];
             let expected = source.data[row * 48 + column];
             assert!(actual == expected || actual.is_nan() && expected.is_nan());
+            let plotted = image.plotted[(7 - row_bin) * 12 + column_bin];
+            assert_eq!(
+                plotted,
+                if SpecialValue::from_value(expected, image.fill_value).is_none() {
+                    expected
+                } else {
+                    0.0
+                }
+            );
         }
+    }
+    let dense =
+        load_heatmap_overview(&file, "/observations/swath_2d", &shape, &slice, shape).unwrap();
+    for (actual, expected) in dense.values.iter().zip(&source.data) {
+        assert!(actual == expected || actual.is_nan() && expected.is_nan());
     }
 }
 

@@ -33,7 +33,7 @@ impl VolumeRotation {
         Self(self.0.map(|v| v / length))
     }
 
-    pub(super) fn transform(self, point: [f32; 3]) -> [f32; 3] {
+    pub(crate) fn transform(self, point: [f32; 3]) -> [f32; 3] {
         let [w, x, y, z] = self.0;
         let q = [x, y, z];
         let cross = |a: [f32; 3], b: [f32; 3]| {
@@ -119,6 +119,7 @@ pub(super) fn visible_volume_slice(
         -rotation.0[2],
         -rotation.0[3],
     ]);
+    let camera_distance = volume_camera_distance(scale);
     let mut local = [[f32::INFINITY, f32::NEG_INFINITY]; 3];
     for mask in 0..8 {
         let screen = [
@@ -126,7 +127,12 @@ pub(super) fn visible_volume_slice(
             if mask & 2 == 0 { 0.0 } else { size[1] },
             depth[(mask >> 2) & 1],
         ];
-        let camera = [screen[0] - center[0], center[1] - screen[1], screen[2]];
+        let perspective = (camera_distance - screen[2]) / camera_distance;
+        let camera = [
+            (screen[0] - center[0]) * perspective,
+            (center[1] - screen[1]) * perspective,
+            screen[2],
+        ];
         let point = inverse.transform(camera);
         for axis in 0..3 {
             let value = point[axis] / scale[axis].max(1e-6);
@@ -236,7 +242,7 @@ pub(super) fn project(
     )
 }
 
-pub(super) fn project_rotated(
+pub(crate) fn project_rotated(
     point: [f32; 3],
     center: [f32; 2],
     scale: [f32; 3],
@@ -244,7 +250,15 @@ pub(super) fn project_rotated(
 ) -> ([f32; 2], f32) {
     let scaled = std::array::from_fn(|axis| point[axis] * scale[axis]);
     let rotated = rotation.transform(scaled);
-    ([center[0] + rotated[0], center[1] - rotated[1]], rotated[2])
+    let distance = volume_camera_distance(scale);
+    let factor = distance / (distance - rotated[2]).max(1e-6);
+    (
+        [
+            center[0] + rotated[0] * factor,
+            center[1] - rotated[1] * factor,
+        ],
+        rotated[2],
+    )
 }
 
 pub(super) fn front_axis_corner(
@@ -271,9 +285,11 @@ pub(super) fn volume_projection_center(
     scale: [f32; 3],
     rotation: VolumeRotation,
 ) -> [f32; 2] {
-    let scaled = std::array::from_fn(|axis| pivot[axis] * scale[axis]);
-    let rotated = rotation.transform(scaled);
-    [screen_center[0] - rotated[0], screen_center[1] + rotated[1]]
+    let projected = project_rotated(pivot, [0.0; 2], scale, rotation).0;
+    [
+        screen_center[0] - projected[0],
+        screen_center[1] - projected[1],
+    ]
 }
 
 #[derive(Clone, Copy)]

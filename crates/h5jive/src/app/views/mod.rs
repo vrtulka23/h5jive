@@ -16,4 +16,6 @@ pub(super) use world_map::coastlines;
 #[cfg(test)]
 pub(super) use profiles::draw_profile_plot;
 pub(super) use slice2d::*;
+#[cfg(test)]
+pub(super) use spatial3d::project_rotated;
 pub(super) use spatial3d::DepthShading;

@@ -116,6 +116,47 @@ mod navigation_tests {
     use dear_app::imgui::{Condition, Context};
 
     #[test]
+    fn selected_group_and_dataset_render_without_scope_errors() {
+        let path =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/space_demo.hdf5");
+        let file = File::open(&path).unwrap();
+        let settings = Settings::load().unwrap();
+        let mut context = Context::create();
+        context.set_ini_filename(None::<String>).unwrap();
+        context.io_mut().set_display_size([500.0, 400.0]);
+        context.io_mut().set_delta_time(1.0 / 60.0);
+        context
+            .font_atlas()
+            .try_claim_legacy_renderer()
+            .unwrap()
+            .build();
+        let mut geolocation_cache = HashMap::new();
+        for selected_path in ["/observations", "/observations/swath_2d"] {
+            let mut selected = Some(Selection {
+                file: 0,
+                path: selected_path.into(),
+            });
+            let ui = context.frame();
+            ui.window("Selected tree row").build(|| {
+                for entry in &file.tree.children {
+                    draw_entry(
+                        ui,
+                        entry,
+                        &file,
+                        0,
+                        &mut selected,
+                        &mut geolocation_cache,
+                        &settings.dataset_rules,
+                        true,
+                        &settings.palette,
+                    );
+                }
+            });
+            context.end_frame();
+        }
+    }
+
+    #[test]
     fn dataset_icon_sits_below_parent_folder_icon() {
         let mut context = Context::create();
         context.set_ini_filename(None::<String>).unwrap();
@@ -481,20 +522,25 @@ pub(crate) fn draw_entry(
         let is_selected = selected
             .as_ref()
             .is_some_and(|s| s.file == file && s.path == entry.path);
-        let mut node = ui
-            .tree_node_config(&label)
-            .selected(is_selected)
-            .open_on_arrow(true)
-            .open_on_double_click(true)
-            .span_avail_width(true);
-        if selected.as_ref().is_some_and(|s| {
-            s.file == file
-                && s.path.starts_with(&entry.path)
-                && s.path.as_bytes().get(entry.path.len()) == Some(&b'/')
-        }) {
-            node = node.opened(true, Condition::Once);
+        let node = {
+            let mut node = ui
+                .tree_node_config(&label)
+                .selected(is_selected)
+                .open_on_arrow(true)
+                .open_on_double_click(true)
+                .span_avail_width(true);
+            if selected.as_ref().is_some_and(|s| {
+                s.file == file
+                    && s.path.starts_with(&entry.path)
+                    && s.path.as_bytes().get(entry.path.len()) == Some(&b'/')
+            }) {
+                node = node.opened(true, Condition::Once);
+            }
+            node.push()
+        };
+        if is_selected {
+            draw_selected_tree_row(ui, palette);
         }
-        let node = node.push();
         draw_tree_entry_icons(ui, row_x, true, false, palette);
         if ui.is_item_clicked() {
             *selected = Some(Selection {
@@ -522,11 +568,15 @@ pub(crate) fn draw_entry(
         let is_selected = selected
             .as_ref()
             .is_some_and(|s| s.file == file && s.path == entry.path);
-        if ui.selectable_config(&label).selected(is_selected).build() {
+        let clicked = ui.selectable_config(&label).selected(is_selected).build();
+        if clicked {
             *selected = Some(Selection {
                 file,
                 path: entry.path.clone(),
             });
+        }
+        if is_selected {
+            draw_selected_tree_row(ui, palette);
         }
         draw_tree_entry_icons(ui, row_x, false, geolocation.is_some(), palette);
         if let Some(geolocation) = geolocation {
@@ -536,6 +586,29 @@ pub(crate) fn draw_entry(
             ));
         }
     }
+}
+
+fn draw_selected_tree_row(ui: &Ui, palette: &Palette) {
+    let min = ui.item_rect_min();
+    let max = ui.item_rect_max();
+    let draw = ui.get_window_draw_list();
+    let fill = [
+        palette.accent[0],
+        palette.accent[1],
+        palette.accent[2],
+        0.24,
+    ];
+    draw.add_rect(min, max, fill)
+        .rounding(3.0)
+        .filled(true)
+        .build();
+    draw.add_rect(min, max, palette.accent)
+        .rounding(3.0)
+        .thickness(1.5)
+        .build();
+    draw.add_rect(min, [min[0] + 3.0, max[1]], palette.accent)
+        .filled(true)
+        .build();
 }
 
 fn draw_tree_entry_icons(ui: &Ui, row_x: f32, group: bool, geolocated: bool, palette: &Palette) {

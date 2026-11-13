@@ -10,7 +10,6 @@ fn draw_native_heatmap_tile(
     ui: &Ui,
     plot_ui: &PlotUi<'_>,
     image: &HeatmapImage,
-    rows: usize,
     visible: [usize; 4],
     limits: [f64; 4],
     range: (f64, f64),
@@ -28,7 +27,7 @@ fn draw_native_heatmap_tile(
     HeatmapPlot::new(&label, &image.plotted, r1 - r0, c1 - c0)
         .with_item_flags(ItemFlags::NO_LEGEND)
         .with_scale(min, scale_max)
-        .with_bounds(c0 as f64, (rows - r1) as f64, c1 as f64, (rows - r0) as f64)
+        .with_bounds(c0 as f64, r0 as f64, c1 as f64, r1 as f64)
         .without_value_labels()
         .plot(plot_ui);
     let draw = ui.get_window_draw_list();
@@ -59,7 +58,7 @@ fn draw_native_heatmap_tile(
             let first = plot_ui.plot_to_pixels_axes(
                 ImPlotPoint {
                     x: column as f64,
-                    y: (rows - row) as f64,
+                    y: (row + 1) as f64,
                 },
                 XAxis::X1,
                 YAxis::Y1,
@@ -67,7 +66,7 @@ fn draw_native_heatmap_tile(
             let last = plot_ui.plot_to_pixels_axes(
                 ImPlotPoint {
                     x: (column + 1) as f64,
-                    y: (rows - row - 1) as f64,
+                    y: row as f64,
                 },
                 XAxis::X1,
                 YAxis::Y1,
@@ -108,7 +107,6 @@ impl App {
                     ui,
                     plot_ui,
                     image,
-                    rows,
                     visible,
                     limits,
                     range,
@@ -121,7 +119,7 @@ impl App {
             let mouse = plot_ui.plot_mouse_position_axes(XAxis::X1, YAxis::Y1);
             if mouse.x >= 0.0 && mouse.y >= 0.0 && mouse.y < rows as f64 {
                 let column = mouse.x.floor() as usize;
-                let row = rows - 1 - mouse.y.floor() as usize;
+                let row = mouse.y.floor() as usize;
                 if let Some((key, image)) = self.heatmap_tiles.iter().rev().find(|(key, _)| {
                     key.file == selection.file
                         && key.path == selection.path
@@ -157,6 +155,10 @@ impl App {
         shape: &[usize],
     ) {
         let Some(slice) = self.applied_slice.clone() else {
+            return;
+        };
+        let Some(row_axis) = slice.row_axis else {
+            ui.text("Select two axes for the heatmap.");
             return;
         };
         if shape.iter().any(|&size| size == 0) {
@@ -246,7 +248,7 @@ impl App {
             self.poll_heatmap_overview(selection, shape, &slice, [grid[1], grid[0]]);
         }
         let x_name = axis_name(&self.axis_names, slice.column_axis);
-        let y_name = axis_name(&self.axis_names, slice.row_axis.unwrap());
+        let y_name = axis_name(&self.axis_names, row_axis);
         let tick_key = HeatmapRangeKey {
             file: selection.file,
             path: selection.path.clone(),
@@ -266,7 +268,7 @@ impl App {
             .collect::<Vec<_>>();
         let y_positions = y_indices
             .iter()
-            .map(|&index| rows as f64 - index as f64 - 0.5)
+            .map(|&index| index as f64 + 0.5)
             .collect::<Vec<_>>();
         let x_labels = x_indices
             .iter()
@@ -274,7 +276,7 @@ impl App {
             .collect::<Vec<_>>();
         let y_labels = y_indices
             .iter()
-            .map(|&index| self.coordinate_label(selection, slice.row_axis.unwrap(), index))
+            .map(|&index| self.coordinate_label(selection, row_axis, index))
             .collect::<Vec<_>>();
         let x_label_refs = x_labels.iter().map(String::as_str).collect::<Vec<_>>();
         let y_label_refs = y_labels.iter().map(String::as_str).collect::<Vec<_>>();
@@ -309,10 +311,21 @@ impl App {
         }
         plot_ui.setup_finish();
         let limits = plot_ui.plot_limits_axes(XAxis::X1, YAxis::Y1);
-        self.heatmap_tick_view = Some((
-            tick_key.clone(),
-            [limits.X.Min, limits.X.Max, limits.Y.Min, limits.Y.Max],
-        ));
+        let current_limits = [limits.X.Min, limits.X.Max, limits.Y.Min, limits.Y.Max];
+        if self
+            .heatmap_tick_view
+            .as_ref()
+            .is_some_and(|(previous_key, previous)| {
+                previous_key == &tick_key
+                    && previous
+                        .iter()
+                        .zip(current_limits)
+                        .any(|(&old, new)| (old - new).abs() > 1e-6)
+            })
+        {
+            self.note_heatmap_navigation();
+        }
+        self.heatmap_tick_view = Some((tick_key.clone(), current_limits));
         let visible = heatmap_visible_bounds(
             rows,
             columns,
@@ -345,6 +358,7 @@ impl App {
                 key.clone(),
                 shape,
                 display_range.map_or(0.0, |(min, _)| min),
+                Self::refinement_settled(self.heatmap_navigation_at),
             );
             let tile = self
                 .heatmap_cache
@@ -360,7 +374,6 @@ impl App {
                     ui,
                     plot_ui,
                     image,
-                    rows,
                     visible,
                     [limits.X.Min, limits.X.Max, limits.Y.Min, limits.Y.Max],
                     display_range.unwrap_or((0.0, 1.0)),
@@ -375,13 +388,12 @@ impl App {
                         && mouse.y < rows as f64
                     {
                         let column = mouse.x.floor() as usize;
-                        let row = rows - 1 - mouse.y.floor() as usize;
+                        let row = mouse.y.floor() as usize;
                         if row >= r0 && row < r1 && column >= c0 && column < c1 {
                             let value = image.values[(row - r0) * (c1 - c0) + column - c0];
                             let special = SpecialValue::from_value(value, image.fill_value);
                             if self.value_visibility.allows_class(value, special) {
-                                let row_label =
-                                    self.coordinate_label(selection, slice.row_axis.unwrap(), row);
+                                let row_label = self.coordinate_label(selection, row_axis, row);
                                 let column_label =
                                     self.coordinate_label(selection, slice.column_axis, column);
                                 ui.set_tooltip(format!(
@@ -498,10 +510,8 @@ impl App {
                             let x0 = column_bin as f64 * columns as f64 / image.grid[1] as f64;
                             let x1 =
                                 (column_bin + 1) as f64 * columns as f64 / image.grid[1] as f64;
-                            let y0 =
-                                rows as f64 - row_bin as f64 * rows as f64 / image.grid[0] as f64;
-                            let y1 = rows as f64
-                                - (row_bin + 1) as f64 * rows as f64 / image.grid[0] as f64;
+                            let y0 = (row_bin + 1) as f64 * rows as f64 / image.grid[0] as f64;
+                            let y1 = row_bin as f64 * rows as f64 / image.grid[0] as f64;
                             let first = plot_ui.plot_to_pixels_axes(
                                 ImPlotPoint { x: x0, y: y0 },
                                 XAxis::X1,
@@ -532,17 +542,15 @@ impl App {
                             let column_bin = ((mouse.x / columns as f64 * image.grid[1] as f64)
                                 .floor() as usize)
                                 .min(image.grid[1] - 1);
-                            let row_bin = (((rows as f64 - mouse.y) / rows as f64
-                                * image.grid[0] as f64)
-                                .floor() as usize)
+                            let row_bin = ((mouse.y / rows as f64 * image.grid[0] as f64).floor()
+                                as usize)
                                 .min(image.grid[0] - 1);
                             let row = overview_sample_index(row_bin, rows, image.grid[0]);
                             let column = overview_sample_index(column_bin, columns, image.grid[1]);
                             let value = image.values[row_bin * image.grid[1] + column_bin];
                             let special = SpecialValue::from_value(value, image.fill_value);
                             if self.value_visibility.allows_class(value, special) {
-                                let row_label =
-                                    self.coordinate_label(selection, slice.row_axis.unwrap(), row);
+                                let row_label = self.coordinate_label(selection, row_axis, row);
                                 let column_label =
                                     self.coordinate_label(selection, slice.column_axis, column);
                                 ui.set_tooltip(format!(
