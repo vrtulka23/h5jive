@@ -32,7 +32,7 @@ import { pluginPages } from '../../data/plugins';
         <div class="lab-hero-copy">
           <p class="eyebrow">H5JIVE / PLUGIN LAB</p>
           <h1>Bring your analysis<br /><em>into the explorer.</em></h1>
-          <p class="lab-lede">Plugin Lab is a growing collection of optional scientific tools. Start with H5Jive's file browser, data access, and visualizations; add the workflow your research needs.</p>
+          <p class="lab-lede">Plugin Lab starts with two comparison tools: one for file structure and metadata, one for dataset values. Each uses H5Jive's file browser and visualizations, and leaves room for your own analysis.</p>
           <div class="lab-actions"><a class="button primary" href="#catalog">Explore plugins <span>↓</span></a><a class="text-link" href="#create">Create a plugin <span>→</span></a></div>
         </div>
         <div class="lab-flow" aria-label="Plugin Lab builds on H5Jive's core">
@@ -45,7 +45,7 @@ import { pluginPages } from '../../data/plugins';
       <section class="lab-benefits">
         <div class="wrap lab-benefit-grid">
           <article><span>BUILT WITH DEAR IMGUI</span><h2>Native, responsive UI</h2><p>Plugin panels use the same immediate mode desktop interface as H5Jive's data inspector.</p></article>
-          <article><span>NO ADMIN RIGHTS</span><h2>Install in your space</h2><p>Release installers place H5Jive in your user directory, with no administrator permission needed.</p></article>
+          <article><span>NO ADMIN RIGHTS</span><h2>Install in your space</h2><p><a href="../#download">Precompiled downloads</a> run from your own directory. The Windows setup installer uses a per-user install; Linux AppImage and macOS DMG downloads appear when published.</p></article>
           <article><span>X11 SUPPORT</span><h2>Work remotely</h2><p>On Linux, H5Jive can use OpenGL for SSH forwarded X11 sessions when a compatible graphics stack is available.</p></article>
         </div>
       </section>
@@ -55,8 +55,9 @@ import { pluginPages } from '../../data/plugins';
         <div class="lab-plugin-list">
           {pluginPages.map((plugin, index) => <article class="lab-plugin-card">
             <div class="lab-plugin-mark" aria-hidden="true"><span>{plugin.mark[0]}</span><i>{plugin.mark[1]}</i><span>{plugin.mark[2]}</span></div>
-            <div class="lab-plugin-main"><p class="lab-plugin-index">PLUGIN {String(index + 1).padStart(2, '0')}</p><h3>{plugin.name}</h3><p>{plugin.summary}</p><ul>{plugin.details.map((detail) => <li>{detail}</li>)}</ul><div class="lab-plugin-links"><a href={plugin.source}>View source <span>↗</span></a><a href={plugin.demo}>Try the demo <span>↗</span></a></div></div>
-            <div class="lab-plugin-setting"><span>DIPL SWITCH</span><code>{plugin.setting}</code><small>settings/plugins.dip</small></div>
+            <div class="lab-plugin-main"><p class="lab-plugin-index">PLUGIN {String(index + 1).padStart(2, '0')}</p><h3>{plugin.name}</h3><p>{plugin.summary}</p><ul>{plugin.details.map((detail) => <li>{detail}</li>)}</ul><div class="lab-plugin-links"><a href={`./${plugin.id}/`}>Explore plugin <span>→</span></a><a href={plugin.source}>View source <span>↗</span></a><a href={plugin.demo}>Try the demo <span>↗</span></a></div></div>
+            <div class="lab-plugin-setting"><span>DIPL SWITCH</span><code>{plugin.setting}</code><small>settings/runtime/plugins.dip</small></div>
+            <figure class="lab-plugin-preview"><a href={`../${plugin.image}`} aria-label={`Open full-size ${plugin.name} screenshot`}><img src={`../${plugin.image}`} width="2564" height="1508" alt={plugin.alt} loading="lazy" decoding="async" /></a><figcaption>{plugin.caption}</figcaption></figure>
           </article>)}
         </div>
         <p class="lab-catalog-note">Path comparison checks metadata; value comparison calculates differences or ratios for same-shaped numeric arrays. Large 2D planes use a bounded, matching-position preview.</p>

@@ -4,7 +4,7 @@ export const viewPages = [
     title: '3D volume',
     kicker: 'Look inside the array',
     summary: 'Explore a numeric volume as voxels, with a perspective camera that makes its depth easier to read.',
-    image: 'screenshot-3d-volume.png',
+    image: 'view-3d-volume.png',
     alt: 'H5Jive showing a three-dimensional volume',
     caption: 'SEE THE VOLUME IN THREE DIMENSIONS',
     points: [
@@ -20,7 +20,7 @@ export const viewPages = [
     title: '2D slice',
     kicker: 'Explore a plane',
     summary: 'Turn two dimensions of a numeric array into a color image while keeping the source indexes and values in reach.',
-    image: 'screenshot-2d-slice.png',
+    image: 'view-2d-slice.png',
     alt: 'H5Jive showing a two-dimensional data slice',
     caption: 'EXPLORE A SLICE OF THE ARRAY',
     points: [
@@ -36,7 +36,7 @@ export const viewPages = [
     title: '1D profiles',
     kicker: 'Follow a signal',
     summary: 'Plot values along one array dimension to see trends, peaks, gaps, and differences between selected lines.',
-    image: 'screenshot-1d-profile.png',
+    image: 'view-1d-profile.png',
     alt: 'H5Jive showing a one-dimensional data profile',
     caption: 'FOLLOW VALUES ALONG A DIMENSION',
     points: [
@@ -52,7 +52,7 @@ export const viewPages = [
     title: 'World map',
     kicker: 'Put pixels in place',
     summary: 'View geolocated observations on a flat map, from center points to the measured footprint of each pixel.',
-    image: 'screenshot-world.png',
+    image: 'view-world.png',
     alt: 'H5Jive world map showing GOME-2 radiance pixels over Earth',
     caption: 'REAL DATA · REAL PIXEL FOOTPRINTS',
     points: [
@@ -68,7 +68,7 @@ export const viewPages = [
     title: 'Globe',
     kicker: 'See the global context',
     summary: 'Place geolocated observations on a rotatable sphere to understand swaths, coverage, and position around Earth.',
-    image: 'screenshot-globe.png',
+    image: 'view-globe.png',
     alt: 'H5Jive showing geospatial data on a globe',
     caption: 'EXPLORE GEOSPATIAL DATA ON A GLOBE',
     points: [
@@ -84,7 +84,7 @@ export const viewPages = [
     title: 'Data table',
     kicker: 'Read the source values',
     summary: 'Inspect dataset cells directly, alongside dimensions, coordinates, attributes, statistics, and distributions.',
-    image: 'screenshot-data.png',
+    image: 'view-data.png',
     alt: 'H5Jive showing dataset values in the data view',
     caption: 'INSPECT THE UNDERLYING VALUES',
     points: [

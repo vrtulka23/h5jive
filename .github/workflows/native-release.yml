@@ -123,6 +123,8 @@ jobs:
           export LIBCLANG_PATH=/ucrt64/bin
           export PKG_CONFIG_PATH=/ucrt64/lib/pkgconfig
           export CMAKE_GENERATOR=Ninja
+          # The GNU Rust host also links the SNT3 C++ library in h5jive/build.rs.
+          export RUSTFLAGS="-C link-arg=-lstdc++"
           # hdf5-metno-sys checks a fixed list of DLL names; MSYS2 uses a versioned name.
           hdf5_dll=$(find /ucrt64/bin -maxdepth 1 -type f -name 'libhdf5-*.dll' -print -quit)
           if [ -z "$hdf5_dll" ]; then
