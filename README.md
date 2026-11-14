@@ -164,5 +164,5 @@ The optional Blue Marble map background is credited to
 The default Natural Earth map background uses
 [public-domain Natural Earth data](https://www.naturalearthdata.com/about/terms-of-use/).
 
-H5Jive is maintained by Ondrej Pêgo Jaura and released under the
+H5Jive is maintained and released under the
 [MIT license](LICENSE).
