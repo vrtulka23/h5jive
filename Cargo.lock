@@ -1170,7 +1170,7 @@ dependencies = [
 
 [[package]]
 name = "h5jive"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "dear-app",
  "dear-implot",
@@ -1178,6 +1178,7 @@ dependencies = [
  "font8x8",
  "h5jive-data",
  "hdf5-metno",
+ "hdf5-metno-sys",
  "image",
  "regex",
  "scinumtools3",

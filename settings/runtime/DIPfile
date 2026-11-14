@@ -89,17 +89,13 @@ code[]
 code[]
   file = "dataset/formats/fdr_atmos_l1b_uvn.dip"
 code[]
-  file = "dataset/sources/mock_gome.dip"
+  file = "dataset/sources/gome.dip"
 code[]
-  file = "dataset/sources/mock_sciamachy.dip"
+  file = "dataset/sources/sciamachy.dip"
 code[]
-  file = "dataset/sources/mock_gome2.dip"
+  file = "dataset/sources/gome2.dip"
 code[]
-  file = "dataset/sources/mock_s5p.dip"
-code[]
-  file = "dataset/sources/mock_fdr_l1a.dip"
-code[]
-  file = "dataset/sources/mock_fdr_l1b.dip"
+  file = "dataset/sources/s5p.dip"
 code[]
   file = "themes/dark.dip"
 code[]

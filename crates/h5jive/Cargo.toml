@@ -1,6 +1,6 @@
 [package]
 name = "h5jive"
-version = "0.1.2"
+version = "0.1.3"
 authors = ["Ondrej Pêgo Jaura"]
 edition.workspace = true
 license.workspace = true
@@ -11,6 +11,8 @@ dear-implot = "0.22"
 font8x8 = "0.3"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
 h5jive-data = { path = "../data-source" }
+hdf5-metno = "0.15"
+hdf5-metno-sys = "0.12"
 scinumtools3 = "=0.10.2"
 dunce = "1.0"
 regex = "1"
@@ -22,9 +24,6 @@ xcap = "=0.4.0"
 
 [target.'cfg(not(target_os = "linux"))'.dependencies]
 xcap = "=0.9.8"
-
-[dev-dependencies]
-hdf5-metno = "0.15"
 
 [build-dependencies]
 scinumtools3-build = "=0.10.2"

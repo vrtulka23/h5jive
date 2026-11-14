@@ -22,7 +22,7 @@ enum Operation {
 impl Operation {
     fn label(self) -> &'static str {
         match self {
-            Self::Difference => "Left − Right",
+            Self::Difference => "Left - Right",
             Self::Ratio => "Left ÷ Right",
         }
     }
@@ -423,7 +423,7 @@ fn draw_preview(
     decimals: usize,
 ) {
     let Some((min, max)) = preview.range else {
-        ui.text_wrapped("No finite comparison values in this slice. Fill values, NaNs, infinities, and division by zero are excluded.");
+        ui.text_wrapped("No finite comparison values in this slice.");
         return;
     };
     let rows = key.slice.rows(&key.left.shape);
@@ -526,7 +526,7 @@ pub(super) fn draw(
             .get_or_insert_with(|| Arc::new(collect_choices(context.files))),
     );
     if choices.is_empty() {
-        ui.text_wrapped("Load a file with a numeric dataset of at least two dimensions. The second dataset may come from the same file or the other file.");
+        ui.text_wrapped("Load a file with a numeric dataset of at least two dimensions.");
         return None;
     }
     default_pair(

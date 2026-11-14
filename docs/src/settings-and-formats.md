@@ -50,12 +50,18 @@ Each source declares its own format link, for example
 `format` node; the link target is declared in the source because different
 repositories can use different formats.
 
-The bundled mock registrations use `root = "./"` as a portable default. Put
+The bundled source definitions are examples of DIPL settings for supported
+product formats. They use `root = "./"` as a portable default. Put
 your local dataset roots in `settings/runtime/overrides.dip`; the app creates this
 Git-ignored file on first launch if it is missing. Relative roots are resolved
 from the `settings` directory. A native
 release includes a blank override file beside its executable; the user
-installer preserves local edits when upgrading. The browser stores one index
+installer preserves local edits when upgrading. If an older override uses a
+`mock_` source ID, remove that prefix (for example, use
+`dataset_sources[gome].root` instead of `dataset_sources[mock_gome].root`).
+Remove old `dataset_sources[fdr_l1a]` and `dataset_sources[fdr_l1b]` override
+lines; the FDR formats remain available for files opened directly.
+The browser stores one index
 per source under `settings/runtime/.cache/datasets/` and loads a cached index on
 startup. If no cache exists, select the source and click **Refresh index** to
 start a background scan. **Cancel scan** stops it. Scanning reads directory
@@ -64,6 +70,11 @@ it does not open every product. Missing mounts are marked red while their
 cached products remain listed. The table supports searching, sorting, and
 column resizing. **Open as A/B** assigns the selected product to the inspector
 file slots; the panel below the table shows loaded, loading, and queued products.
+
+Each source index is a JSON file named after its source ID. A completed refresh
+replaces it; closing the app does not delete it. When the configured root or
+product regex changes, the old index is ignored until the next refresh. You can
+delete `.cache/datasets/` to clear all saved indexes; scans will recreate them.
 
 The browser can check products against individual PICS regions on demand. Choose
 an **Overpass area** and click **Check overpasses** for the selected repository.

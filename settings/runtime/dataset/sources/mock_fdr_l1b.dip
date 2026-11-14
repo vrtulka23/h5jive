@@ -1,7 +1,0 @@
-# Repository root defaults to settings/; set the host path in overrides.dip.
-dataset_sources[mock_fdr_l1b] : dataset_source
-  name = "FDR4ATMOS L1B UVN mock"
-  root = "./"
-  format link = {?dataset_formats[fdr_atmos_l1b_uvn]}
-  tags = "mock, fdr, uvn, l1b"
-  product_regex = "^ESA_FDR_ATMOS__L1B_UVN__(?P<year>[0-9]{4})(?P<month>[0-9]{2})(?P<day>[0-9]{2})_[^/]*[.]nc$"

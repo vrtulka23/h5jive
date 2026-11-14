@@ -13,6 +13,13 @@ fn volume_key_cells(key: &VolumeKey) -> usize {
 impl App {
     pub(super) fn draw(&mut self, ui: &Ui, plot_ui: &PlotUi<'_>, plot_ctx: &PlotContext) {
         self.poll_file_open_jobs();
+        if self.plugins.take_reload().is_some() {
+            self.pending_browser_b = self.file_paths.get(1).cloned();
+            if let Some(path) = self.file_paths.first() {
+                self.file_path_inputs[0] = path.display().to_string();
+                self.load_file_slot(0);
+            }
+        }
         self.dataset_browser.poll(&self.settings.dataset_sources);
         let palette = self.settings.palette.clone();
         let control_bg = mix_color(palette.panel, [1.0, 1.0, 1.0, 1.0], 0.055);
@@ -140,6 +147,10 @@ impl App {
                     }
                 }
                 if let Some(_menu) = ui.begin_menu("Help") {
+                    if ui.menu_item("Help for current section...") {
+                        self.show_section_help = true;
+                    }
+                    ui.separator();
                     if ui.menu_item("About H5Jive") {
                         self.show_about = true;
                     }
@@ -227,7 +238,7 @@ impl App {
         if self.workspace_mode == WorkspaceMode::DatasetBrowser {
             self.view_rect = [0.0; 4];
             self.draw_dataset_browser(ui, menu_height, panel_height, flags);
-            self.draw_about_dialog(ui);
+            self.draw_help_dialogs(ui);
             self.draw_file_picker(ui);
             self.draw_global_loading_overlay(ui, size, top_menu_height);
             self.draw_global_error_overlay(ui, size, menu_height);
@@ -236,7 +247,7 @@ impl App {
         if self.workspace_mode != WorkspaceMode::DataInspector {
             self.view_rect = [0.0; 4];
             self.draw_workspace_placeholder(ui, plot_ui, menu_height, panel_height, flags);
-            self.draw_about_dialog(ui);
+            self.draw_help_dialogs(ui);
             self.draw_file_picker(ui);
             self.draw_global_loading_overlay(ui, size, top_menu_height);
             self.draw_global_error_overlay(ui, size, menu_height);
@@ -395,7 +406,7 @@ impl App {
                         self.draw_data_view(ui, plot_ui, plot_ctx);
                     });
             });
-        self.draw_about_dialog(ui);
+        self.draw_help_dialogs(ui);
         self.draw_file_picker(ui);
         self.draw_export_dialog(ui);
         self.draw_global_loading_overlay(ui, size, top_menu_height);
@@ -593,39 +604,111 @@ impl App {
         height: f32,
         flags: WindowFlags,
     ) {
-        ui.window(format!("{}###workspace_content", self.workspace_mode.title()))
-            .position([0.0, top], Condition::Always)
-            .size([ui.io().display_size()[0], height], Condition::Always)
-            .flags(flags)
-            .build(|| match self.workspace_mode {
-                WorkspaceMode::DatasetBrowser => {
-                    ui.text("Dataset browser");
-                    ui.separator();
-                    ui.text_wrapped("Browse indexed products from the local dataset sources configured through DIPL. Open a selected product as file A or B.");
-                    ui.spacing();
-                    if ui.button("Open data inspector") {
-                        self.workspace_mode = WorkspaceMode::DataInspector;
-                    }
+        ui.window(format!(
+            "{}###workspace_content",
+            self.workspace_mode.title()
+        ))
+        .position([0.0, top], Condition::Always)
+        .size([ui.io().display_size()[0], height], Condition::Always)
+        .flags(flags)
+        .build(|| match self.workspace_mode {
+            WorkspaceMode::DatasetBrowser => {
+                if ui.button("Open data inspector") {
+                    self.workspace_mode = WorkspaceMode::DataInspector;
                 }
-                WorkspaceMode::PluginLab => {
-                    if let Some(selection) =
-                        self.plugins.draw(
-                            ui,
-                            plot_ui,
-                            &self.files,
-                            &self.file_paths,
-                            &self.settings,
-                            self.selection.as_ref(),
-                        )
-                    {
-                        self.selection = Some(selection);
-                        self.workspace_mode = WorkspaceMode::DataInspector;
-                        self.switch_view(ViewMode::Data);
-                    }
+            }
+            WorkspaceMode::PluginLab => {
+                if let Some(selection) = self.plugins.draw(
+                    ui,
+                    plot_ui,
+                    &self.files,
+                    &self.file_paths,
+                    &self.settings,
+                    self.selection.as_ref(),
+                ) {
+                    self.selection = Some(selection);
+                    self.workspace_mode = WorkspaceMode::DataInspector;
+                    self.switch_view(ViewMode::Data);
                 }
-                WorkspaceMode::DataInspector => {}
-            });
+                if self.plugins.has_sync_request()
+                    && self.file_open_jobs.iter().all(Option::is_none)
+                {
+                    self.sync_restore_selection = self.selection.clone();
+                    self.reset_file_selection();
+                    self.files.clear();
+                    self.plugins.start_requested_sync(&self.file_paths);
+                }
+            }
+            WorkspaceMode::DataInspector => {}
+        });
     }
+    fn current_help_topic(&self) -> (&'static str, &'static str) {
+        match self.workspace_mode {
+            WorkspaceMode::DatasetBrowser => (
+                "Dataset browser",
+                "Browse products indexed from the local dataset sources configured in DIPL. Open a product as file A or B, then inspect its datasets or use it in Plugin Lab.",
+            ),
+            WorkspaceMode::PluginLab => self.plugins.help_topic(&self.settings),
+            WorkspaceMode::DataInspector => match self.view {
+                ViewMode::Spatial3d => (
+                    "3D projection",
+                    "Preview a numeric dataset in 3D. Choose displayed dimensions and pin any remaining dimensions in the controls. Use the projection and range controls to focus the volume.",
+                ),
+                ViewMode::Slice2d => (
+                    "2D slice",
+                    "Choose two dataset dimensions for the heatmap and pin the others. Pan and zoom the plot to inspect cells; the view loads bounded regions of large datasets.",
+                ),
+                ViewMode::Profiles1d => (
+                    "1D profiles",
+                    "Choose a profile dimension and pin the remaining dimensions. The plot shows values along the selected axis; adjust the controls to compare other slices.",
+                ),
+                ViewMode::WorldMap => (
+                    "World map",
+                    "Display geolocated observations on a flat map. Select a dataset with usable coordinates, then use the map controls to navigate and adjust the display.",
+                ),
+                ViewMode::Globe => (
+                    "Globe",
+                    "Display geolocated observations on a rotatable globe. Select a dataset with usable coordinates, then rotate and zoom the globe to inspect its coverage.",
+                ),
+                ViewMode::Data => (
+                    "Data",
+                    "Select a group or dataset in the file tree to inspect its values and metadata. Numeric datasets can also be viewed as a 2D slice, 1D profile, 3D projection, or geospatial view when coordinates are available.",
+                ),
+            },
+        }
+    }
+
+    fn draw_help_dialogs(&mut self, ui: &Ui) {
+        const SECTION_HELP_POPUP: &str = "Current section help##section_help";
+        if self.show_section_help {
+            ui.open_popup(SECTION_HELP_POPUP);
+            self.show_section_help = false;
+        }
+        if let Some(_popup) = ui
+            .begin_modal_popup_config(SECTION_HELP_POPUP)
+            .flags(WindowFlags::ALWAYS_AUTO_RESIZE)
+            .begin()
+        {
+            let (title, help) = self.current_help_topic();
+            ui.text(title);
+            ui.separator();
+            ui.child_window("section_help_text")
+                .size([500.0, 170.0])
+                .build(ui, || {
+                    ui.text_wrapped(help);
+                    if self.workspace_mode == WorkspaceMode::DataInspector {
+                        ui.spacing();
+                        ui.text("Inspector details");
+                        ui.text_wrapped("Statistics exclude fill and nonfinite values. Large-dataset quartiles may use a bounded sample and are marked approximate in the table.");
+                    }
+                });
+            if ui.button("Close##section_help") {
+                ui.close_current_popup();
+            }
+        }
+        self.draw_about_dialog(ui);
+    }
+
     fn draw_about_dialog(&mut self, ui: &Ui) {
         if self.show_about {
             ui.window("About H5Jive")
@@ -771,10 +854,12 @@ fn make_file_picker_state(slot: usize, directory: PathBuf) -> FilePickerState {
 impl App {
     fn draw_dataset_browser(&mut self, ui: &Ui, top: f32, height: f32, flags: WindowFlags) {
         let mut open = None;
+        let _browser_padding = ui.push_style_var(StyleVar::WindowPadding([0.0, 0.0]));
+        let _browser_spacing = ui.push_style_var(StyleVar::ItemSpacing([0.0, 0.0]));
         ui.window("Dataset browser###workspace_content")
             .position([0.0, top], Condition::Always)
             .size([ui.io().display_size()[0], height], Condition::Always)
-            .flags(flags)
+            .flags(flags | WindowFlags::NO_TITLE_BAR)
             .build(|| {
                 let browser_height =
                     (ui.content_region_avail()[1] - self.browser_footer_height).max(120.0);
@@ -798,18 +883,34 @@ impl App {
                         })
                         .collect::<Vec<_>>(),
                     self.pending_browser_b.as_deref(),
+                    &self.settings.palette,
                     browser_height,
                 );
                 let footer_start = ui.cursor_pos_y();
-                ui.separator();
-                ui.text("Inspected products");
-                if let Some(_table) = ui.begin_table_with_flags(
-                    "##inspected_file_slots",
-                    2,
-                    TableOptions::new().flags(TableFlags::ROW_BG | TableFlags::BORDERS_INNER_H),
-                ) {
+                let footer_top = ui.cursor_screen_pos()[1];
+                ui.get_window_draw_list()
+                    .add_line(
+                        [0.0, footer_top],
+                        [ui.io().display_size()[0], footer_top],
+                        self.settings.palette.border,
+                    )
+                    .build();
+                let _footer_padding =
+                    ui.push_style_var(StyleVar::CellPadding(BROWSER_PANEL_PADDING));
+                if let Some(_table) =
+                    ui.begin_table_with_flags("##inspected_file_slots", 2, TableOptions::new())
+                {
                     for slot in 0..2 {
                         ui.table_next_column();
+                        let color = if slot == 0 {
+                            self.settings.palette.accent
+                        } else {
+                            mix_color(
+                                self.settings.palette.heatmap_low,
+                                self.settings.palette.text,
+                                0.38,
+                            )
+                        };
                         let label = if slot == 0 { "A" } else { "B" };
                         let loading = self.file_open_jobs[slot].is_some();
                         let path = self.file_open_paths[slot]
@@ -833,7 +934,7 @@ impl App {
                         } else {
                             "Empty"
                         };
-                        ui.text(format!("File {label} · {status}"));
+                        ui.text_colored(color, format!("File {label} · {status}"));
                         ui.text_wrapped(path.map_or_else(
                             || "No product selected".to_owned(),
                             |path| path.display().to_string(),
@@ -841,6 +942,7 @@ impl App {
                     }
                 }
                 if let Some(error) = &self.file_error {
+                    ui.set_cursor_pos([BROWSER_PANEL_PADDING[0], ui.cursor_pos_y() + PANEL_GAP]);
                     ui.text_wrapped(error);
                 }
                 self.browser_footer_height = (ui.cursor_pos_y() - footer_start).max(1.0);
@@ -949,6 +1051,11 @@ impl App {
     }
 
     fn load_file_slot(&mut self, slot: usize) {
+        if self.plugins.is_syncing() {
+            self.file_error =
+                Some("Wait for synchronization to finish before opening files.".into());
+            return;
+        }
         let path = self.file_path_inputs[slot].trim();
         if path.is_empty() {
             self.file_error = Some(format!(
@@ -1019,6 +1126,16 @@ impl App {
                 self.file_path_inputs[1] = path.display().to_string();
                 self.load_file_slot(1);
             }
+        }
+        if self.files.len() == 2 && self.file_open_jobs.iter().all(Option::is_none) {
+            if let Some(selection) = self.sync_restore_selection.take() {
+                if find_entry(&self.files[selection.file].tree, &selection.path).is_some() {
+                    self.selection = Some(selection);
+                    self.refresh_selection();
+                }
+            }
+        } else if self.file_error.is_some() && self.file_open_jobs.iter().all(Option::is_none) {
+            self.sync_restore_selection = None;
         }
     }
 

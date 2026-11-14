@@ -21,12 +21,35 @@ cargo run -p h5jive -- examples/plugins/path_comparison/plugin_demo_a.hdf5 examp
 Open **Plugin Lab** in the top mode bar. Both files are loaded through H5Jive's
 normal file slots, so plugins use the same file trees and dataset access as the
 inspector. Choose a plugin using its icon in the vertical tab rail on the left.
+Use **Help → Help for current section** for the active plugin's instructions.
 The A and B panels share one scrollable row grid, keeping matching paths aligned
 as you scroll. Status icons indicate a match, a metadata difference, a path
 present on only one side, or metadata that could not be read. Hover an icon for
 the fields that differ. Use the count buttons to filter paths by status. Path
 details start collapsed; click a path or chevron on either side to reveal metadata on both sides.
 The metadata scan runs in the background.
+
+The path comparison plugin can copy missing groups and datasets in either
+direction. Choose **Copy missing A → B** or **Copy missing B → A**, then review
+the count in the confirmation window. Click a missing-path status icon to copy
+one path instead.
+The copy runs in the background and reloads the destination
+file afterward. Existing paths, including paths with different metadata, are
+left untouched. A copied group includes its children and attributes. HDF5
+object copying preserves links as links and includes referenced objects needed
+by the copy. Check external links before relying on a synchronized file as a
+standalone copy.
+When copying one nested dataset, any missing parent groups are created without
+their source attributes; copy the parent group to preserve those attributes.
+
+Click a **Different** status icon to resolve that path by replacing the whole
+object in either direction. The prompt shows the path and differing metadata.
+For datasets, replacement also changes values, even though this plugin does
+not compare values. Replacing a group removes destination-only children. The
+new object is staged before the destination link is changed; the app attempts
+to restore the old link if the swap fails. This is a whole-object resolution, not an
+attribute-by-attribute merge.
+References elsewhere in the destination file to the old object may need review.
 
 ## Compare dataset values
 

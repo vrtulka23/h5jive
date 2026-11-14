@@ -24,6 +24,10 @@ before changing a cross-cutting flow.
 5. Preserve Dear ImGui scope pairing and stable widget IDs. Use a bounded
    `ListClipper` or table scrolling for large lists. Keep view and plugin
    selections usable when files are absent or loading.
+   Put general explanations for the active section in the top Help menu's
+   "Help for current section" popup, not among controls or inside the viewer.
+   Add a topic in `layout.rs` when adding an inspector view or workspace section.
+   Keep short loading, error, and actionable empty-state messages in place.
 6. Run `cargo fmt --all`, `cargo check -p h5jive`, and relevant tests. Run the
    full suite with `cargo test -p h5jive -- --test-threads=1` because DIPL and
    Dear ImGui tests share process state.

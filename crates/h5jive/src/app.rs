@@ -26,8 +26,8 @@ use volume_raycast::*;
 
 use dear_app::{
     imgui::{
-        ColorEditFlags, ColorStackToken, Condition, DrawListMut, FontConfig, FontSource,
-        ListClipper, MouseCursor, StyleColor, StyleVar, TabItemFlags, TableColumnFlags,
+        ChildFlags, ColorEditFlags, ColorStackToken, Condition, DrawListMut, FontConfig,
+        FontSource, ListClipper, MouseCursor, StyleColor, StyleVar, TabItemFlags, TableColumnFlags,
         TableColumnStateFlags, TableFlags, TableOptions, TableSizingPolicy, Ui, WindowFlags,
     },
     run as run_app, wgpu, AppConfig, Application, FrameContext, InitContext, RunError, Theme,
@@ -55,6 +55,7 @@ use std::{
 
 const TABLE_CELL_PADDING: [f32; 2] = [8.0, 5.0];
 const PANEL_PADDING: [f32; 2] = [8.0, 8.0];
+const BROWSER_PANEL_PADDING: [f32; 2] = [16.0, 12.0];
 const PANEL_GAP: f32 = 8.0;
 const CONTROL_INLINE_GAP: f32 = 4.0;
 const CONTROL_FRAME_PADDING: [f32; 2] = [6.0, 3.0];
@@ -91,6 +92,7 @@ struct App {
     pending_export: Option<PendingExport>,
     view_rect: [f32; 4],
     selection: Option<Selection>,
+    sync_restore_selection: Option<Selection>,
     startup_tab: Option<usize>,
     details_key: Option<(usize, String)>,
     details_default_pending: bool,
@@ -186,6 +188,7 @@ struct App {
     sidebar_width: f32,
     details_panel_fraction: f32,
     show_about: bool,
+    show_section_help: bool,
     settings: Settings,
 }
 
@@ -309,6 +312,7 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
         view_rect: [0.0; 4],
         startup_tab: selection.as_ref().map(|selected| selected.file),
         selection,
+        sync_restore_selection: None,
         details_key: None,
         details_default_pending: true,
         statistics_cache: None,
@@ -399,6 +403,7 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
         sidebar_width: settings.sidebar_width,
         details_panel_fraction: settings.details_panel_fraction,
         show_about: false,
+        show_section_help: false,
         settings,
     };
     run_app(config, app)?;

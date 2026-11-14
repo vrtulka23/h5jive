@@ -27,6 +27,7 @@ struct PluginDefinition {
     key: &'static str,
     title: &'static str,
     description: &'static str,
+    help: &'static str,
     enabled: fn(&Settings) -> bool,
     icon: fn(&DrawListMut<'_>, [f32; 2], [f32; 2], [f32; 4]),
     draw: fn(&mut PluginLab, &Ui, &PlotUi<'_>, PluginContext<'_>) -> Option<Selection>,
@@ -46,6 +47,7 @@ const PLUGINS: &[PluginDefinition] = &[
         key: "path_comparison",
         title: "A/B path comparison",
         description: "Compare paths, shapes, datatypes, and attributes in files A and B.",
+        help: "Compare the loaded files A and B by path, object kind, shape, datatype, and displayed attributes. Use the status buttons to filter paths; click a path to expand its details on both sides. Click a missing-path arrow to copy one object, or use Copy missing A -> B / B -> A for all missing objects. Click a Different icon to choose which side should replace the other at that path. Replacing a dataset also copies its values; replacing a group also replaces its children. Dataset values are not compared here.",
         enabled: |settings| settings.path_comparison_enabled,
         icon: path_comparison::draw_icon,
         draw: draw_path_comparison,
@@ -54,6 +56,7 @@ const PLUGINS: &[PluginDefinition] = &[
         key: "value_comparison",
         title: "Dataset value comparison",
         description: "Compare matching numeric arrays from A or B as a 2D difference or ratio.",
+        help: "Choose a numeric dataset on the left, then pick a same-shaped dataset on the right from either file. Compare their difference or ratio in a 2D view. Select two dimensions to display and pin the others. Invalid values, fill values, and division by zero are excluded from the preview.",
         enabled: |settings| settings.value_comparison_enabled,
         icon: value_comparison::draw_icon,
         draw: value_comparison::draw,
@@ -68,6 +71,35 @@ pub(super) struct PluginLab {
 }
 
 impl PluginLab {
+    pub fn help_topic(&self, settings: &Settings) -> (&'static str, &'static str) {
+        let available: Vec<_> = PLUGINS
+            .iter()
+            .filter(|plugin| (plugin.enabled)(settings))
+            .collect();
+        available
+            .get(self.selected.min(available.len().saturating_sub(1)))
+            .map_or(
+                (
+                    "Plugin Lab",
+                    "Enable a plugin in settings/runtime/plugins.dip to use it here.",
+                ),
+                |plugin| (plugin.title, plugin.help),
+            )
+    }
+    pub fn has_sync_request(&self) -> bool {
+        self.comparison.has_sync_request()
+    }
+
+    pub fn is_syncing(&self) -> bool {
+        self.comparison.is_syncing()
+    }
+
+    pub fn start_requested_sync(&mut self, paths: &[PathBuf]) {
+        self.comparison.start_requested_sync(paths);
+    }
+    pub fn take_reload(&mut self) -> Option<(usize, PathBuf)> {
+        self.comparison.take_reload()
+    }
     pub fn invalidate(&mut self) {
         self.comparison.invalidate();
         self.value_comparison.invalidate();
@@ -155,7 +187,6 @@ impl PluginLab {
             .size([0.0, 0.0])
             .build(ui, || {
                 ui.text(plugin.title);
-                ui.text_wrapped(plugin.description);
                 ui.separator();
                 result = (plugin.draw)(
                     self,

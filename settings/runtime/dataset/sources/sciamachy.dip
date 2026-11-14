@@ -1,7 +1,7 @@
 # Repository root defaults to settings/; set the host path in overrides.dip.
-dataset_sources[mock_sciamachy] : dataset_source
-  name = "SCIAMACHY L1C mock"
+dataset_sources[sciamachy] : dataset_source
+  name = "SCIAMACHY L1C"
   root = "./"
   format link = {?dataset_formats[sciamachy_l1c]}
-  tags = "mock, sciamachy, envisat, uvn, l1c"
+  tags = "sciamachy, envisat, uvn, l1c"
   product_regex = "^EN1_RPRO_SCI_____1C_(?P<year>[0-9]{4})(?P<month>[0-9]{2})(?P<day>[0-9]{2})T[0-9]{6}_[0-9]{8}T[0-9]{6}_(?P<orbit>[0-9]+)_[^/]*[.]nc$"

@@ -499,6 +499,7 @@ impl DatasetBrowser {
         sources: &[DatasetSource],
         areas: &[OverpassArea],
         pending_b: Option<&Path>,
+        palette: &Palette,
         height: f32,
     ) -> Option<(usize, PathBuf)> {
         self.poll(sources);
@@ -508,16 +509,20 @@ impl DatasetBrowser {
         }
         let mut open = None;
         let mut any_visible = false;
+        let source_surface = palette.background;
+        let product_surface = palette.background;
+        let source_top = ui.cursor_screen_pos();
+        let _source_padding = ui.push_style_var(StyleVar::WindowPadding(BROWSER_PANEL_PADDING));
+        let _source_spacing = ui.push_style_var(StyleVar::ItemSpacing([PANEL_GAP, PANEL_GAP]));
         ui.child_window("##dataset_sources")
             .size([250.0, height])
+            .child_flags(ChildFlags::ALWAYS_USE_WINDOW_PADDING)
             .build(ui, || {
-                ui.text("Available datasets");
-                ui.text_disabled("Group by tag");
                 ui.set_next_item_width(-1.0);
                 ui.combo_simple_string("##dataset_tag_group", &mut self.tag_choice, &self.tags);
-                ui.text("Search tags");
                 ui.set_next_item_width(-1.0);
                 ui.input_text("##dataset_tag_search", &mut self.tag_search)
+                    .hint("Search tags")
                     .build();
                 ui.separator();
                 let selected_tag = self
@@ -548,25 +553,57 @@ impl DatasetBrowser {
                         Some(false) => ([0.9, 0.3, 0.28, 1.0], "Dataset directory unavailable"),
                         None => ([0.65, 0.65, 0.65, 1.0], "Checking dataset directory"),
                     };
-                    ui.dummy([14.0, ui.text_line_height()]);
+                    let selected = self.selected_source == number;
+                    let clicked = ui.invisible_button(
+                        format!("##source_{number}"),
+                        [ui.content_region_avail()[0], ui.frame_height().max(30.0)],
+                    );
                     let min = ui.item_rect_min();
                     let max = ui.item_rect_max();
-                    ui.get_window_draw_list()
-                        .add_circle(
-                            [(min[0] + max[0]) * 0.5, (min[1] + max[1]) * 0.5],
-                            4.5,
-                            color,
-                        )
+                    let hovered = ui.is_item_hovered();
+                    let background = if selected {
+                        mix_color(source_surface, palette.accent, 0.30)
+                    } else if hovered {
+                        mix_color(source_surface, palette.text, 0.10)
+                    } else {
+                        source_surface
+                    };
+                    let draw = ui.get_window_draw_list();
+                    draw.add_rect(min, max, background)
+                        .filled(true)
+                        .rounding(3.0)
+                        .build();
+                    if selected {
+                        draw.add_rect(min, [min[0] + 3.0, max[1]], palette.accent)
+                            .filled(true)
+                            .build();
+                    }
+                    let center_y = (min[1] + max[1]) * 0.5;
+                    draw.add_circle([min[0] + 14.0, center_y], 4.5, color)
                         .filled(true)
                         .build();
-                    ui.set_item_tooltip(tooltip);
-                    ui.same_line();
-                    let label = format!("{} ({count})##source_{number}", source.name);
-                    if ui
-                        .selectable_config(&label)
-                        .selected(self.selected_source == number)
-                        .build()
-                    {
+                    let count_text = count.to_string();
+                    let text_y = center_y - ui.text_line_height() * 0.5;
+                    let count_width = ui.calc_text_size(&count_text)[0];
+                    draw.add_text(
+                        [max[0] - count_width - 10.0, text_y],
+                        palette.muted,
+                        &count_text,
+                    );
+                    draw.with_clip_rect(
+                        [min[0] + 24.0, min[1]],
+                        [max[0] - count_width - 16.0, max[1]],
+                        || {
+                            draw.add_text([min[0] + 24.0, text_y], palette.text, &source.name);
+                        },
+                    );
+                    if hovered {
+                        ui.set_item_tooltip(format!(
+                            "{} | {count} products | {tooltip}",
+                            source.name
+                        ));
+                    }
+                    if clicked {
                         self.selected_source = number;
                         self.selected_product = None;
                         self.only_overpasses = false;
@@ -574,10 +611,22 @@ impl DatasetBrowser {
                         self.dirty = true;
                     }
                 }
+                ui.get_window_draw_list()
+                    .add_line(
+                        [source_top[0] + 249.0, source_top[1]],
+                        [source_top[0] + 249.0, source_top[1] + height],
+                        palette.border,
+                    )
+                    .build();
             });
+        drop(_source_spacing);
+        drop(_source_padding);
         ui.same_line();
+        let _product_padding = ui.push_style_var(StyleVar::WindowPadding(BROWSER_PANEL_PADDING));
+        let _product_spacing = ui.push_style_var(StyleVar::ItemSpacing([PANEL_GAP, PANEL_GAP]));
         ui.child_window("##dataset_products")
             .size([0.0, height])
+            .child_flags(ChildFlags::ALWAYS_USE_WINDOW_PADDING)
             .build(ui, || {
                 if !any_visible {
                     ui.text("No datasets match the selected tags.");
@@ -590,6 +639,15 @@ impl DatasetBrowser {
                 }
                 let index = &self.sources[source_number];
                 ui.text(&source.name);
+                ui.same_line();
+                ui.text_disabled(format!("{} products", index.products.len()));
+                ui.text_disabled(format!(
+                    "{}  |  {}  |  {}",
+                    source.id,
+                    source.format,
+                    source.tags.join(", ")
+                ));
+                ui.text_wrapped(source.root.display().to_string());
                 if let Some(path) = pending_b {
                     ui.text_wrapped(format!(
                         "File B queued until file A loads: {}",
@@ -602,9 +660,7 @@ impl DatasetBrowser {
                         "Dataset directory unavailable; cached index remains visible.",
                     );
                 }
-                ui.text_disabled(format!("ID: {}  ·  Format: {}", source.id, source.format));
-                ui.text_disabled(format!("Tags: {}", source.tags.join(", ")));
-                ui.text_wrapped(source.root.display().to_string());
+                ui.spacing();
                 if index.scanning {
                     ui.text(format!("Scanning: {} files visited", index.visited));
                     if ui.button("Cancel scan") {
@@ -622,15 +678,12 @@ impl DatasetBrowser {
                 if let Some(error) = &self.sources[source_number].error {
                     ui.text_wrapped(format!("Index: {error}"));
                 }
-                ui.same_line();
-                ui.text(format!(
-                    "{} products",
-                    self.sources[source_number].products.len()
-                ));
-                ui.text("Search name or path");
+                ui.separator();
+                ui.text("FIND PRODUCTS");
                 ui.set_next_item_width(-1.0);
                 if ui
                     .input_text("##product_name_search", &mut self.search)
+                    .hint("Search name or path")
                     .build()
                 {
                     self.dirty = true;
@@ -639,20 +692,20 @@ impl DatasetBrowser {
                 if let Some(_filters) = ui.begin_table("##product_search_filters", 2) {
                     ui.table_next_row();
                     ui.table_next_column();
-                    ui.text("Date (YYYY-MM-DD)");
                     ui.set_next_item_width(-1.0);
                     if ui
                         .input_text("##product_date_search", &mut self.date_search)
+                        .hint("Date (YYYY-MM-DD)")
                         .build()
                     {
                         self.dirty = true;
                         self.selected_product = None;
                     }
                     ui.table_next_column();
-                    ui.text("Orbit");
                     ui.set_next_item_width(-1.0);
                     if ui
                         .input_text("##product_orbit_search", &mut self.orbit_search)
+                        .hint("Orbit")
                         .build()
                     {
                         self.dirty = true;
@@ -739,6 +792,8 @@ impl DatasetBrowser {
                     }
                 }
                 self.rebuild_visible();
+                ui.separator();
+                ui.text(format!("PRODUCTS ({} matching)", self.filtered.len()));
                 let column_widths = [360.0, 250.0, 100.0, 80.0, 85.0];
                 let preferred_width = column_widths.iter().sum::<f32>()
                     + column_widths.len() as f32 * TABLE_CELL_PADDING[0] * 2.0;
@@ -802,6 +857,12 @@ impl DatasetBrowser {
                             ui.table_next_column();
                             let selected =
                                 self.selected_product.as_ref() == Some(&product.relative_path);
+                            if selected {
+                                let selected_bg = mix_color(product_surface, palette.accent, 0.24);
+                                for column in 0..5 {
+                                    ui.table_set_cell_bg_color(selected_bg, column);
+                                }
+                            }
                             if ui
                                 .selectable_config(format!("{}##product_{row}", product.filename))
                                 .selected(selected)
@@ -824,6 +885,8 @@ impl DatasetBrowser {
                     }
                 }
                 let footer_start = ui.cursor_pos_y();
+                ui.separator();
+                ui.text("SELECTED PRODUCT");
                 if let Some(relative) = &self.selected_product {
                     let path = source.root.join(relative);
                     ui.text_wrapped(path.display().to_string());
@@ -881,6 +944,8 @@ impl DatasetBrowser {
                 }
                 self.product_footer_height = (ui.cursor_pos_y() - footer_start).max(1.0);
             });
+        drop(_product_spacing);
+        drop(_product_padding);
         open
     }
 }
@@ -891,21 +956,28 @@ mod tests {
     use std::fs;
 
     #[test]
-    fn registered_mock_repositories_are_indexed() {
+    fn registered_example_repositories_are_indexed() {
         let settings = Settings::load().unwrap();
-        let fdr = settings
-            .dataset_sources
-            .iter()
-            .find(|source| source.id == "mock_fdr_l1a")
-            .unwrap();
         let gome = settings
             .dataset_sources
             .iter()
-            .find(|source| source.id == "mock_gome")
+            .find(|source| source.id == "gome")
             .unwrap();
-        assert_eq!(fdr.format, "FDR4ATMOS Level 1A UVN");
-        assert!(source_matches_tags(fdr, Some("fdr"), "uvn"));
-        assert!(!source_matches_tags(gome, Some("fdr"), ""));
+        assert_eq!(gome.format, "GOME Level 1B");
+        assert!(source_matches_tags(gome, Some("gome"), "uvn"));
+        assert!(!source_matches_tags(gome, Some("s5p"), ""));
+        assert!(settings
+            .dataset_sources
+            .iter()
+            .all(|source| source.id != "fdr_l1a" && source.id != "fdr_l1b"));
+        assert!(settings
+            .dataset_rules
+            .iter()
+            .any(|rule| rule.file_glob == "ESA_FDR_ATMOS__L1A_UVN__*.nc"));
+        assert!(settings
+            .dataset_rules
+            .iter()
+            .any(|rule| rule.file_glob == "ESA_FDR_ATMOS__L1B_UVN__*.nc"));
         for source in &settings.dataset_sources {
             if !source.root.is_dir() {
                 continue;
@@ -916,18 +988,17 @@ mod tests {
                 continue;
             }
             let expected = match source.id.as_str() {
-                "mock_fdr_l1a" | "mock_fdr_l1b" => 1,
-                "mock_s5p" => 3,
+                "s5p" => 3,
                 _ => 5,
             };
             assert_eq!(products.len(), expected, "{}", source.id);
             assert!(products.iter().all(|product| product.year.len() == 4
                 && product.month.len() == 2
                 && product.day.len() == 2));
-            if source.id == "mock_gome" {
+            if source.id == "gome" {
                 assert_eq!(products[0].orbit, "73861");
             }
-            if source.id == "mock_gome2" {
+            if source.id == "gome2" {
                 assert_eq!(products[0].orbit, "32260");
             }
         }
@@ -1078,6 +1149,7 @@ mod tests {
             overpass: OverpassDiscovery::default(),
         }];
         let mut browser = DatasetBrowser::new(&sources);
+        let settings = Settings::load().unwrap();
         let ui = context.frame();
         ui.window("Dataset browser smoke")
             .size([1100.0, 700.0], Condition::Always)
@@ -1087,7 +1159,7 @@ mod tests {
                     label: "Test area".into(),
                     bounds: [-1.0, -1.0, 1.0, 1.0],
                 }];
-                browser.draw(ui, &sources, &areas, None, 640.0);
+                browser.draw(ui, &sources, &areas, None, &settings.palette, 640.0);
             });
     }
 
@@ -1161,7 +1233,7 @@ mod tests {
         let Some(source) = settings
             .dataset_sources
             .iter()
-            .find(|source| source.id == "mock_gome2")
+            .find(|source| source.id == "gome2")
         else {
             return;
         };

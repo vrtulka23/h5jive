@@ -137,11 +137,11 @@ fn dataset_formats_load_from_dipl() {
 }
 
 #[test]
-fn s5p_mock_source_indexes_local_band_products_when_available() {
+fn s5p_example_source_indexes_local_band_products_when_available() {
     let source = test_settings()
         .dataset_sources
         .iter()
-        .find(|source| source.id == "mock_s5p")
+        .find(|source| source.id == "s5p")
         .unwrap();
     if !source.root.is_dir() {
         return;

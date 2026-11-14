@@ -81,8 +81,8 @@ for manual installation. DIPL reads those settings at runtime. Edit
 machine; the installer preserves this file during upgrades. For example:
 
 ```text
-dataset_sources[mock_gome].root = "/data/GOME"
-dataset_sources[mock_gome2].root = "/data/GOME2"
+dataset_sources[gome].root = "/data/GOME"
+dataset_sources[gome2].root = "/data/GOME2"
 ```
 
 Use forward slashes in Windows paths, such as `D:/satellite/GOME`. Dataset

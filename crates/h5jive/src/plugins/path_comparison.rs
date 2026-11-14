@@ -2,6 +2,269 @@ use super::*;
 use dear_app::imgui::MouseButton;
 use std::collections::{BTreeMap, BTreeSet};
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum SyncDirection {
+    AToB,
+    BToA,
+}
+
+impl SyncDirection {
+    fn slots(self) -> (usize, usize) {
+        match self {
+            Self::AToB => (0, 1),
+            Self::BToA => (1, 0),
+        }
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            Self::AToB => "A -> B",
+            Self::BToA => "B -> A",
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct CopyItem {
+    path: String,
+    kind: PathKind,
+}
+
+enum SyncRequest {
+    Missing(SyncDirection, Vec<CopyItem>),
+    Replace(SyncDirection, CopyItem),
+}
+
+impl SyncRequest {
+    fn direction(&self) -> SyncDirection {
+        match self {
+            Self::Missing(direction, _) | Self::Replace(direction, _) => *direction,
+        }
+    }
+}
+
+fn collect_copy_items(entry: &Entry, items: &mut BTreeMap<String, PathKind>) {
+    if entry.path != "/" && !matches!(entry.kind, Kind::Other) {
+        items.insert(entry.path.clone(), PathKind::from_entry(entry));
+    }
+    for child in &entry.children {
+        collect_copy_items(child, items);
+    }
+}
+
+fn copy_plan(source: &File, destination: &File) -> Vec<CopyItem> {
+    let mut source_items = BTreeMap::new();
+    let mut destination_items = BTreeMap::new();
+    collect_copy_items(&source.tree, &mut source_items);
+    collect_copy_items(&destination.tree, &mut destination_items);
+    let mut plan = Vec::new();
+    let mut copied_groups = BTreeSet::new();
+    for (path, kind) in source_items {
+        if destination_items.contains_key(&path) {
+            continue;
+        }
+        // A copied group includes every child and all its attributes.
+        let mut parent = path.as_str();
+        let mut inside_copied_group = false;
+        while let Some((ancestor, _)) = parent.rsplit_once('/') {
+            if copied_groups.contains(ancestor) {
+                inside_copied_group = true;
+                break;
+            }
+            parent = ancestor;
+        }
+        if inside_copied_group {
+            continue;
+        }
+        if matches!(kind, PathKind::Group) {
+            copied_groups.insert(path.clone());
+        }
+        plan.push(CopyItem { path, kind });
+    }
+    plan
+}
+
+struct SyncOutcome {
+    destination: usize,
+    path: PathBuf,
+    copied: usize,
+    error: Option<String>,
+    action: &'static str,
+}
+
+fn open_copy_files(
+    source_path: &std::path::Path,
+    destination_path: &std::path::Path,
+) -> Result<
+    (
+        hdf5_metno::File,
+        hdf5_metno::File,
+        hdf5_metno::plist::ObjectCopy,
+    ),
+    String,
+> {
+    if source_path == destination_path
+        || std::fs::canonicalize(source_path)
+            .ok()
+            .zip(std::fs::canonicalize(destination_path).ok())
+            .is_some_and(|(source, destination)| source == destination)
+    {
+        return Err("Source and destination must be different files".into());
+    }
+    let source = hdf5_metno::File::open(source_path).map_err(|e| e.to_string())?;
+    let copy_properties =
+        hdf5_metno::plist::ObjectCopy::try_new().map_err(|e| format!("Copy properties: {e}"))?;
+    // Keep object references valid when H5Ocopy crosses file boundaries.
+    let property_result = hdf5_metno::sync::sync(|| unsafe {
+        hdf5_metno_sys::h5p::H5Pset_copy_object(
+            copy_properties.id(),
+            hdf5_metno_sys::h5o::H5O_COPY_EXPAND_REFERENCE_FLAG,
+        )
+    });
+    if property_result < 0 {
+        return Err("Could not enable HDF5 reference copying".into());
+    }
+    // Cancelled inspector reads can hold a read handle briefly.
+    let mut retries = 0;
+    let destination = loop {
+        match hdf5_metno::File::open_rw(destination_path) {
+            Ok(file) => break file,
+            Err(error)
+                if retries < 50 && error.to_string().contains("already open for read-only") =>
+            {
+                retries += 1;
+                thread::sleep(std::time::Duration::from_millis(100));
+            }
+            Err(error) => return Err(error.to_string()),
+        }
+    };
+    Ok((source, destination, copy_properties))
+}
+
+fn copy_missing(
+    source_path: &std::path::Path,
+    destination_path: &std::path::Path,
+    plan: &[CopyItem],
+) -> (usize, Option<String>) {
+    let mut copied = 0;
+    let result = (|| -> Result<(), String> {
+        let (source, destination, copy_properties) =
+            open_copy_files(source_path, destination_path)?;
+        for item in plan {
+            if destination.link_exists(&item.path) {
+                continue;
+            }
+            let (parent_path, name) = item.path.rsplit_once('/').unwrap();
+            let parent = if parent_path.is_empty() {
+                destination.group("/")
+            } else if destination.link_exists(parent_path) {
+                destination.group(parent_path)
+            } else {
+                destination.create_group(parent_path)
+            }
+            .map_err(|e| format!("{}: destination parent: {e}", item.path))?;
+            let copy_result = match item.kind {
+                PathKind::Group => source.group(&item.path).and_then(|group| {
+                    group.copy_to_with_props(&parent, name, Some(&copy_properties), None)
+                }),
+                PathKind::Dataset { .. } => source.dataset(&item.path).and_then(|dataset| {
+                    dataset.copy_to_with_props(&parent, name, Some(&copy_properties), None)
+                }),
+                PathKind::Other => continue,
+            };
+            copy_result.map_err(|e| format!("{}: {e}", item.path))?;
+            copied += 1;
+        }
+        destination.flush().map_err(|e| e.to_string())?;
+        Ok(())
+    })();
+    (copied, result.err())
+}
+
+fn replacement_name(parent: &hdf5_metno::Group, prefix: &str) -> String {
+    let nonce = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |time| time.as_nanos());
+    for index in 0.. {
+        let name = format!(".__h5jive_{prefix}_{}_{nonce}_{index}", std::process::id());
+        if !parent.link_exists(&name) {
+            return name;
+        }
+    }
+    unreachable!()
+}
+
+fn replace_existing(
+    source_path: &std::path::Path,
+    destination_path: &std::path::Path,
+    item: &CopyItem,
+) -> (usize, Option<String>) {
+    let mut replaced = 0;
+    let result = (|| -> Result<(), String> {
+        if item.path == "/" {
+            return Err("The file root cannot be replaced".into());
+        }
+        let (source, destination, copy_properties) =
+            open_copy_files(source_path, destination_path)?;
+        let (parent_path, name) = item.path.rsplit_once('/').unwrap();
+        let parent = destination
+            .group(if parent_path.is_empty() {
+                "/"
+            } else {
+                parent_path
+            })
+            .map_err(|e| format!("{}: destination parent: {e}", item.path))?;
+        if !parent.link_exists(name) {
+            return Err(format!("{} no longer exists in the destination", item.path));
+        }
+        let staged = replacement_name(&parent, "stage");
+        let backup = replacement_name(&parent, "previous");
+        let copied = match item.kind {
+            PathKind::Group => source.group(&item.path).and_then(|group| {
+                group.copy_to_with_props(&parent, &staged, Some(&copy_properties), None)
+            }),
+            PathKind::Dataset { .. } => source.dataset(&item.path).and_then(|dataset| {
+                dataset.copy_to_with_props(&parent, &staged, Some(&copy_properties), None)
+            }),
+            PathKind::Other => return Err("This HDF5 object type cannot be replaced".into()),
+        };
+        if let Err(error) = copied {
+            if parent.link_exists(&staged) {
+                let _ = parent.unlink(&staged);
+            }
+            return Err(format!("{}: staging copy failed: {error}", item.path));
+        }
+        if let Err(error) = parent.relink(name, &backup) {
+            let _ = parent.unlink(&staged);
+            return Err(format!(
+                "{}: could not save the destination object: {error}",
+                item.path
+            ));
+        }
+        if let Err(error) = parent.relink(&staged, name) {
+            let rollback = parent.relink(&backup, name);
+            let _ = parent.unlink(&staged);
+            return Err(match rollback {
+                Ok(()) => format!("{}: replacement failed; original restored: {error}", item.path),
+                Err(rollback_error) => format!(
+                    "{}: replacement failed: {error}; original remains at {backup}: {rollback_error}",
+                    item.path
+                ),
+            });
+        }
+        replaced = 1;
+        parent.unlink(&backup).map_err(|e| {
+            format!(
+                "{}: replaced, but the old object remains at {backup}: {e}",
+                item.path
+            )
+        })?;
+        destination.flush().map_err(|e| e.to_string())?;
+        Ok(())
+    })();
+    (replaced, result.err())
+}
+
 pub(super) fn draw_icon(draw: &DrawListMut<'_>, min: [f32; 2], max: [f32; 2], color: [f32; 4]) {
     let width = max[0] - min[0];
     let height = max[1] - min[1];
@@ -115,7 +378,7 @@ fn status_color(status: Status, palette: &Palette) -> [f32; 4] {
         Status::Same => palette.heatmap_mid,
         Status::Different => palette.positive_inf,
         Status::OnlyA => palette.accent,
-        Status::OnlyB => palette.heatmap_low,
+        Status::OnlyB => mix_color(palette.heatmap_low, palette.text, 0.38),
         Status::Unavailable => palette.muted,
     }
 }
@@ -155,15 +418,16 @@ fn draw_status_icon(
                 .build();
         }
         Status::OnlyA | Status::OnlyB => {
+            // The arrow points from the existing object to the missing side.
             let (start, end, tip) = if status == Status::OnlyA {
-                (23.0, 9.0, 9.0)
-            } else {
                 (9.0, 23.0, 23.0)
+            } else {
+                (23.0, 9.0, 9.0)
             };
             draw.add_line(p(start, 14.0), p(end, 14.0), color)
                 .thickness(1.5)
                 .build();
-            let wing = if status == Status::OnlyA { 5.0 } else { -5.0 };
+            let wing = if status == Status::OnlyA { -5.0 } else { 5.0 };
             draw.add_line(p(tip, 14.0), p(tip + wing, 9.0), color)
                 .thickness(1.5)
                 .build();
@@ -311,6 +575,7 @@ fn draw_entry_detail(ui: &Ui, summary: Option<&EntrySummary>, attributes: bool, 
     }
 }
 
+#[derive(Clone)]
 struct Row {
     path: String,
     a: Option<EntrySummary>,
@@ -448,6 +713,14 @@ pub(super) struct State {
     filter: Option<Status>,
     expanded: BTreeSet<String>,
     needs_redraw: bool,
+    pending_sync: Option<(SyncDirection, Vec<CopyItem>)>,
+    show_sync_prompt: bool,
+    pending_resolution: Option<Row>,
+    show_resolution_prompt: bool,
+    sync_request: Option<SyncRequest>,
+    sync_job: Option<mpsc::Receiver<SyncOutcome>>,
+    sync_message: Option<String>,
+    reload: Option<(usize, PathBuf)>,
 }
 
 impl State {
@@ -458,17 +731,68 @@ impl State {
         self.filter = None;
         self.expanded.clear();
         self.needs_redraw = false;
+        self.pending_sync = None;
+        self.show_sync_prompt = false;
+        self.pending_resolution = None;
+        self.show_resolution_prompt = false;
+        self.sync_request = None;
+        self.reload = None;
     }
 
     pub fn is_busy(&self) -> bool {
-        self.job.is_some()
+        self.job.is_some() || self.sync_job.is_some()
     }
 
     pub fn take_redraw(&mut self) -> bool {
         std::mem::take(&mut self.needs_redraw)
     }
 
+    pub fn take_reload(&mut self) -> Option<(usize, PathBuf)> {
+        self.reload.take()
+    }
+
+    pub fn has_sync_request(&self) -> bool {
+        self.sync_request.is_some()
+    }
+
+    pub fn is_syncing(&self) -> bool {
+        self.sync_job.is_some()
+    }
+
+    pub fn start_requested_sync(&mut self, paths: &[PathBuf]) {
+        if let Some(request) = self.sync_request.take() {
+            self.start_sync(request, paths);
+        }
+    }
+
     pub(super) fn poll(&mut self) {
+        if let Some(job) = &self.sync_job {
+            match job.try_recv() {
+                Ok(outcome) => {
+                    let noun = if outcome.copied == 1 {
+                        "object"
+                    } else {
+                        "objects"
+                    };
+                    self.sync_message = Some(match outcome.error {
+                        Some(error) => format!(
+                            "{} {} {noun}; synchronization stopped: {error}",
+                            outcome.action, outcome.copied
+                        ),
+                        None => format!("{} {} {noun}.", outcome.action, outcome.copied),
+                    });
+                    self.reload = Some((outcome.destination, outcome.path));
+                    self.sync_job = None;
+                    self.needs_redraw = true;
+                }
+                Err(mpsc::TryRecvError::Disconnected) => {
+                    self.sync_message = Some("Synchronization worker stopped unexpectedly. Reload both files before trying again.".into());
+                    self.sync_job = None;
+                    self.needs_redraw = true;
+                }
+                Err(mpsc::TryRecvError::Empty) => {}
+            }
+        }
         let Some(job) = &self.job else { return };
         match job.try_recv() {
             Ok(Ok(rows)) => {
@@ -508,15 +832,53 @@ impl State {
         });
         self.job = Some(receiver);
     }
+
+    fn start_sync(&mut self, request: SyncRequest, paths: &[PathBuf]) {
+        let direction = request.direction();
+        let (source, destination) = direction.slots();
+        let source_path = paths[source].clone();
+        let destination_path = paths[destination].clone();
+        let (sender, receiver) = mpsc::channel();
+        thread::spawn(move || {
+            let (copied, error, action) = match request {
+                SyncRequest::Missing(_, plan) => {
+                    let (copied, error) = copy_missing(&source_path, &destination_path, &plan);
+                    (copied, error, "Copied")
+                }
+                SyncRequest::Replace(_, item) => {
+                    let (copied, error) = replace_existing(&source_path, &destination_path, &item);
+                    (copied, error, "Replaced")
+                }
+            };
+            let _ = sender.send(SyncOutcome {
+                destination,
+                path: destination_path,
+                copied,
+                error,
+                action,
+            });
+        });
+        self.sync_job = Some(receiver);
+        self.sync_message = None;
+        self.pending_sync = None;
+        self.pending_resolution = None;
+    }
 }
 
 pub(super) fn draw(lab: &mut PluginLab, ui: &Ui, context: PluginContext<'_>) -> Option<Selection> {
+    lab.comparison.poll();
     let (Some(a), Some(b)) = (context.files.first(), context.files.get(1)) else {
         ui.spacing();
-        ui.text_wrapped("Load files A and B from the Files menu to compare their paths.");
+        if lab.comparison.is_syncing() {
+            ui.text("Copying missing objects...");
+        } else {
+            ui.text_wrapped("Load files A and B from the Files menu to compare their paths.");
+        }
+        if let Some(message) = &lab.comparison.sync_message {
+            ui.text_wrapped(message);
+        }
         return None;
     };
-    lab.comparison.poll();
     if lab.comparison.rows.is_none()
         && lab.comparison.job.is_none()
         && lab.comparison.error.is_none()
@@ -549,6 +911,13 @@ pub(super) fn draw(lab: &mut PluginLab, ui: &Ui, context: PluginContext<'_>) -> 
     let palette = &context.settings.palette;
     let available_width = ui.content_region_avail()[0];
     let mut line_width = 0.0;
+    let plans = [copy_plan(a, b), copy_plan(b, a)];
+    let same_file = context.file_paths.len() < 2
+        || std::fs::canonicalize(&context.file_paths[0])
+            .ok()
+            .zip(std::fs::canonicalize(&context.file_paths[1]).ok())
+            .is_some_and(|(a, b)| a == b);
+    let mut start_sync: Option<SyncRequest> = None;
     let filters = [
         (None, format!("All {}##filter_all", rows.len())),
         (
@@ -608,24 +977,39 @@ pub(super) fn draw(lab: &mut PluginLab, ui: &Ui, context: PluginContext<'_>) -> 
             lab.comparison.filter = if active { None } else { target };
         }
     }
-    let items = display_items(rows, lab.comparison.filter, &lab.comparison.expanded);
-    let visible_paths = rows
-        .iter()
-        .filter(|row| {
-            lab.comparison
-                .filter
-                .is_none_or(|status| row.status == status)
-        })
-        .count();
-    {
-        let _muted = ui.push_style_color(StyleColor::Text, palette.muted);
-        ui.text_wrapped(format!("Showing {visible_paths} of {} paths. Click a path or chevron to reveal metadata on both sides; double-click a dataset path to inspect it.", rows.len()));
-    }
-    {
-        let _muted = ui.push_style_color(StyleColor::Text, palette.muted);
-        ui.text_wrapped("Matching compares paths, object kinds, shapes, datatypes, and attribute values. Dataset values are not compared.");
+    if !same_file && lab.comparison.sync_job.is_none() {
+        for (index, direction) in [SyncDirection::AToB, SyncDirection::BToA]
+            .into_iter()
+            .enumerate()
+        {
+            let label = format!(
+                "Copy missing {} ({})",
+                direction.label(),
+                plans[index].len()
+            );
+            let width = ui.calc_text_size(&label)[0] + 20.0;
+            if line_width > 0.0 && line_width + 8.0 + width <= available_width {
+                ui.same_line_with_spacing(0.0, 8.0);
+                line_width += 8.0 + width;
+            } else {
+                line_width = width;
+            }
+            if ui.button(label) && !plans[index].is_empty() {
+                lab.comparison.pending_sync = Some((direction, plans[index].clone()));
+                lab.comparison.show_sync_prompt = true;
+            }
+        }
     }
     ui.spacing();
+    if same_file {
+        ui.text_wrapped("Synchronization requires two different files.");
+    } else if lab.comparison.sync_job.is_some() {
+        ui.text("Copying missing objects...");
+    }
+    if let Some(message) = &lab.comparison.sync_message {
+        ui.text_wrapped(message);
+    }
+    let items = display_items(rows, lab.comparison.filter, &lab.comparison.expanded);
     let mut selected = None;
     let flags = TableFlags::SCROLL_Y | TableFlags::BORDERS_INNER_V | TableFlags::BORDERS_OUTER;
     let height = ui.content_region_avail()[1].max(1.0);
@@ -640,7 +1024,10 @@ pub(super) fn draw(lab: &mut PluginLab, ui: &Ui, context: PluginContext<'_>) -> 
         ui.table_next_row();
         ui.table_set_cell_bg_color(mix_color(palette.panel, palette.accent, 0.35), 0);
         ui.table_set_cell_bg_color(palette.panel, 1);
-        ui.table_set_cell_bg_color(mix_color(palette.panel, palette.heatmap_low, 0.35), 2);
+        ui.table_set_cell_bg_color(
+            mix_color(palette.panel, status_color(Status::OnlyB, palette), 0.35),
+            2,
+        );
         ui.table_next_column();
         ui.text(format!("A  ·  {}", a.name));
         if ui.is_item_hovered() {
@@ -661,7 +1048,8 @@ pub(super) fn draw(lab: &mut PluginLab, ui: &Ui, context: PluginContext<'_>) -> 
                 ui.table_next_row();
                 let tint = if row_index % 2 == 0 { 0.16 } else { 0.22 };
                 let a_background = mix_color(palette.panel, palette.accent, tint);
-                let b_background = mix_color(palette.panel, palette.heatmap_low, tint);
+                let b_background =
+                    mix_color(palette.panel, status_color(Status::OnlyB, palette), tint);
                 ui.table_set_cell_bg_color(a_background, 0);
                 ui.table_set_cell_bg_color(palette.background, 1);
                 ui.table_set_cell_bg_color(b_background, 2);
@@ -688,7 +1076,33 @@ pub(super) fn draw(lab: &mut PluginLab, ui: &Ui, context: PluginContext<'_>) -> 
                         }
                         ui.table_next_column();
                         center_status_cell(ui, STATUS_ICON_SIZE[0]);
-                        ui.invisible_button(format!("##status_{index}"), STATUS_ICON_SIZE);
+                        let status_clicked =
+                            ui.invisible_button(format!("##status_{index}"), STATUS_ICON_SIZE);
+                        if status_clicked && lab.comparison.sync_job.is_none() && !same_file {
+                            if row.status == Status::Different {
+                                lab.comparison.pending_resolution = Some(row.clone());
+                                lab.comparison.show_resolution_prompt = true;
+                            }
+                            let transfer = match row.status {
+                                Status::OnlyA => {
+                                    row.a.as_ref().map(|entry| (SyncDirection::AToB, entry))
+                                }
+                                Status::OnlyB => {
+                                    row.b.as_ref().map(|entry| (SyncDirection::BToA, entry))
+                                }
+                                _ => None,
+                            };
+                            if let Some((direction, entry)) = transfer {
+                                lab.comparison.pending_sync = Some((
+                                    direction,
+                                    vec![CopyItem {
+                                        path: row.path.clone(),
+                                        kind: entry.kind.clone(),
+                                    }],
+                                ));
+                                lab.comparison.show_sync_prompt = true;
+                            }
+                        }
                         draw_status_icon(
                             &ui.get_window_draw_list(),
                             row.status,
@@ -698,7 +1112,10 @@ pub(super) fn draw(lab: &mut PluginLab, ui: &Ui, context: PluginContext<'_>) -> 
                         );
                         if ui.is_item_hovered() {
                             let detail = if row.status == Status::Different {
-                                format!("Different: {}", row.differences.join(", "))
+                                format!(
+                                    "Different: {}. Click to resolve.",
+                                    row.differences.join(", ")
+                                )
                             } else if row.status == Status::Unavailable {
                                 let errors = row
                                     .a
@@ -710,7 +1127,15 @@ pub(super) fn draw(lab: &mut PluginLab, ui: &Ui, context: PluginContext<'_>) -> 
                                     .join("\n");
                                 format!("Metadata unavailable\n{errors}")
                             } else {
-                                row.status.label().into()
+                                match row.status {
+                                    Status::OnlyA if !same_file => {
+                                        "Only A: click to copy this path to B".into()
+                                    }
+                                    Status::OnlyB if !same_file => {
+                                        "Only B: click to copy this path to A".into()
+                                    }
+                                    _ => row.status.label().into(),
+                                }
                             };
                             ui.set_item_tooltip(detail);
                         }
@@ -753,6 +1178,106 @@ pub(super) fn draw(lab: &mut PluginLab, ui: &Ui, context: PluginContext<'_>) -> 
             lab.comparison.expanded.remove(&path);
         }
         lab.comparison.needs_redraw = true;
+    }
+    const SYNC_PROMPT: &str = "Confirm path copy##path_sync_prompt";
+    if std::mem::take(&mut lab.comparison.show_sync_prompt) {
+        ui.open_popup(SYNC_PROMPT);
+    }
+    if let Some(_popup) = ui
+        .begin_modal_popup_config(SYNC_PROMPT)
+        .flags(WindowFlags::ALWAYS_AUTO_RESIZE)
+        .begin()
+    {
+        if let Some((direction, plan)) = lab.comparison.pending_sync.clone() {
+            ui.text(format!(
+                "Copy {} missing object(s) {}?",
+                plan.len(),
+                direction.label()
+            ));
+            ui.separator();
+            ui.text("Groups include their children and attributes.");
+            ui.text("Missing parent groups will be created.");
+            ui.text("Existing paths stay unchanged.");
+            ui.text("Referenced objects may also be copied.");
+            ui.spacing();
+            if ui.button("Copy##confirm_path_sync") {
+                start_sync = Some(SyncRequest::Missing(direction, plan));
+                lab.comparison.pending_sync = None;
+                ui.close_current_popup();
+            }
+            ui.same_line();
+            if ui.button("Cancel##cancel_path_sync") {
+                lab.comparison.pending_sync = None;
+                ui.close_current_popup();
+            }
+        } else {
+            ui.close_current_popup();
+        }
+    } else if !ui.is_popup_open(SYNC_PROMPT) {
+        lab.comparison.pending_sync = None;
+    }
+    const RESOLUTION_PROMPT: &str = "Resolve different path##path_resolution_prompt";
+    if std::mem::take(&mut lab.comparison.show_resolution_prompt) {
+        ui.open_popup(RESOLUTION_PROMPT);
+    }
+    if let Some(_popup) = ui
+        .begin_modal_popup_config(RESOLUTION_PROMPT)
+        .flags(WindowFlags::ALWAYS_AUTO_RESIZE)
+        .begin()
+    {
+        if let Some(row) = lab.comparison.pending_resolution.clone() {
+            ui.text(format!("Resolve {}", row.path));
+            ui.text(format!("Different: {}", row.differences.join(", ")));
+            ui.separator();
+            ui.text("The chosen side replaces the entire object on the other side.");
+            ui.text("Dataset values are copied too, even though they were not compared.");
+            ui.text("References to the old destination object may need review.");
+            if row
+                .a
+                .as_ref()
+                .is_some_and(|entry| matches!(entry.kind, PathKind::Group))
+                || row
+                    .b
+                    .as_ref()
+                    .is_some_and(|entry| matches!(entry.kind, PathKind::Group))
+            {
+                ui.text("Replacing a group removes destination-only children.");
+            }
+            ui.spacing();
+            for (direction, summary, label) in [
+                (SyncDirection::AToB, row.a.as_ref(), "Replace B with A"),
+                (SyncDirection::BToA, row.b.as_ref(), "Replace A with B"),
+            ] {
+                if let Some(summary) =
+                    summary.filter(|entry| !matches!(entry.kind, PathKind::Other))
+                {
+                    if ui.button(label) {
+                        start_sync = Some(SyncRequest::Replace(
+                            direction,
+                            CopyItem {
+                                path: row.path.clone(),
+                                kind: summary.kind.clone(),
+                            },
+                        ));
+                        lab.comparison.pending_resolution = None;
+                        ui.close_current_popup();
+                    }
+                    ui.same_line();
+                }
+            }
+            if ui.button("Cancel##cancel_path_resolution") {
+                lab.comparison.pending_resolution = None;
+                ui.close_current_popup();
+            }
+        } else {
+            ui.close_current_popup();
+        }
+    } else if !ui.is_popup_open(RESOLUTION_PROMPT) {
+        lab.comparison.pending_resolution = None;
+    }
+    if let Some(request) = start_sync {
+        lab.comparison.sync_request = Some(request);
+        lab.comparison.pending_sync = None;
     }
     selected
 }
@@ -798,6 +1323,179 @@ mod tests {
         assert_eq!(row("/measurements/only_a").status, Status::OnlyA);
         assert_eq!(row("/measurements/only_b").status, Status::OnlyB);
         assert_eq!(row("/coordinates/latitude").status, Status::Same);
+    }
+
+    #[test]
+    fn copies_missing_objects_both_ways_without_replacing_existing_paths() {
+        let (examples, _) = demo_files();
+        let suffix = format!(
+            "{}_{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        );
+        let paths = [
+            std::env::temp_dir().join(format!("h5jive_sync_a_{suffix}.hdf5")),
+            std::env::temp_dir().join(format!("h5jive_sync_b_{suffix}.hdf5")),
+        ];
+        for index in 0..2 {
+            std::fs::copy(&examples[index], &paths[index]).unwrap();
+        }
+        // Build the plan from the same loaded file trees used by the UI.
+        let a = File::open(&paths[0]).unwrap();
+        let b = File::open(&paths[1]).unwrap();
+        let a_to_b = copy_plan(&a, &b);
+        let b_to_a = copy_plan(&b, &a);
+        assert!(a_to_b
+            .iter()
+            .any(|item| item.path == "/measurements/only_a"));
+        assert!(b_to_a
+            .iter()
+            .any(|item| item.path == "/measurements/only_b"));
+        // The app releases its read handles before opening a destination for writing.
+        drop((a, b));
+        assert_eq!(copy_missing(&paths[0], &paths[1], &a_to_b).1, None);
+        assert_eq!(copy_missing(&paths[1], &paths[0], &b_to_a).1, None);
+        let left = hdf5_metno::File::open(&paths[0]).unwrap();
+        let right = hdf5_metno::File::open(&paths[1]).unwrap();
+        assert!(left.dataset("/measurements/only_b").is_ok());
+        assert!(right.dataset("/measurements/only_a").is_ok());
+        assert!(left.dataset("/extra_b/signal").is_ok());
+        assert!(right.dataset("/extra_a/signal").is_ok());
+        assert!(right
+            .dataset("/extra_a/signal")
+            .unwrap()
+            .attr("units")
+            .is_ok());
+        assert_ne!(
+            left.dataset("/measurements/changed_shape").unwrap().shape(),
+            right
+                .dataset("/measurements/changed_shape")
+                .unwrap()
+                .shape()
+        );
+        drop((left, right));
+        assert_eq!(copy_missing(&paths[0], &paths[1], &a_to_b).0, 0);
+        for path in paths {
+            std::fs::remove_file(path).unwrap();
+        }
+    }
+
+    #[test]
+    fn copied_dataset_references_still_resolve() {
+        let suffix = format!(
+            "{}_{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        );
+        let source_path = std::env::temp_dir().join(format!("h5jive_ref_source_{suffix}.h5"));
+        let target_path = std::env::temp_dir().join(format!("h5jive_ref_target_{suffix}.h5"));
+        let source = hdf5_metno::File::create(&source_path).unwrap();
+        source
+            .new_dataset_builder()
+            .with_data(&[42_i32])
+            .create("target")
+            .unwrap();
+        let reference: hdf5_metno::ObjectReference1 = source.reference("target").unwrap();
+        source
+            .new_dataset_builder()
+            .with_data(&[reference])
+            .create("refs")
+            .unwrap();
+        drop(source);
+        drop(hdf5_metno::File::create(&target_path).unwrap());
+        let plan = [CopyItem {
+            path: "/refs".into(),
+            kind: PathKind::Dataset { shape: vec![1] },
+        }];
+        assert_eq!(copy_missing(&source_path, &target_path, &plan).1, None);
+        let target = hdf5_metno::File::open(&target_path).unwrap();
+        let references = target
+            .dataset("refs")
+            .unwrap()
+            .read_1d::<hdf5_metno::ObjectReference1>()
+            .unwrap();
+        assert!(matches!(
+            target.dereference(&references[0]).unwrap(),
+            hdf5_metno::ReferencedObject::Dataset(_)
+        ));
+        drop(target);
+        std::fs::remove_file(source_path).unwrap();
+        std::fs::remove_file(target_path).unwrap();
+    }
+
+    #[test]
+    fn resolves_different_datasets_and_groups_in_both_directions() {
+        let (examples, _) = demo_files();
+        let suffix = format!(
+            "{}_{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        );
+        let paths = [
+            std::env::temp_dir().join(format!("h5jive_resolve_a_{suffix}.hdf5")),
+            std::env::temp_dir().join(format!("h5jive_resolve_b_{suffix}.hdf5")),
+        ];
+        for index in 0..2 {
+            std::fs::copy(&examples[index], &paths[index]).unwrap();
+        }
+        let shape_path = "/measurements/changed_shape";
+        let shape = File::open(&paths[0])
+            .unwrap()
+            .dataset_info(shape_path)
+            .unwrap()
+            .shape;
+        let item = CopyItem {
+            path: shape_path.into(),
+            kind: PathKind::Dataset {
+                shape: shape.clone(),
+            },
+        };
+        assert_eq!(replace_existing(&paths[0], &paths[1], &item).1, None);
+        let b = hdf5_metno::File::open(&paths[1]).unwrap();
+        assert_eq!(b.dataset(shape_path).unwrap().shape(), shape);
+        assert!(b
+            .group("/measurements")
+            .unwrap()
+            .member_names()
+            .unwrap()
+            .iter()
+            .all(|name| !name.starts_with(".__h5jive_")));
+        drop(b);
+
+        let group = CopyItem {
+            path: "/measurements".into(),
+            kind: PathKind::Group,
+        };
+        assert_eq!(replace_existing(&paths[0], &paths[1], &group).1, None);
+        let b = hdf5_metno::File::open(&paths[1]).unwrap();
+        assert!(b.dataset("/measurements/only_a").is_ok());
+        assert!(b.dataset("/measurements/only_b").is_err());
+        drop(b);
+
+        let changed_kind = CopyItem {
+            path: "/structure_variant".into(),
+            kind: PathKind::Dataset { shape: vec![2] },
+        };
+        assert_eq!(
+            replace_existing(&paths[1], &paths[0], &changed_kind).1,
+            None
+        );
+        let a = hdf5_metno::File::open(&paths[0]).unwrap();
+        assert!(a.dataset("/structure_variant").is_ok());
+        assert!(a.group("/structure_variant").is_err());
+        drop(a);
+        for path in paths {
+            std::fs::remove_file(path).unwrap();
+        }
     }
 
     #[test]

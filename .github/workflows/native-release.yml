@@ -134,7 +134,8 @@ jobs:
           cp "$hdf5_dll" /ucrt64/bin/hdf5.dll
           # Build the pinned SNT3 source with its MinGW TLS linker fix.
           source .github/scripts/build-snt3-windows.sh
-          cargo build --release --locked -p h5jive --target ${{ matrix.target }}
+          # Avoid --target here: Cargo then omits RUSTFLAGS from host build scripts.
+          cargo build --release --locked -p h5jive --target-dir target/${{ matrix.target }}
 
       - name: Package Linux executable
         if: runner.os == 'Linux'

@@ -16,6 +16,14 @@ From there, use the existing visualization selector for compatible datasets.
 Use the status count buttons to filter the list. Clicking a path in either
 column reveals its details in both columns; both columns scroll together.
 
+To try synchronization, make copies of the demo files first. Use **Copy missing
+A → B** or **Copy missing B → A**, review the proposed count, and confirm. The
+missing-path status icon can copy one path. The destination is reloaded when
+copying finishes; existing paths are not replaced.
+Click a **Different** status icon to replace an existing object in either
+direction. This also replaces dataset values or group children, so review the
+confirmation prompt first.
+
 The comparison checks paths, object kinds, dataset shapes and datatypes, and
 group and dataset attribute names and displayed values. It does not compare
 dataset values. Large or unsupported attribute values can be summarized by the

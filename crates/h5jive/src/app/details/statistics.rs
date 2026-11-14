@@ -188,10 +188,5 @@ impl App {
                 );
             }
         }
-        if statistics.approximate_quartiles {
-            ui.text_wrapped("Quartiles use a bounded sample.");
-        } else if statistics.info.numeric {
-            ui.text_wrapped("Fill and nonfinite values are excluded from numeric statistics.");
-        }
     }
 }

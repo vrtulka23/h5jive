@@ -31,7 +31,10 @@ state. Share stateless data and drawing helpers when behavior overlaps.
    `cargo test -p h5jive -- --test-threads=1`. The serial test run avoids
    shared DIPL and Dear ImGui test state conflicts.
 5. Update `plugins/README.md` so the catalog lists the new plugin and its
-   switch. Keep claims about value comparison or visualization precise.
+   switch. Add its help text to the plugin registry so the top Help menu can
+   explain the active plugin in a popup. Keep general instructions out of the
+   plugin controls and viewer; retain loading, error, and empty-state feedback.
+   Keep claims about value comparison or visualization precise.
 
 Plugins are compiled from source with H5Jive. This directory is not a loader
 for untrusted runtime binaries.

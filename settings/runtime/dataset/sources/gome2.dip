@@ -1,7 +1,7 @@
 # Repository root defaults to settings/; set the host path in overrides.dip.
-dataset_sources[mock_gome2] : dataset_source
-  name = "GOME-2 L1B mock"
+dataset_sources[gome2] : dataset_source
+  name = "GOME-2 L1B"
   root = "./"
   format link = {?dataset_formats[gome2_l1b]}
-  tags = "mock, gome2, metop, uvn, l1b"
+  tags = "gome2, metop, uvn, l1b"
   product_regex = "^[0-9]{2}/[0-9]{2}/(?P<year>[0-9]{4})(?P<month>[0-9]{2})(?P<day>[0-9]{2})[0-9]{6}Z_(?P<orbit>[0-9]+)_gome[.]nc$"
