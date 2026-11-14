@@ -122,7 +122,7 @@ impl App {
             }
         }
         if geo_options.is_some_and(|options| options.show_pics) {
-            description.push("PICS site source: settings/pics.dip".into());
+            description.push("PICS site source: runtime DIPL catalog".into());
         }
         match self.view {
             ViewMode::Slice2d | ViewMode::Data => {

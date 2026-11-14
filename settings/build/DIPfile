@@ -1,0 +1,6 @@
+schemas[]
+  name = "plugin_layout_settings"
+  file = "schemas/plugin_layout.dip"
+
+code[]
+  file = "plugin_layout.dip"

@@ -3,7 +3,7 @@
 # Source this from the MSYS2 Windows build step so SNT3_BUILD_DIR reaches Cargo.
 cargo fetch --locked --target x86_64-pc-windows-gnu
 cargo_home=$(cygpath -u "${CARGO_HOME:-$USERPROFILE/.cargo}")
-snt3_crate=$(find "$cargo_home/registry/src" -mindepth 2 -maxdepth 2 -type d -name 'scinumtools3-sys-0.10.1' -print -quit)
+snt3_crate=$(find "$cargo_home/registry/src" -mindepth 2 -maxdepth 2 -type d -name 'scinumtools3-sys-0.10.2' -print -quit)
 if [ -z "$snt3_crate" ]; then
   echo 'Bundled scinumtools3-sys source was not found' >&2
   exit 1

@@ -192,7 +192,7 @@ fn s5p_radiance_reads_a_zoomed_2d_tile_when_available() {
 
 #[test]
 fn dataset_format_schema_rejects_invalid_scan_options_and_depth() {
-    let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../settings");
+    let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../settings/runtime");
     let temporary = std::env::temp_dir().join(format!(
         "h5jive-schema-{}-{}",
         std::process::id(),

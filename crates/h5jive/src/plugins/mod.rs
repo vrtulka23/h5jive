@@ -7,6 +7,15 @@ mod value_comparison;
 
 use super::*;
 
+mod compiled_settings {
+    include!(concat!(env!("OUT_DIR"), "/compiled_settings.rs"));
+}
+
+pub(crate) struct PluginLayout {
+    pub(crate) rail_width: f32,
+    pub(crate) button_height: f32,
+}
+
 pub(super) struct PluginContext<'a> {
     pub files: &'a [File],
     pub file_paths: &'a [PathBuf],
@@ -88,7 +97,7 @@ impl PluginLab {
             .filter(|(_, plugin)| (plugin.enabled)(settings))
             .collect();
         if available.is_empty() {
-            ui.text_wrapped("No plugins are enabled. Enable one in settings/plugins.dip.");
+            ui.text_wrapped("No plugins are enabled. Enable one in settings/runtime/plugins.dip.");
             return None;
         }
         self.selected = self.selected.min(available.len() - 1);
@@ -96,12 +105,15 @@ impl PluginLab {
         {
             let _rail_background = ui.push_style_color(StyleColor::ChildBg, palette.panel);
             ui.child_window("plugin_icon_tabs")
-                .size([76.0, 0.0])
+                .size([compiled_settings::PLUGIN_LAYOUT.rail_width, 0.0])
                 .build(ui, || {
                     for (position, (_, plugin)) in available.iter().enumerate() {
                         let clicked = ui.invisible_button(
                             format!("##plugin_{}", plugin.key),
-                            [ui.content_region_avail()[0], 56.0],
+                            [
+                                ui.content_region_avail()[0],
+                                compiled_settings::PLUGIN_LAYOUT.button_height,
+                            ],
                         );
                         let hovered = ui.is_item_hovered();
                         if clicked {

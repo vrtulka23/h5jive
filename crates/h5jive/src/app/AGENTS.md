@@ -18,7 +18,8 @@ before changing a cross-cutting flow.
    reopen files on worker threads, send results through channels, and use
    generation counters to discard stale work. Keep each frame responsive.
 4. Use `Settings` for behavior and sizes that users should configure, and
-   update the matching DIPL schema and source file in `settings/`. Use palette
+   update the matching DIPL schema and source file in `settings/runtime/`.
+   Build-only constants live in `settings/build/`. Use palette
    colors and the shared UI helpers rather than hardcoded theme colors.
 5. Preserve Dear ImGui scope pairing and stable widget IDs. Use a bounded
    `ListClipper` or table scrolling for large lists. Keep view and plugin

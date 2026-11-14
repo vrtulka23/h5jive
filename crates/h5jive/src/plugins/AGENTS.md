@@ -19,11 +19,11 @@ state. Share stateless data and drawing helpers when behavior overlaps.
    and cache the result; invalidate it when A or B changes. Return a
    `Selection` from the plugin to open a dataset in the Data inspector, where
    the core visualization views remain available.
-3. Add a central `<plugin>_enabled bool` switch in `settings/plugins.dip` and
-   its declaration in `settings/schemas/viewer.dip`. Put plugin-specific
-   options in `settings/plugins/<plugin>.dip` with a matching schema under
-   `settings/schemas/plugins/`. Register both files in `settings/DIPfile`,
-   include the plugin settings in `settings/viewer.dip`, and read them through
+3. Add a central `<plugin>_enabled bool` switch in `settings/runtime/plugins.dip` and
+   its declaration in `settings/runtime/schemas/viewer.dip`. Put plugin-specific
+   options in `settings/runtime/plugins/<plugin>.dip` with a matching schema under
+   `settings/runtime/schemas/plugins/`. Register both files in `settings/runtime/DIPfile`,
+   include the plugin settings in `settings/runtime/viewer.dip`, and read them through
    `app/settings.rs`. DIPL source files need explicit types for leaf values.
 4. Add a tiny reproducible fixture or generator in `examples/` and document
    how to run it. Test classifications or calculations with a meaningful

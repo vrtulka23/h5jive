@@ -11,7 +11,7 @@ dear-implot = "0.22"
 font8x8 = "0.3"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
 h5jive-data = { path = "../data-source" }
-scinumtools3 = "=0.10.1"
+scinumtools3 = "=0.10.2"
 dunce = "1.0"
 regex = "1"
 serde = { version = "1", features = ["derive"] }
@@ -25,4 +25,7 @@ xcap = "=0.9.8"
 
 [dev-dependencies]
 hdf5-metno = "0.15"
+
+[build-dependencies]
+scinumtools3-build = "=0.10.2"
 

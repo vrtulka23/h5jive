@@ -2,7 +2,7 @@
 
 ## DIPL settings
 
-The root project is `settings/DIPfile`. It loads the viewer configuration,
+The editable project is `settings/runtime/DIPfile`. It loads the viewer configuration,
 appearance profiles, PICS catalog, and their schemas. User-facing values such as
 map zoom, point limits, color ranges, and view defaults live in DIPL. Constraints
 that DIPL can express belong in schemas rather than duplicated Rust checks.
@@ -10,13 +10,17 @@ The dataset-format schema checks overpass grouping depth, scan direction options
 and the syntax and required presence of scan flag lists. Rust still converts
 those lists to integers and checks that forward and backward codes do not overlap.
 
+`settings/build/DIPfile` holds values compiled into the executable. The first
+compiled values are Plugin Lab icon rail dimensions. Build settings never read
+`runtime/overrides.dip`; release packages contain only the runtime project.
+
 The main files are:
 
-- `settings/viewer.dip` and `settings/schemas/viewer.dip`
-- `settings/pics.dip` and the PICS schemas
-- `settings/dataset/formats/*.dip` and `settings/schemas/dataset_format.dip`
-- `settings/dataset/sources/*.dip` and `settings/schemas/dataset_source.dip`
-- `settings/themes/*.dip` and `settings/schemas/appearance.dip`
+- `settings/runtime/viewer.dip` and `settings/runtime/schemas/viewer.dip`
+- `settings/runtime/pics.dip` and the PICS schemas
+- `settings/runtime/dataset/formats/*.dip` and `settings/runtime/schemas/dataset_format.dip`
+- `settings/runtime/dataset/sources/*.dip` and `settings/runtime/schemas/dataset_source.dip`
+- `settings/runtime/themes/*.dip` and `settings/runtime/schemas/appearance.dip`
 
 The `h5jive` appearance profile matches the project's static page: deep
 charcoal backgrounds, sage text, and orange/copper accents. It is the
@@ -47,12 +51,12 @@ Each source declares its own format link, for example
 repositories can use different formats.
 
 The bundled mock registrations use `root = "./"` as a portable default. Put
-your local dataset roots in `settings/overrides.dip`; the app creates this
+your local dataset roots in `settings/runtime/overrides.dip`; the app creates this
 Git-ignored file on first launch if it is missing. Relative roots are resolved
 from the `settings` directory. A native
 release includes a blank override file beside its executable; the user
 installer preserves local edits when upgrading. The browser stores one index
-per source under `settings/.cache/datasets/` and loads a cached index on
+per source under `settings/runtime/.cache/datasets/` and loads a cached index on
 startup. If no cache exists, select the source and click **Refresh index** to
 start a background scan. **Cancel scan** stops it. Scanning reads directory
 entries and file metadata;
@@ -67,7 +71,7 @@ The background check reads only latitude and longitude coordinate slabs, not
 observation values, and stops reading a group once a pixel center enters the
 area. It uses at most two reader threads to limit disk contention, reports
 progress, and can be cancelled. Completed checks are saved under
-`settings/.cache/datasets/`, which Git ignores, and reused by **Check
+`settings/runtime/.cache/datasets/`, which Git ignores, and reused by **Check
 overpasses** when file size and modification time are unchanged. Selecting an
 area restores saved matches for products with the indexed size without opening
 them; **Refresh overpasses** validates their modification times. The table shows matching products after a check;
@@ -105,7 +109,7 @@ bounds names remain a fallback for older files without those attributes.
 NetCDF groups can put observations and geolocation in sibling groups. The
 bundled GOME, SCIAMACHY, GOME-2, Sentinel-5P TROPOMI, and FDR4ATMOS formats use `OBSERVATIONS`
 and sibling `GEODATA` groups under each band. Each format has its own DIPL
-entry in `settings/dataset/formats/`. Its `identification` subnode specifies
+entry in `settings/runtime/dataset/formats/`. Its `identification` subnode specifies
 patterns for root `platform`, `sensor`, and `product_type` attributes, plus a
 fallback filename glob. Two matching metadata attributes identify a format
 even if the filename is damaged. With fewer available attributes, the filename
@@ -150,6 +154,6 @@ Cells containing multiple scan directions are marked mixed and appear in Both
 mode; zooming in separates them into smaller cells.
 As zoom increases, the cells shrink; at full detail, each source pixel is drawn
 with its own bounds. Datasets without bounds keep point sampling. Set
-`viewer.views.world_map.max_points` in `settings/viewers/world_map.dip` to
+`viewer.views.world_map.max_points` in `settings/runtime/viewers/world_map.dip` to
 control the whole-world cell count and `zoom_detail_factor` to control how
 quickly detail grows with zoom. Both settings apply to map and globe views.

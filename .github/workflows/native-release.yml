@@ -138,7 +138,7 @@ jobs:
         run: |
           mkdir -p bundle/lib dist
           cp target/${{ matrix.target }}/release/h5jive bundle/
-          cp -R settings bundle/settings
+          cp -R settings/runtime bundle/settings
           printf '# Local settings overrides\n' > bundle/settings/overrides.dip
           cp README.md LICENSE bundle/
           # Keep HDF5 and its compression helpers beside the program.
@@ -159,7 +159,7 @@ jobs:
         run: |
           mkdir -p bundle/lib dist
           cp target/${{ matrix.target }}/release/h5jive bundle/
-          cp -R settings bundle/settings
+          cp -R settings/runtime bundle/settings
           printf '# Local settings overrides\n' > bundle/settings/overrides.dip
           cp README.md LICENSE bundle/
           dylibbundler -b -x bundle/h5jive -d bundle/lib -p @executable_path/lib
@@ -175,7 +175,7 @@ jobs:
         run: |
           mkdir -p bundle dist
           cp target/${{ matrix.target }}/release/h5jive.exe bundle/
-          cp -R settings bundle/settings
+          cp -R settings/runtime bundle/settings
           printf '# Local settings overrides\n' > bundle/settings/overrides.dip
           cp README.md LICENSE bundle/
           # Ship the UCRT64 DLLs referenced by the executable, including HDF5.

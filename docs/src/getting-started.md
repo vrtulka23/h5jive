@@ -50,7 +50,7 @@ additional sources and formats.
 ## Requirements
 
 Builds need Rust and Cargo, CMake, a C++ compiler, and the HDF5 C library. The
-SNT3 0.10.1 Rust binding builds its matching native source by default. On macOS,
+SNT3 0.10.2 Rust binding builds its matching native source by default. On macOS,
 the launch script uses the system graphics backend; Linux also needs a working
 graphics session and adapter. On Ubuntu 22.04, install build dependencies with:
 

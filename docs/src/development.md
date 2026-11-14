@@ -12,7 +12,8 @@
   routines to obtain data for display.
 - `crates/h5jive/src/plugins/` contains optional Plugin Lab tools. See
   [Plugin Lab](plugin-lab.md) for the extension contract and demo.
-- `settings/` contains DIPL configuration, schemas, and appearance profiles.
+- `settings/build/` contains compiled DIPL constants; `settings/runtime/`
+  contains editable DIPL configuration, schemas, and appearance profiles.
 - `examples/arrays/`, `examples/satellite/`, and `examples/plugins/` keep the
   general, geospatial, and Plugin Lab fixtures separate.
 - `website/` is the static Astro project page; `docs/` is this mdBook guide.

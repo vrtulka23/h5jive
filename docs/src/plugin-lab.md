@@ -62,9 +62,9 @@ before editing the plugin registry or adding a module.
 3. Register it in `crates/h5jive/src/plugins/mod.rs` with a unique key, icon,
    title, enabled setting, and draw function. The icon appears in the left tab
    rail when the plugin is enabled.
-4. Give it a dedicated schema in `settings/schemas/plugins/` and a settings
-   file in `settings/plugins/`. Add its `enabled` switch to the central
-   `settings/plugins.dip` and wire the values through `Settings`.
+4. Give it a dedicated schema in `settings/runtime/schemas/plugins/` and a settings
+   file in `settings/runtime/plugins/`. Add its `enabled` switch to the central
+   `settings/runtime/plugins.dip` and wire the values through `Settings`.
 5. Add a reproducible demo in `examples/`, run `cargo test -p h5jive`, and
    submit a pull request with a short description and screenshot. The Plugin
    [Plugin Lab catalog](https://github.com/vrtulka23/h5jive/tree/main/plugins)

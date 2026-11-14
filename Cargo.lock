@@ -1181,6 +1181,7 @@ dependencies = [
  "image",
  "regex",
  "scinumtools3",
+ "scinumtools3-build",
  "serde",
  "serde_json",
  "xcap 0.4.0",
@@ -2951,18 +2952,27 @@ dependencies = [
 
 [[package]]
 name = "scinumtools3"
-version = "0.10.1"
+version = "0.10.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b73e14b38ea6d50f8a3174e6d76aefa566386b53096cb8de417a9a5e5b97890c"
+checksum = "ce471b4d70011b290679ec30c9c3ffa753c186730f2aabf958340294223f94c3"
 dependencies = [
  "scinumtools3-sys",
 ]
 
 [[package]]
-name = "scinumtools3-sys"
-version = "0.10.1"
+name = "scinumtools3-build"
+version = "0.10.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1bedf3be0b20cec82bf284f482f199e7cdc864a3b4dc252d1df6757917a574af"
+checksum = "f491b146feabddecb3f0ba472dfb116d65ccdd7394e2692680b6777eff005967"
+dependencies = [
+ "scinumtools3",
+]
+
+[[package]]
+name = "scinumtools3-sys"
+version = "0.10.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1770ac835f2d9a67fbc04915d49e92e878476cf94ec6cf3c29339fb482256538"
 
 [[package]]
 name = "scoped-tls"

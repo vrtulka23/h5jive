@@ -1,0 +1,5 @@
+?descr "Build-time dimensions for the Plugin Lab navigation rail."
+rail_width float = 76.0
+  !condition ({.} >= 40 && {.} <= 160)
+button_height float = 56.0
+  !condition ({.} >= 32 && {.} <= 120)

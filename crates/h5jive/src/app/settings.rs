@@ -490,7 +490,7 @@ pub(super) struct Settings {
 }
 impl Settings {
     pub(super) fn load() -> Result<Self, Box<dyn std::error::Error>> {
-        let local_project = std::path::Path::new("settings/DIPfile");
+        let local_project = std::path::Path::new("settings/runtime/DIPfile");
         // An extracted release keeps its editable settings beside the executable.
         let executable = std::env::current_exe()?;
         // Windows canonicalize() and current_exe() add a \\?\ verbatim prefix
@@ -501,7 +501,13 @@ impl Settings {
             .parent()
             .map(|directory| directory.join("settings/DIPfile"));
         let project = if let Some(settings_dir) = std::env::var_os("H5JIVE_SETTINGS_DIR") {
-            std::path::PathBuf::from(settings_dir).join("DIPfile")
+            let directory = std::path::PathBuf::from(settings_dir);
+            let direct = directory.join("DIPfile");
+            if direct.exists() {
+                direct
+            } else {
+                directory.join("runtime/DIPfile")
+            }
         } else if let Some(packaged) = packaged_settings_project(&executable)? {
             packaged
         } else if local_project.exists() {
@@ -509,7 +515,7 @@ impl Settings {
         } else if let Some(bundled) = bundled.filter(|path| path.exists()) {
             bundled
         } else {
-            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../settings/DIPfile")
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../settings/runtime/DIPfile")
         };
         let project = dunce::simplified(&project);
         let override_path = project.parent().unwrap().join("overrides.dip");

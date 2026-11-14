@@ -8,7 +8,7 @@ SNT3's build cannot find a nonstandard HDF5 installation, set
 
 ## Native SNT3 mismatch
 
-The workspace pins `scinumtools3` 0.10.1, whose `scinumtools3-sys` crate builds
+The workspace pins `scinumtools3` 0.10.2, whose `scinumtools3-sys` crate builds
 the matching bundled native source by default. Check that `SNT3_PREFIX` or
 `SNT3_BUILD_DIR` is not forcing an older installation.
 

@@ -5,6 +5,8 @@ website/.astro/
 docs/book/
 settings/.cache/
 settings/overrides.dip
+settings/runtime/.cache/
+settings/runtime/overrides.dip
 PROPOSALS/*
 .spacegit/
 *.diph5
