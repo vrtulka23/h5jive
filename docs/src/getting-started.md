@@ -2,7 +2,7 @@
 
 ## Install a native release
 
-Once published, the [release archives](https://github.com/vrtulka23/h5jive/releases)
+The [release archives](https://github.com/vrtulka23/h5jive/releases)
 contain the executable and a runtime `settings/` directory. The installers
 verify the archive checksum and place the files in a user-owned directory.
 They preserve `settings/overrides.dip` when upgrading.
@@ -52,7 +52,7 @@ additional sources and formats.
 Builds need Rust and Cargo, CMake, a C++ compiler, and the HDF5 C library. The
 SNT3 0.10.2 Rust binding builds its matching native source by default. On macOS,
 the launch script uses the system graphics backend; Linux also needs a working
-graphics session and adapter. On Ubuntu 22.04, install build dependencies with:
+graphics backend to run the app. On Ubuntu 22.04, install build dependencies with:
 
 ```sh
 sudo apt-get update
@@ -64,6 +64,24 @@ sudo apt-get install -y build-essential ca-certificates clang cmake curl git \
 
 Prebuilt Linux releases bundle HDF5 and its compression helpers. They still
 need a compatible Linux graphics stack on the host.
+
+### Run over SSH with X11 forwarding
+
+The Linux app can display its window through SSH X11 forwarding. Connect from a
+machine running an X server, then launch H5Jive on the remote host:
+
+```sh
+ssh -Y user@host
+echo "$DISPLAY"
+h5jive
+```
+
+The remote `DISPLAY` must be set, and the X server must support OpenGL for the
+window to render. With the default `viewer.graphics.backend = "auto"`, H5Jive
+detects a forwarded X11 session and selects the OpenGL backend. This default is
+set by `viewer.graphics.forwarded_x11_backend = "gl"` in DIPL. You can also run
+`./h5jive.sh --run` from a source checkout after building it. Building alone
+does not require an X11 session.
 
 ## Build and launch
 
@@ -87,8 +105,8 @@ available in the sidebar.
 
 ## Try the examples
 
-The array demo generator writes `examples/arrays/space_demo.hdf5` with 1D–4D
-datasets. The bundled `examples/satellite/gome2_band3_20130106_gome.nc` contains a
+The bundled `examples/arrays/space_demo.hdf5` contains 1D–4D datasets.
+The bundled `examples/satellite/gome2_band3_20130106_gome.nc` contains a
 sample extracted from a real GOME-2 Level 1B product. Select
 `MODE_NADIR/BAND_3/OBSERVATIONS/radiance` and open the world map or globe to
 inspect its geolocated pixels. The sample retains all 625 scan lines, 32 ground

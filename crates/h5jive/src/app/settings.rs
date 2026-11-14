@@ -387,6 +387,35 @@ fn read_color(dip: &Project, path: &str) -> Result<[f32; 4], Box<dyn std::error:
 
 struct ViewerValues<'a>(&'a Project);
 
+mod compiled_limits {
+    include!(concat!(env!("OUT_DIR"), "/compiled_limits.rs"));
+}
+
+pub(super) struct ResourceLimits {
+    pub(super) tree_max_depth: usize,
+    pub(super) tree_max_objects: usize,
+    pub(super) statistics_sample_values: usize,
+    pub(super) slice_max_cells: usize,
+    pub(super) volume_preview_max_voxels: usize,
+}
+
+fn check_compiled_limit(path: &str, value: usize, max: usize) -> Result<usize, String> {
+    if value > max {
+        return Err(format!(
+            "viewer.{path} is {value}, above the compiled maximum of {max}"
+        ));
+    }
+    Ok(value)
+}
+
+fn bounded_count(
+    values: &ViewerValues<'_>,
+    path: &str,
+    max: usize,
+) -> Result<usize, Box<dyn std::error::Error>> {
+    Ok(check_compiled_limit(path, values.count(path)?, max)?)
+}
+
 impl ViewerValues<'_> {
     fn string(&self, path: &str) -> Result<String, Box<dyn std::error::Error>> {
         Ok(self.0.node(&format!("viewer.{path}"))?.as_string()?)
@@ -586,12 +615,24 @@ impl Settings {
             view_button_gap: values.pixels("layout.view_button_gap")?,
             update_button_width: values.pixels("layout.refresh_button_width")?,
             update_button_height: values.pixels("layout.refresh_button_height")?,
-            tree_max_depth: values.count("tree.max_depth")?,
-            tree_max_objects: values.count("tree.max_objects")?,
+            tree_max_depth: bounded_count(
+                &values,
+                "tree.max_depth",
+                compiled_limits::RESOURCE_LIMITS.tree_max_depth,
+            )?,
+            tree_max_objects: bounded_count(
+                &values,
+                "tree.max_objects",
+                compiled_limits::RESOURCE_LIMITS.tree_max_objects,
+            )?,
             pinned_default,
             display_decimals: values.count("format.decimals")?,
             region_cache_entries: values.count("data.region_cache_entries")?,
-            statistics_sample_values: values.count("statistics.sample_values")?,
+            statistics_sample_values: bounded_count(
+                &values,
+                "statistics.sample_values",
+                compiled_limits::RESOURCE_LIMITS.statistics_sample_values,
+            )?,
             histogram_bins: values.count("statistics.histogram_bins")?,
             details_max_width: values.pixels("layout.details_max_width")?,
             table_columns_per_page: values.count("views.data.table.columns_per_page")?,
@@ -605,7 +646,11 @@ impl Settings {
             heatmap_value_max,
             heatmap_legend_width: values.pixels("views.slice_2d.legend_width")?,
             heatmap_legend_fraction: values.fraction("views.slice_2d.legend_fraction")?,
-            heatmap_max_cells: values.count("views.slice_2d.max_cells")?,
+            heatmap_max_cells: bounded_count(
+                &values,
+                "views.slice_2d.max_cells",
+                compiled_limits::RESOURCE_LIMITS.slice_max_cells,
+            )?,
             distribution_min_width: values.pixels("views.profiles_1d.min_width")?,
             distribution_min_height: values.pixels("views.profiles_1d.min_height")?,
             distribution_x_tick_spacing: values.pixels("views.profiles_1d.x_tick_spacing")?,
@@ -614,7 +659,11 @@ impl Settings {
             volume_default_log_scale: values.boolean("views.spatial_3d.default_log_scale")?,
             volume_max_zoom: values.fraction("views.spatial_3d.max_zoom")?,
             volume_back_brightness: values.fraction("views.spatial_3d.back_brightness")?,
-            volume_preview_max_voxels: values.count("views.spatial_3d.preview_max_voxels")?,
+            volume_preview_max_voxels: bounded_count(
+                &values,
+                "views.spatial_3d.preview_max_voxels",
+                compiled_limits::RESOURCE_LIMITS.volume_preview_max_voxels,
+            )?,
             map_max_points: values.count("views.world_map.max_points")?,
             map_zoom_detail_factor: values.fraction("views.world_map.zoom_detail_factor")?,
             map_point_radius: values.fraction("views.world_map.point_radius")?,
@@ -695,6 +744,35 @@ fn copy_packaged_settings(
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod limit_tests {
+    use super::{check_compiled_limit, compiled_limits, Settings};
+
+    #[test]
+    fn runtime_budgets_fit_compiled_ceilings() {
+        let settings = Settings::load().unwrap();
+        let limits = compiled_limits::RESOURCE_LIMITS;
+        assert!(settings.tree_max_depth <= limits.tree_max_depth);
+        assert!(settings.tree_max_objects <= limits.tree_max_objects);
+        assert!(settings.statistics_sample_values <= limits.statistics_sample_values);
+        assert!(settings.heatmap_max_cells <= limits.slice_max_cells);
+        assert!(settings.volume_preview_max_voxels <= limits.volume_preview_max_voxels);
+        assert_eq!(
+            check_compiled_limit(
+                "tree.max_depth",
+                limits.tree_max_depth + 1,
+                limits.tree_max_depth
+            )
+            .unwrap_err(),
+            format!(
+                "viewer.tree.max_depth is {}, above the compiled maximum of {}",
+                limits.tree_max_depth + 1,
+                limits.tree_max_depth
+            )
+        );
+    }
 }
 
 #[cfg(test)]

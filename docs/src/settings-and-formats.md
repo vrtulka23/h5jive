@@ -2,17 +2,23 @@
 
 ## DIPL settings
 
-The editable project is `settings/runtime/DIPfile`. It loads the viewer configuration,
-appearance profiles, PICS catalog, and their schemas. User-facing values such as
-map zoom, point limits, color ranges, and view defaults live in DIPL. Constraints
-that DIPL can express belong in schemas rather than duplicated Rust checks.
-The dataset-format schema checks overpass grouping depth, scan direction options,
-and the syntax and required presence of scan flag lists. Rust still converts
-those lists to integers and checks that forward and backward codes do not overlap.
+The editable project is `settings/runtime/DIPfile`. It loads the viewer
+configuration, appearance profiles, PICS catalog, and their schemas. Values
+such as map zoom, point limits, color ranges, and view defaults live in DIPL.
+Constraints that DIPL can express belong in schemas rather than duplicated
+Rust checks. The dataset-format schema checks overpass grouping depth, scan
+direction options, and the syntax and required presence of scan flag lists.
+Rust still converts those lists to integers and checks that forward and
+backward codes do not overlap.
 
-`settings/build/DIPfile` holds values compiled into the executable. The first
-compiled values are Plugin Lab icon rail dimensions. Build settings never read
-`runtime/overrides.dip`; release packages contain only the runtime project.
+`settings/build/DIPfile` holds values compiled into the executable, including
+Plugin Lab icon rail dimensions. `settings/build/resource_limits.dip` sets
+ceilings for file tree depth and object count, statistics sampling, 2D slice
+sampling, and 3D preview sampling. The corresponding runtime settings remain
+editable up to those ceilings; exceeding one produces a startup error. Build
+settings never read
+`settings/runtime/overrides.dip`; release packages contain only the runtime
+project.
 
 The main files are:
 
@@ -33,11 +39,10 @@ available in the 2D slice settings.
 A `dataset_sources[...]` entry registers one local repository in its own DIP
 file. Its `root` is the directory to scan, `format` links to a
 `dataset_formats[...]` entry, and `product_regex` matches paths relative to
-the root. Several sources may use
-the same format, and several sources may point at the same directory with
-different product rules. Named regex captures `year`, `month`, `day`, and
-`orbit` fill the product table. Captures can come from folder names, file names,
-or both. For example, a repository organized by date can use
+the root. Several sources may use the same format or point to the same
+directory with different product rules. Named regex captures `year`, `month`,
+`day`, and `orbit` fill the product table. Captures can come from folder names,
+file names, or both. For example, a repository organized by date can use
 `^(?P<year>[0-9]{4})/(?P<month>[0-9]{2})/(?P<day>[0-9]{2})/` at the start of
 its regex. Product metadata can be read on demand when a field is missing.
 The `tags` setting is a comma-separated list used by the dataset tag picker
@@ -51,25 +56,24 @@ Each source declares its own format link, for example
 repositories can use different formats.
 
 The bundled source definitions are examples of DIPL settings for supported
-product formats. They use `root = "./"` as a portable default. Put
-your local dataset roots in `settings/runtime/overrides.dip`; the app creates this
+product formats. They use `root = "./"` as a portable default. Put your local
+dataset roots in `settings/runtime/overrides.dip`; the app creates this
 Git-ignored file on first launch if it is missing. Relative roots are resolved
-from the `settings` directory. A native
-release includes a blank override file beside its executable; the user
-installer preserves local edits when upgrading. If an older override uses a
-`mock_` source ID, remove that prefix (for example, use
-`dataset_sources[gome].root` instead of `dataset_sources[mock_gome].root`).
-Remove old `dataset_sources[fdr_l1a]` and `dataset_sources[fdr_l1b]` override
-lines; the FDR formats remain available for files opened directly.
-The browser stores one index
-per source under `settings/runtime/.cache/datasets/` and loads a cached index on
-startup. If no cache exists, select the source and click **Refresh index** to
-start a background scan. **Cancel scan** stops it. Scanning reads directory
-entries and file metadata;
-it does not open every product. Missing mounts are marked red while their
-cached products remain listed. The table supports searching, sorting, and
-column resizing. **Open as A/B** assigns the selected product to the inspector
-file slots; the panel below the table shows loaded, loading, and queued products.
+from the `settings` directory. A native release includes a blank override file
+in its `settings` directory; the installer preserves local edits when upgrading.
+If an older override uses a `mock_` source ID, remove that prefix. For example,
+use `dataset_sources[gome].root` instead of
+`dataset_sources[mock_gome].root`.
+
+The browser stores one index per source under
+`settings/runtime/.cache/datasets/` and loads a cached index on startup. If no
+cache exists, select the source and click **Refresh index** to start a
+background scan. **Cancel scan** stops it. Scanning reads directory
+entries and file metadata without opening every product. Missing mounts are
+marked red while their cached products remain listed. The table supports
+searching, sorting, and column resizing. **Open as A** and **Open as B** assign
+the selected product to the inspector file slots; the panel below the table
+shows loaded, loading, and queued products.
 
 Each source index is a JSON file named after its source ID. A completed refresh
 replaces it; closing the app does not delete it. When the configured root or
@@ -85,16 +89,15 @@ progress, and can be cancelled. Completed checks are saved under
 `settings/runtime/.cache/datasets/`, which Git ignores, and reused by **Check
 overpasses** when file size and modification time are unchanged. Selecting an
 area restores saved matches for products with the indexed size without opening
-them; **Refresh overpasses** validates their modification times. The table shows matching products after a check;
-**Show all products** removes that filter. Products with multiple geolocation
-groups have a group selector, so FDR can be filtered by GOME or SCIAMACHY. This is a
-pixel-center test, so a footprint touching an area without its center entering
-it does not count as an overpass.
+them; **Refresh overpasses** validates their modification times. Click **Show
+overpasses** to filter the table to matching products, then **Show all products**
+to clear that filter. Products with multiple geolocation groups have a group
+selector. The check uses pixel centers, so a footprint touching an area without
+its center entering it does not count as an overpass.
 
 The `overpass_group_depth` format setting controls how hits within one product
-are separated. Zero gives one result per product. FDR uses depth 1 so its
-top-level GOME and SCIAMACHY groups are reported independently. Other formats
-can use the same rule for any grouped product layout.
+are separated. Zero gives one result per product. A depth of one reports
+top-level groups independently.
 
 ## Supported data
 
@@ -118,15 +121,16 @@ validation step, not the link between variables. Conventional coordinate and
 bounds names remain a fallback for older files without those attributes.
 
 NetCDF groups can put observations and geolocation in sibling groups. The
-bundled GOME, SCIAMACHY, GOME-2, Sentinel-5P TROPOMI, and FDR4ATMOS formats use `OBSERVATIONS`
-and sibling `GEODATA` groups under each band. Each format has its own DIPL
-entry in `settings/runtime/dataset/formats/`. Its `identification` subnode specifies
-patterns for root `platform`, `sensor`, and `product_type` attributes, plus a
-fallback filename glob. Two matching metadata attributes identify a format
-even if the filename is damaged. With fewer available attributes, the filename
-provides a fallback. A conflicting attribute rejects the format. The bundled
-GOME-2 rule covers MetOp-A/B/C, whose filenames share a pattern and whose
-geolocation layout is the same. Format settings are independent of repository
+bundled GOME, SCIAMACHY, GOME-2, and Sentinel-5P TROPOMI formats use
+`OBSERVATIONS` and sibling `GEODATA` groups under each band. Each format has
+its own DIPL entry in `settings/runtime/dataset/formats/`. Its `identification`
+subnode specifies patterns for root `platform`, `sensor`, and `product_type`
+attributes, plus a fallback filename glob. Two matching metadata attributes
+identify a format even if the filename is damaged. With fewer available
+attributes, the filename provides a fallback. A conflicting attribute rejects
+the format. The bundled GOME-2 rule covers MetOp-A/B/C, whose filenames share
+a pattern and whose geolocation layout is the same. Format settings are
+independent of repository
 paths and dates. The viewer checks coordinate shapes before applying a format.
 Explicit coordinate paths need no format entry.
 
@@ -137,9 +141,10 @@ Formats can also define a `scan_direction` subnode for a per-pixel flag. Set
 `backward`, or `both`); bundled GOME-2 and SCIAMACHY formats start on `forward`.
 The flag must share the observation's spatial dimensions. GOME-2 uses
 `GEODATA/scan_direction` (1 forward, 2 backward); SCIAMACHY uses
-`OBSERVATIONS/backscan_flag` (0 forward, 1 backward). The world and globe views
-then offer **Both**, **Fwd**, and **Back** buttons. They filter the loaded pixels
-immediately; **Both** also includes pixels with unknown flag codes.
+`OBSERVATIONS/backscan_flag` (0 forward, 1 backward). The world map and globe
+then offer icon buttons for both, forward, and backward scans. They filter the
+loaded pixels immediately; the both-directions setting also includes pixels
+with unknown flag codes.
 
 Four-dimensional radiance arrays use their first three dimensions for map
 geolocation and a pinned fourth-axis index for values. The world map and globe
@@ -150,19 +155,19 @@ dimension metadata. Synthetic dimension scales are omitted from value labels.
 
 The bundled GOME-2 Band 3 sample contains radiance channels, pixel centers,
 four footprint corners, and scan direction copied from a Level 1B product.
-The local Sentinel-5P source indexes TROPOMI Level 1B radiance bands under
-`../mock_datasets/S5P`. Their radiance arrays have time, scanline, ground-pixel,
-and spectral axes; the sibling `GEODATA` arrays provide pixel centers and four
-corners. These products do not contain a per-pixel forward/backward flag, so the
-scan-direction controls are unavailable.
+The bundled Sentinel-5P source can index TROPOMI Level 1B radiance bands after
+you set its `root` to a local product directory. Their radiance arrays have
+time, scanline, ground-pixel, and spectral axes; the sibling `GEODATA` arrays
+provide pixel centers and four corners. These products do not contain a
+per-pixel forward/backward flag, so the scan-direction controls are unavailable.
 
 For any geolocated dataset with four-corner pixel bounds, the map and globe
 combine neighboring source pixels into display cells when the pixel count
 exceeds the current display budget. Each cell uses the source block's outer
 geographic corners and the mean of its valid values. The corner directions are
 derived from nearby pixel centers, so formats can use different corner orders.
-Cells containing multiple scan directions are marked mixed and appear in Both
-mode; zooming in separates them into smaller cells.
+Cells containing multiple scan directions are marked mixed and appear when both
+directions are shown; zooming in separates them into smaller cells.
 As zoom increases, the cells shrink; at full detail, each source pixel is drawn
 with its own bounds. Datasets without bounds keep point sampling. Set
 `viewer.views.world_map.max_points` in `settings/runtime/viewers/world_map.dip` to

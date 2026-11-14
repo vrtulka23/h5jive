@@ -14,4 +14,5 @@ Install mdBook with `cargo install mdbook` if it is not already available.
 - [Exploring data](src/exploring-data.md)
 - [Settings and data formats](src/settings-and-formats.md)
 - [Architecture](src/development.md)
+- [Plugin Lab](src/plugin-lab.md)
 - [Troubleshooting](src/troubleshooting.md)

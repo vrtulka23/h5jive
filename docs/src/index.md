@@ -11,7 +11,7 @@ For generated Rust API documentation, run `cargo doc --workspace --open`.
 
 ## At a glance
 
-- Open HDF5 and classic NetCDF files.
+- Open HDF5, NetCDF-4, and classic NetCDF files.
 - Inspect dataset shape, type, statistics, attributes, and coordinate axes.
 - Explore numeric arrays as tables, profiles, 2D slices, and 3D voxel previews.
 - Map datasets with CF style latitude and longitude coordinates, including

@@ -169,7 +169,7 @@ impl App {
         }
         let rows = slice.rows(shape);
         let columns = slice.columns(shape);
-        let max_cells = self.settings.heatmap_max_cells.min(1_000_000);
+        let max_cells = self.settings.heatmap_max_cells;
         let large_plane = rows.saturating_mul(columns) > max_cells;
         if !large_plane {
             self.poll_heatmap_range(selection, shape, &slice);

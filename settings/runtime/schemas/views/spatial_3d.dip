@@ -13,5 +13,5 @@ back_brightness float = 0.45
   ?descr "Brightness of voxels and geometry at the back of the 3D preview."
   !condition ({.} >= 0 && {.} <= 1)
 preview_max_voxels int = 500000
-  ?descr "Maximum sampled voxels when the selected volume is too large for exact rendering."
-  !condition ({.} >= 10000 && {.} <= 2000000)
+  ?descr "Sampled voxels for large volumes, up to the compiled resource limit."
+  !condition ({.} >= 10000)

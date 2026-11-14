@@ -68,10 +68,10 @@ layout
 tree
   show_dataset_shape bool = true
   max_depth int = 24
-    ?descr "Maximum HDF5 group depth to display"
+    ?descr "HDF5 group depth to display, up to the compiled resource limit"
     !condition ({.} >= 1)
   max_objects int = 10000
-    ?descr "Maximum HDF5 objects to list"
+    ?descr "HDF5 objects to list, up to the compiled resource limit"
     !condition ({.} >= 1)
 
 data
@@ -91,8 +91,8 @@ format
 
 statistics
   sample_values int = 1000000
-    ?descr "Maximum reservoir sample for quartiles and outliers"
-    !condition ({.} >= 1 && {.} <= 5000000)
+    ?descr "Reservoir sample for quartiles and outliers, up to the compiled resource limit"
+    !condition ({.} >= 1)
   histogram_bins int = 32
     !condition ({.} >= 4 && {.} <= 512)
 

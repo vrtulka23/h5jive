@@ -1,0 +1,6 @@
+resource_limits : resource_limits_settings
+  tree_max_depth = 64
+  tree_max_objects = 100000
+  statistics_sample_values = 5000000
+  slice_max_cells = 1000000
+  volume_preview_max_voxels = 2000000

@@ -1,13 +1,13 @@
 # Plugin Lab
 
 Plugin Lab is H5Jive's collection of optional, source-level extensions. The
-path comparison plugin compares paths in the loaded files A and B. It labels a path
-**Same** when object kind, dataset shape and datatype, and displayed attribute
-values match, **Different** when they do not, and **Only A/B** when the path is
-absent from one file. Dataset values are not compared. Attribute comparison uses
+path comparison plugin compares paths in the loaded files A and B. It labels a
+path **Same** when object kind, dataset shape and datatype, and displayed
+attribute values match, **Different** when they do not, and **Only A/B** when
+the path is absent from one file. Dataset values are not compared. Attribute comparison uses
 the values exposed by H5Jive's metadata reader; large or unsupported attribute
-values may be summarized. Double-click a dataset in either column to open it in the core
-Data inspector; compatible datasets can then use the other core views.
+values may be summarized. Double-click a dataset in either column to open it in
+the Data inspector; compatible datasets can then use the other core views.
 
 ## Try the demo
 
@@ -26,30 +26,29 @@ The A and B panels share one scrollable row grid, keeping matching paths aligned
 as you scroll. Status icons indicate a match, a metadata difference, a path
 present on only one side, or metadata that could not be read. Hover an icon for
 the fields that differ. Use the count buttons to filter paths by status. Path
-details start collapsed; click a path or chevron on either side to reveal metadata on both sides.
-The metadata scan runs in the background.
+details start collapsed; click a path or chevron on either side to reveal
+metadata on both sides. The metadata scan runs in the background.
 
 The path comparison plugin can copy missing groups and datasets in either
 direction. Choose **Copy missing A → B** or **Copy missing B → A**, then review
 the count in the confirmation window. Click a missing-path status icon to copy
-one path instead.
-The copy runs in the background and reloads the destination
+one path instead. The copy runs in the background and reloads the destination
 file afterward. Existing paths, including paths with different metadata, are
 left untouched. A copied group includes its children and attributes. HDF5
 object copying preserves links as links and includes referenced objects needed
 by the copy. Check external links before relying on a synchronized file as a
-standalone copy.
-When copying one nested dataset, any missing parent groups are created without
-their source attributes; copy the parent group to preserve those attributes.
+standalone copy. When copying one nested dataset, any missing parent groups
+are created without their source attributes; copy the parent group to preserve
+those attributes.
 
 Click a **Different** status icon to resolve that path by replacing the whole
 object in either direction. The prompt shows the path and differing metadata.
 For datasets, replacement also changes values, even though this plugin does
 not compare values. Replacing a group removes destination-only children. The
 new object is staged before the destination link is changed; the app attempts
-to restore the old link if the swap fails. This is a whole-object resolution, not an
-attribute-by-attribute merge.
-References elsewhere in the destination file to the old object may need review.
+to restore the old link if the swap fails. This replaces the whole object
+rather than merging individual attributes. References elsewhere in the
+destination file to the old object may need review.
 
 ## Compare dataset values
 
@@ -89,7 +88,7 @@ before editing the plugin registry or adding a module.
    file in `settings/runtime/plugins/`. Add its `enabled` switch to the central
    `settings/runtime/plugins.dip` and wire the values through `Settings`.
 5. Add a reproducible demo in `examples/`, run `cargo test -p h5jive`, and
-   submit a pull request with a short description and screenshot. The Plugin
+   submit a pull request with a short description and screenshot. The
    [Plugin Lab catalog](https://github.com/vrtulka23/h5jive/tree/main/plugins)
    is the project's small app store for shared source plugins.
 
