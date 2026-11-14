@@ -38,7 +38,7 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: 1.99.0
+          toolchain: ${{ runner.os == 'Windows' && '1.99.0-x86_64-pc-windows-gnu' || '1.99.0' }}
           targets: ${{ matrix.target }}
 
       - name: Install Linux build dependencies
@@ -87,6 +87,7 @@ jobs:
         if: runner.os == 'Windows'
         shell: msys2 {0}
         run: |
+          rustc -vV | grep -q 'host: x86_64-pc-windows-gnu'
           export HDF5_DIR=/ucrt64
           export HDF5_ROOT=/ucrt64
           export LIBCLANG_PATH=/ucrt64/bin
