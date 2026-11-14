@@ -22,9 +22,9 @@ the [Plugin Lab catalog](plugins/README.md).
 
 ## Install a release
 
-New [releases](https://github.com/vrtulka23/h5jive/releases) built from this
-revision provide a Windows setup `.exe`, a macOS `.dmg` for each Mac
-architecture, and a Linux AppImage. The Windows setup installs for the current
+The [latest release](https://github.com/vrtulka23/h5jive/releases/latest)
+provides a Windows setup `.exe`, a macOS `.dmg` for each Mac architecture,
+and a Linux AppImage. The Windows setup installs for the current
 user without an administrator password. On macOS, drag `H5Jive.app` from the disk image into
 `~/Applications`. On Linux, make the AppImage executable and run it. These
 packages keep DIPL settings and caches in your user directory; local
@@ -33,11 +33,19 @@ Developer ID signed or notarized, so macOS may ask you to use **Open Anyway**
 in Privacy & Security when opening the app for the first time. If Linux lacks
 FUSE support, run the AppImage with `--appimage-extract-and-run`.
 
-The portable archives and script installers remain available:
+| System | Installer or app image | Portable archive |
+| --- | --- | --- |
+| Windows x86-64 | [Setup .exe](https://github.com/vrtulka23/h5jive/releases/latest/download/h5jive-windows-x86_64-setup.exe) | [ZIP](https://github.com/vrtulka23/h5jive/releases/latest/download/h5jive-windows-x86_64.zip) |
+| Linux x86-64 | [AppImage](https://github.com/vrtulka23/h5jive/releases/latest/download/h5jive-linux-x86_64.AppImage) | [tar.gz](https://github.com/vrtulka23/h5jive/releases/latest/download/h5jive-linux-x86_64.tar.gz) |
+| macOS Apple Silicon | [DMG](https://github.com/vrtulka23/h5jive/releases/latest/download/h5jive-macos-aarch64.dmg) | [tar.gz](https://github.com/vrtulka23/h5jive/releases/latest/download/h5jive-macos-aarch64.tar.gz) |
+| macOS Intel | [DMG](https://github.com/vrtulka23/h5jive/releases/latest/download/h5jive-macos-x86_64.dmg) | [tar.gz](https://github.com/vrtulka23/h5jive/releases/latest/download/h5jive-macos-x86_64.tar.gz) |
 
-Once a release with native assets is published, the installers download the
-archive for your system, verify its SHA-256 checksum, and install it in your
-user directory. No administrator access is needed. The macOS and Linux
+Use [SHA256SUMS](https://github.com/vrtulka23/h5jive/releases/latest/download/SHA256SUMS)
+to verify a download. Script installers are also available.
+
+The scripts download the latest release archive for your system, verify its
+SHA-256 checksum, and install it in your user directory. No administrator
+access is needed. The macOS and Linux
 installer requires `curl` and `tar`.
 
 **macOS or Linux:**

@@ -1,4 +1,4 @@
-// Keep the direct v0.1.2 archive links usable when the GitHub API is unavailable.
+// Direct latest-release links stay usable when the GitHub API is unavailable.
 const releaseAssets = document.querySelectorAll('[data-release-asset]');
 
 if (releaseAssets.length) {
@@ -12,16 +12,21 @@ if (releaseAssets.length) {
     .then((release) => {
       if (!Array.isArray(release.assets)) return;
       const assets = new Map(release.assets.map((asset) => [asset.name, asset.browser_download_url]));
-      const portable = [...releaseAssets].filter((link) => !link.classList.contains('download-installer'));
-      if (!portable.every((link) => assets.has(link.dataset.releaseAsset))) return;
       for (const link of releaseAssets) {
         const url = assets.get(link.dataset.releaseAsset);
-        if (!url) continue;
-        link.href = url;
-        link.hidden = false;
+        if (url) link.href = url;
+        link.hidden = !url;
       }
       const version = document.querySelector('[data-release-version]');
-      if (version && release.tag_name) version.textContent = release.tag_name;
+      if (version && release.tag_name) version.textContent = `(${release.tag_name})`;
+      const releasePage = document.querySelector('[data-release-page]');
+      if (releasePage && release.html_url) releasePage.href = release.html_url;
+      const checksum = document.querySelector('[data-release-checksum]');
+      if (checksum) {
+        const url = assets.get('SHA256SUMS');
+        if (url) checksum.href = url;
+        else checksum.hidden = true;
+      }
     })
     .catch(() => {});
 }
