@@ -23,7 +23,7 @@ the [Plugin Lab catalog](plugins/README.md).
 <p align="center">
   <a href="assets/view-globe.png"><img src="assets/readme-globe-teaser.jpg" width="620" alt="H5Jive globe view showing GOME-2 satellite radiance pixels over Earth, alongside the dataset tree and display controls" /></a>
 </p>
-<p align="center"><small>Globe view with a modified excerpt of EUMETSAT Metop-B GOME-2 Level 1B data (2013). © EUMETSAT 2013 · <a href="https://creativecommons.org/licenses/by/4.0/">CC BY 4.0</a> · Map: <a href="https://www.naturalearthdata.com/about/terms-of-use/">Natural Earth</a>.</small></p>
+<small>H5Jive globe view.</small>[^globe-credit]
 
 ## Install
 
@@ -181,3 +181,8 @@ The default Natural Earth map background uses
 
 H5Jive is maintained and released under the
 [MIT license](LICENSE).
+
+[^globe-credit]: Screenshot contains a modified excerpt of EUMETSAT Metop-B
+    GOME-2 Level 1B data (2013). © EUMETSAT 2013. Data: [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/)
+    ([sample licence details](examples/satellite/LICENSE.md)). Map background:
+    [Natural Earth](https://www.naturalearthdata.com/about/terms-of-use/).
