@@ -20,39 +20,12 @@ H5Jive's file access and visualizations. Try the bundled
 [contributor guide](docs/src/plugin-lab.md) to build and share a plugin through
 the [Plugin Lab catalog](plugins/README.md).
 
-## Install a release
+## Install for your account
 
-The [latest release](https://github.com/vrtulka23/h5jive/releases/latest)
-provides a Windows setup `.exe`, a macOS `.dmg` for each Mac architecture,
-and a Linux AppImage. The Windows setup installs for the current
-user without an administrator password. On macOS, drag `H5Jive.app` from the disk image into
-`~/Applications`. On Linux, make the AppImage executable and run it. These
-packages keep DIPL settings and caches in your user directory; local
-`overrides.dip` values survive app upgrades.
-
-**Release signing:** The Windows installer and executable and the Linux
-AppImage are currently unsigned. The macOS app has an ad hoc signature but is
-not Developer ID signed or notarized. Windows may show a SmartScreen or
-"Unknown publisher" prompt; macOS may require **Open Anyway** in Privacy &
-Security on first launch. Linux may require you to mark the AppImage executable.
-Download from the [official release](https://github.com/vrtulka23/h5jive/releases/latest)
-and use the published checksums below to check the downloaded file. If Linux
-lacks FUSE support, run the AppImage with `--appimage-extract-and-run`.
-
-| System | Installer or app image | Portable archive |
-| --- | --- | --- |
-| Windows x86-64 | [Setup .exe](https://github.com/vrtulka23/h5jive/releases/latest/download/h5jive-windows-x86_64-setup.exe) | [ZIP](https://github.com/vrtulka23/h5jive/releases/latest/download/h5jive-windows-x86_64.zip) |
-| Linux x86-64 | [AppImage](https://github.com/vrtulka23/h5jive/releases/latest/download/h5jive-linux-x86_64.AppImage) | [tar.gz](https://github.com/vrtulka23/h5jive/releases/latest/download/h5jive-linux-x86_64.tar.gz) |
-| macOS Apple Silicon | [DMG](https://github.com/vrtulka23/h5jive/releases/latest/download/h5jive-macos-aarch64.dmg) | [tar.gz](https://github.com/vrtulka23/h5jive/releases/latest/download/h5jive-macos-aarch64.tar.gz) |
-| macOS Intel | [DMG](https://github.com/vrtulka23/h5jive/releases/latest/download/h5jive-macos-x86_64.dmg) | [tar.gz](https://github.com/vrtulka23/h5jive/releases/latest/download/h5jive-macos-x86_64.tar.gz) |
-
-Use [SHA256SUMS](https://github.com/vrtulka23/h5jive/releases/latest/download/SHA256SUMS)
-to verify a download. Script installers are also available.
-
-The scripts download the latest release archive for your system, verify its
-SHA-256 checksum, and install it in your user directory. No administrator
-access is needed. The macOS and Linux
-installer requires `curl` and `tar`.
+The install scripts fetch the latest [release](https://github.com/vrtulka23/h5jive/releases/latest),
+check its SHA-256 checksum, and install H5Jive in your user directory. They
+need no administrator rights and preserve local DIPL settings on upgrades.
+The macOS and Linux script requires `curl` and `tar`.
 
 **macOS or Linux:**
 
@@ -72,6 +45,31 @@ to `PATH` if needed. Windows installs to `%LOCALAPPDATA%\Programs\H5Jive`
 and adds that directory to the user `PATH`. Open a new terminal after installing.
 To install a specific release, pass `--version vX.Y.Z` to the Unix script or
 `-Version vX.Y.Z` to the PowerShell script.
+
+**Release signing:** The Windows installer and executable and the Linux
+AppImage are currently unsigned. The macOS builds have ad hoc signatures but
+are not Developer ID signed or notarized. Windows may show SmartScreen or
+"Unknown publisher"; macOS may require **Open Anyway** in Privacy & Security
+on first launch. Download from the official release above.
+
+### Manual downloads
+
+The same release also provides a Windows setup `.exe`, macOS DMGs, a Linux
+AppImage, and portable archives for manual installation. On macOS, drag
+`H5Jive.app` from the DMG into `~/Applications`. On Linux, mark the AppImage
+executable before running it; if FUSE is unavailable, use
+`--appimage-extract-and-run`.
+
+| System | Installer or app image | Portable archive |
+| --- | --- | --- |
+| Windows x86-64 | [Setup .exe](https://github.com/vrtulka23/h5jive/releases/latest/download/h5jive-windows-x86_64-setup.exe) | [ZIP](https://github.com/vrtulka23/h5jive/releases/latest/download/h5jive-windows-x86_64.zip) |
+| Linux x86-64 | [AppImage](https://github.com/vrtulka23/h5jive/releases/latest/download/h5jive-linux-x86_64.AppImage) | [tar.gz](https://github.com/vrtulka23/h5jive/releases/latest/download/h5jive-linux-x86_64.tar.gz) |
+| macOS Apple Silicon | [DMG](https://github.com/vrtulka23/h5jive/releases/latest/download/h5jive-macos-aarch64.dmg) | [tar.gz](https://github.com/vrtulka23/h5jive/releases/latest/download/h5jive-macos-aarch64.tar.gz) |
+| macOS Intel | [DMG](https://github.com/vrtulka23/h5jive/releases/latest/download/h5jive-macos-x86_64.dmg) | [tar.gz](https://github.com/vrtulka23/h5jive/releases/latest/download/h5jive-macos-x86_64.tar.gz) |
+
+For manual downloads, use
+[SHA256SUMS](https://github.com/vrtulka23/h5jive/releases/latest/download/SHA256SUMS)
+to check the file.
 
 To uninstall on macOS or Linux, run:
 

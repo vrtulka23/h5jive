@@ -305,6 +305,16 @@
 .download-version,.download-note{color:#8caab6;font-size:12px}
 .download-version{margin:27px 0 18px}
 .download-version span{color:#d0e9ee}
+.install-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}
+.install-card{min-width:0;padding:26px;border:1px solid #55c9db88;background:#0e3043}
+.install-card>span{font:10px 'DM Mono',monospace;letter-spacing:.1em;color:#8be0eb}
+.install-card h3{font:600 22px Manrope,sans-serif;margin:12px 0 16px}
+.install-card pre{margin:0;padding:16px;overflow-x:auto;background:#071b2b;border:1px solid #ffffff24;color:#d7f3f7;font:12px/1.7 'DM Mono',monospace}
+.install-card p{margin:16px 0 0;color:#a8c5ce;font-size:12px;line-height:1.6}
+.install-card p code{font-family:'DM Mono',monospace;color:#d7f3f7}
+.manual-download-heading{display:flex;align-items:end;justify-content:space-between;gap:24px;margin:52px 0 18px}
+.manual-download-heading h3{font:600 26px Manrope,sans-serif;margin:0}
+.manual-download-heading p{max-width:420px;margin:0;color:#9ab7c2;font-size:13px}
 .download-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}
 .download-card{display:flex;flex-direction:column;padding:26px;border:1px solid #ffffff28;background:#0c2538}
 .download-card>span{font:10px 'DM Mono',monospace;letter-spacing:.1em;color:#72bcca}
@@ -316,7 +326,7 @@
 .download-links [hidden]{display:none}
 .download-note{margin:20px 0 0}
 .lab-benefit-grid a{text-decoration:underline;text-underline-offset:3px}
-@media(max-width:700px){.download-heading{display:block}.download-heading>p{margin-top:18px}.download-grid{grid-template-columns:1fr}.downloads{padding-block:70px 76px}}
+@media(max-width:700px){.download-heading{display:block}.download-heading>p{margin-top:18px}.install-grid,.download-grid{grid-template-columns:1fr}.manual-download-heading{display:block;margin-top:42px}.manual-download-heading p{margin-top:8px}.downloads{padding-block:70px 76px}}
 
 .browser-section {
   padding-block: 96px 105px;
