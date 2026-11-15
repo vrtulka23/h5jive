@@ -137,7 +137,8 @@ Both the script and executable accept `--view-data`, `--view-1d-profiles`,
 
 The repository includes a deterministic [HDF5 demo](examples/arrays/space_demo.hdf5)
 and a [GOME-2 Band 3 sample](examples/satellite/gome2_band3_20130106_gome.nc) extracted
-from a real Level 1B product. You can inspect a file tree
+from a real Level 1B product. The sample's [data attribution and licence](examples/satellite/LICENSE.md)
+are separate from the software's MIT licence. You can inspect a file tree
 without opening a window:
 
 ```sh

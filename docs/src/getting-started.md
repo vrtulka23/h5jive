@@ -110,4 +110,5 @@ The bundled `examples/satellite/gome2_band3_20130106_gome.nc` contains a
 sample extracted from a real GOME-2 Level 1B product. Select
 `MODE_NADIR/BAND_3/OBSERVATIONS/radiance` and open the world map or globe to
 inspect its geolocated pixels. The sample retains all 625 scan lines, 32 ground
-pixels, four-corner bounds, scan direction, and 64 radiance channels.
+pixels, four-corner bounds, scan direction, and 64 radiance channels. See its
+[data attribution and licence](../../examples/satellite/LICENSE.md).

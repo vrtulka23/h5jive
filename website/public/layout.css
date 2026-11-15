@@ -374,6 +374,15 @@
 .browser-details strong { color: #e8f4f8; }
 .browser-details .text-link { white-space: nowrap; }
 
+.sample-credit {
+  max-width: 980px;
+  margin: 14px auto 0;
+  color: #9fbcc8;
+  font: 11px/1.5 'DM Mono', monospace;
+}
+
+.sample-credit a { color: #8be0eb; text-decoration: underline; }
+
 @media (max-width: 900px) {
   .browser-heading { grid-template-columns: 1fr; gap: 20px; }
   .browser-details { grid-template-columns: 1fr 1fr; }
