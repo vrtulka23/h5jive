@@ -20,3 +20,10 @@ by Natural Earth/NACIS:
 
 The cartographic Natural Earth texture is the default for the flat map and
 globe; NASA Blue Marble remains available as an alternate background.
+
+`coastline_110m.txt` is a simplified coordinate rendering of Natural Earth's
+1:110m coastline vector data, used to draw coastlines in the map and globe.
+Natural Earth's [terms of use](https://www.naturalearthdata.com/about/terms-of-use/)
+place its raster and vector data in the public domain; attribution is optional.
+The source dataset is available from the
+[1:110m coastline page](https://www.naturalearthdata.com/downloads/110m-physical-vectors/110m-coastline/).
