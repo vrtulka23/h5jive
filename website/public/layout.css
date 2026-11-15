@@ -395,3 +395,39 @@
   .browser-details .text-link { grid-column: auto; }
   .browser-preview figcaption { font-size: 8px; }
 }
+
+.topbar nav a:focus-visible {
+  outline: 2px solid #8be0eb;
+  outline-offset: 3px;
+}
+
+@media (max-width: 900px) {
+  .topbar {
+    height: auto;
+    min-height: 82px;
+    padding-block: 12px;
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+
+  .topbar nav {
+    width: 100%;
+    flex-wrap: wrap;
+    gap: 4px 18px;
+  }
+
+  .topbar nav a {
+    display: inline-flex;
+    align-items: center;
+    min-height: 36px;
+  }
+}
+
+@media (max-width: 620px) {
+  .topbar nav > a:not(.nav-cta) { display: inline-flex; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  .ticker-inner { animation: none; }
+}

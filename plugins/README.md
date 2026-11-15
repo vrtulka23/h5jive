@@ -1,8 +1,8 @@
 # Plugin Lab catalog
 
-This is the small source based app store for H5Jive plugins. Plugins are
-reviewed as pull requests and compiled into the app; installing a plugin means
-building a version of H5Jive that contains its source.
+This catalog lists the plugins compiled into H5Jive. Contributions are
+reviewed as pull requests; using a new plugin means building a version of
+H5Jive that contains its source.
 
 | Plugin | Purpose | Setting |
 | --- | --- | --- |
