@@ -5,7 +5,7 @@ use hdf5_metno::{
     ObjectReference1, ReferencedObject, SliceOrIndex,
 };
 use ndarray::IxDyn;
-use netcdf_reader::{NcAttrValue, NcFile, NcSliceInfo, NcSliceInfoElem, NcType};
+use netcdf_reader::{NcAttrValue, NcAttribute, NcFile, NcSliceInfo, NcSliceInfoElem, NcType};
 use std::{cell::RefCell, error::Error, fmt, path::Path};
 mod geolocation;
 mod statistics;
@@ -193,25 +193,27 @@ impl File {
                 }
             }
             Backend::ClassicNetcdf(file) => {
+                let convert = |attributes: &[NcAttribute]| {
+                    attributes
+                        .iter()
+                        .map(|attribute| AttributeValue {
+                            name: attribute.name.clone(),
+                            value: format_netcdf_attribute(&attribute.value),
+                            float_values: match &attribute.value {
+                                NcAttrValue::Floats(values) => {
+                                    Some(values.iter().map(|&value| value as f64).collect())
+                                }
+                                NcAttrValue::Doubles(values) => Some(values.clone()),
+                                _ => None,
+                            },
+                        })
+                        .collect()
+                };
                 if path == "/" {
-                    return Ok(Vec::new());
+                    return Ok(convert(file.global_attributes().map_err(error)?));
                 }
                 let variable = file.variable(path.trim_start_matches('/')).map_err(error)?;
-                Ok(variable
-                    .attributes()
-                    .iter()
-                    .map(|attribute| AttributeValue {
-                        name: attribute.name.clone(),
-                        value: format_netcdf_attribute(&attribute.value),
-                        float_values: match &attribute.value {
-                            NcAttrValue::Floats(values) => {
-                                Some(values.iter().map(|&value| value as f64).collect())
-                            }
-                            NcAttrValue::Doubles(values) => Some(values.clone()),
-                            _ => None,
-                        },
-                    })
-                    .collect())
+                Ok(convert(variable.attributes()))
             }
         }
     }

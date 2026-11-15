@@ -161,6 +161,7 @@ mod navigation_tests {
                         entry,
                         &file,
                         0,
+                        false,
                         &mut selected,
                         &mut geolocation_cache,
                         &settings.dataset_rules,
@@ -187,7 +188,7 @@ mod navigation_tests {
         let ui = context.frame();
         ui.window("Tree alignment").build(|| {
             let folder_row_x = ui.cursor_screen_pos()[0];
-            let folder_icon_x = tree_icon_x(ui, folder_row_x, true);
+            let folder_icon_x = tree_icon_x(ui, folder_row_x, true, false);
             let node = ui
                 .tree_node_config("folder")
                 .opened(true, Condition::Always)
@@ -197,14 +198,38 @@ mod navigation_tests {
                 let name_x = dataset_row_x
                     + ui.calc_text_size(format!("{DATASET_NAME_PREFIX}X"))[0]
                     - ui.calc_text_size("X")[0];
-                let geo_icon_right = tree_icon_x(ui, dataset_row_x, false) + 29.0;
+                let geo_icon_right = tree_icon_x(ui, dataset_row_x, false, true) + 29.0;
                 assert!((name_x - geo_icon_right - 7.0).abs() <= 4.0);
                 ui.selectable_config("dataset").build();
-                let dataset_icon_x = tree_icon_x(ui, dataset_row_x, false);
+                let dataset_icon_x = tree_icon_x(ui, dataset_row_x, false, true);
                 assert!((dataset_icon_x - folder_icon_x).abs() < 0.5);
             } else {
                 panic!("folder should be open");
             }
+        });
+    }
+
+    #[test]
+    fn root_dataset_icon_aligns_with_root_group_icon() {
+        let mut context = Context::create();
+        context.set_ini_filename(None::<String>).unwrap();
+        context.io_mut().set_display_size([500.0, 300.0]);
+        context.io_mut().set_delta_time(1.0 / 60.0);
+        context
+            .font_atlas()
+            .try_claim_legacy_renderer()
+            .unwrap()
+            .build();
+        let ui = context.frame();
+        ui.window("Root tree alignment").build(|| {
+            let group_row_x = ui.cursor_screen_pos()[0];
+            let group_icon_x = tree_icon_x(ui, group_row_x, true, false);
+            ui.tree_node_config("group")
+                .opened(false, Condition::Always)
+                .push();
+            let dataset_row_x = ui.cursor_screen_pos()[0];
+            let dataset_icon_x = tree_icon_x(ui, dataset_row_x, false, false);
+            assert!((dataset_icon_x - group_icon_x).abs() < 0.5);
         });
     }
 
@@ -528,11 +553,36 @@ pub(crate) fn find_entry<'a>(root: &'a Entry, path: &str) -> Option<&'a Entry> {
 }
 const DATASET_NAME_PREFIX: &str = "     ";
 
+pub(super) fn draw_file_root(
+    ui: &Ui,
+    source: &File,
+    file: usize,
+    selected: &mut Option<Selection>,
+    palette: &Palette,
+) {
+    let row_x = ui.cursor_screen_pos()[0];
+    let is_selected = selected
+        .as_ref()
+        .is_some_and(|current| current.file == file && current.path == "/");
+    let label = format!("{DATASET_NAME_PREFIX}{}##file_root_{file}", source.name);
+    if ui.selectable_config(&label).selected(is_selected).build() {
+        *selected = Some(Selection {
+            file,
+            path: "/".into(),
+        });
+    }
+    if is_selected {
+        draw_selected_tree_row(ui, palette);
+    }
+    draw_tree_entry_icons(ui, row_x, false, false, false, palette);
+}
+
 pub(crate) fn draw_entry(
     ui: &Ui,
     entry: &Entry,
     source: &File,
     file: usize,
+    has_parent: bool,
     selected: &mut Option<Selection>,
     geolocation_cache: &mut HashMap<(usize, String), Option<Geolocation>>,
     dataset_rules: &[GeolocationRule],
@@ -587,7 +637,7 @@ pub(crate) fn draw_entry(
         if is_selected {
             draw_selected_tree_row(ui, palette);
         }
-        draw_tree_entry_icons(ui, row_x, true, false, palette);
+        draw_tree_entry_icons(ui, row_x, true, false, has_parent, palette);
         if ui.is_item_clicked() {
             *selected = Some(Selection {
                 file,
@@ -601,6 +651,7 @@ pub(crate) fn draw_entry(
                     child,
                     source,
                     file,
+                    true,
                     selected,
                     geolocation_cache,
                     dataset_rules,
@@ -624,7 +675,7 @@ pub(crate) fn draw_entry(
         if is_selected {
             draw_selected_tree_row(ui, palette);
         }
-        draw_tree_entry_icons(ui, row_x, false, geolocation.is_some(), palette);
+        draw_tree_entry_icons(ui, row_x, false, geolocation.is_some(), has_parent, palette);
         if let Some(geolocation) = geolocation {
             ui.set_item_tooltip(format!(
                 "Geolocated dataset\nLatitude: {}\nLongitude: {}",
@@ -657,10 +708,17 @@ fn draw_selected_tree_row(ui: &Ui, palette: &Palette) {
         .build();
 }
 
-fn draw_tree_entry_icons(ui: &Ui, row_x: f32, group: bool, geolocated: bool, palette: &Palette) {
+fn draw_tree_entry_icons(
+    ui: &Ui,
+    row_x: f32,
+    group: bool,
+    geolocated: bool,
+    has_parent: bool,
+    palette: &Palette,
+) {
     let min = ui.item_rect_min();
     let max = ui.item_rect_max();
-    let x = tree_icon_x(ui, row_x, group);
+    let x = tree_icon_x(ui, row_x, group, has_parent);
     let y = (min[1] + max[1]) * 0.5;
     let color = if group { palette.accent } else { palette.muted };
     let draw = ui.get_window_draw_list();
@@ -702,14 +760,14 @@ fn draw_tree_entry_icons(ui: &Ui, row_x: f32, group: bool, geolocated: bool, pal
     }
 }
 
-fn tree_icon_x(ui: &Ui, row_x: f32, group: bool) -> f32 {
-    // A child row already includes one tree indent. Cancel it so its icon
-    // sits directly below the parent folder icon.
+fn tree_icon_x(ui: &Ui, row_x: f32, group: bool, has_parent: bool) -> f32 {
+    // Only nested leaves include a tree indent that their parent folder icon
+    // does not. Root leaves share the same icon column as root folders.
     row_x + ui.text_line_height() + 4.0
-        - if group {
-            0.0
-        } else {
+        - if !group && has_parent {
             ui.clone_style().indent_spacing()
+        } else {
+            0.0
         }
 }
 

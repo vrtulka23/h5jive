@@ -57,8 +57,8 @@ pub(super) fn distribution(
     let upper_fence = q3 + 1.5 * iqr;
     let mut lower_whisker = None::<f64>;
     let mut upper_whisker = None::<f64>;
-    for_each_value(file, path, &statistics.info.shape, |value, fill_value| {
-        if !value.is_finite() || fill_value.is_some_and(|marker| value == marker) {
+    for_each_value(file, path, &statistics.info.shape, |value, is_fill| {
+        if !value.is_finite() || is_fill {
             return;
         }
         let fraction = if min == max {
@@ -112,14 +112,14 @@ pub(super) fn calculate(file: &File, path: &str, sample_limit: usize) -> Result<
     let mut sample = Vec::with_capacity((result.info.elements.min(limit as u128)) as usize);
     let mut random_state = 0x9E37_79B9_7F4A_7C15_u64;
     let mut squared_deviations = 0.0_f64;
-    for_each_value(file, path, &result.info.shape, |value, fill_value| {
+    for_each_value(file, path, &result.info.shape, |value, is_fill| {
         if value.is_nan() {
             result.nan += 1;
         } else if value == f64::INFINITY {
             result.positive_infinity += 1;
         } else if value == f64::NEG_INFINITY {
             result.negative_infinity += 1;
-        } else if fill_value.is_some_and(|marker| value == marker) {
+        } else if is_fill {
             result.fill += 1;
         } else {
             result.valid += 1;
@@ -170,11 +170,8 @@ pub(super) fn calculate(file: &File, path: &str, sample_limit: usize) -> Result<
         let lower = q1 - 1.5 * range;
         let upper = q3 + 1.5 * range;
         if result.approximate_quartiles {
-            for_each_value(file, path, &result.info.shape, |value, fill_value| {
-                if value.is_finite()
-                    && !fill_value.is_some_and(|marker| value == marker)
-                    && (value < lower || value > upper)
-                {
+            for_each_value(file, path, &result.info.shape, |value, is_fill| {
+                if value.is_finite() && !is_fill && (value < lower || value > upper) {
                     result.outliers += 1;
                 }
             })?;
@@ -203,15 +200,36 @@ fn for_each_value(
     file: &File,
     path: &str,
     shape: &[usize],
-    mut visit: impl FnMut(f64, Option<f64>),
+    mut visit: impl FnMut(f64, bool),
 ) -> Result<()> {
+    let missing_values: Vec<f64> = file
+        .attributes(path)?
+        .into_iter()
+        .filter(|attribute| attribute.name == "_FillValue" || attribute.name == "missing_value")
+        .flat_map(|attribute| {
+            attribute.float_values.unwrap_or_else(|| {
+                attribute
+                    .value
+                    .trim_matches(['[', ']'])
+                    .split(',')
+                    .filter_map(|value| value.trim().parse().ok())
+                    .collect()
+            })
+        })
+        .collect();
+    let mut visit_value = |value: f64, fill_value: Option<f64>| {
+        visit(
+            value,
+            fill_value == Some(value) || missing_values.contains(&value),
+        );
+    };
     if shape.iter().any(|&length| length == 0) {
         return Ok(());
     }
     if shape.is_empty() {
         let values = file.values(path, 1)?;
         for value in values.data {
-            visit(value, values.fill_value);
+            visit_value(value, values.fill_value);
         }
         return Ok(());
     }
@@ -233,7 +251,7 @@ fn for_each_value(
             .collect();
         let region = file.region(path, &start, &count)?;
         for value in region.data {
-            visit(value, region.fill_value);
+            visit_value(value, region.fill_value);
         }
         let mut exhausted = true;
         for axis in (0..shape.len()).rev() {

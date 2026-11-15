@@ -17,8 +17,12 @@ fn classic_netcdf_coordinate_values_follow_dimension_indexes() {
     put_u32(&mut bytes, 1);
     put_name(&mut bytes, "time");
     put_u32(&mut bytes, 3);
-    put_u32(&mut bytes, 0); // no global attributes
-    put_u32(&mut bytes, 0);
+    put_u32(&mut bytes, 12); // global attribute list
+    put_u32(&mut bytes, 1);
+    put_name(&mut bytes, "source");
+    put_u32(&mut bytes, 2); // NC_CHAR
+    put_u32(&mut bytes, 4);
+    bytes.extend_from_slice(b"test");
     put_u32(&mut bytes, 11); // variable list
     put_u32(&mut bytes, 2);
     let mut offsets = Vec::new();
@@ -46,6 +50,11 @@ fn classic_netcdf_coordinate_values_follow_dimension_indexes() {
     let path = std::env::temp_dir().join(format!("h5jive-coordinate-{}.nc", std::process::id()));
     std::fs::write(&path, bytes).unwrap();
     let file = File::open(&path).unwrap();
+    assert!(file
+        .attributes("/")
+        .unwrap()
+        .iter()
+        .any(|attribute| attribute.name == "source" && attribute.value == "test"));
     assert_eq!(file.axis_names("/temperature").unwrap(), ["time"]);
     let axes = file.coordinate_axes("/temperature").unwrap();
     assert_eq!(axes[0].variable.as_deref(), Some("/time"));

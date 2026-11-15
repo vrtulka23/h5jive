@@ -11,6 +11,12 @@ fn exact_quartiles_outlier_and_group_attribute() {
         std::env::temp_dir().join(format!("h5jive-stats-{}.hdf5", std::process::id()));
     {
         let hdf5 = H5File::create(&path).unwrap();
+        let source = VarLenUnicode::from_str("test measurements").unwrap();
+        hdf5.new_attr::<VarLenUnicode>()
+            .create("source")
+            .unwrap()
+            .write_scalar(&source)
+            .unwrap();
         let group = hdf5.create_group("measurements").unwrap();
         let title = VarLenUnicode::from_str("regional measurements").unwrap();
         group
@@ -81,8 +87,29 @@ fn exact_quartiles_outlier_and_group_attribute() {
             .unwrap()
             .write_raw(&[-9999.0])
             .unwrap();
+        let two_markers = group
+            .new_dataset::<f64>()
+            .shape([5])
+            .create("two_markers")
+            .unwrap();
+        two_markers
+            .write_raw(&[1.0, 2.0, -9999.0, -8888.0, 3.0])
+            .unwrap();
+        for (name, marker) in [("_FillValue", -9999.0), ("missing_value", -8888.0)] {
+            two_markers
+                .new_attr::<f64>()
+                .create(name)
+                .unwrap()
+                .write_scalar(&marker)
+                .unwrap();
+        }
     }
     let file = File::open(&path).unwrap();
+    assert!(file
+        .attributes("/")
+        .unwrap()
+        .iter()
+        .any(|attribute| attribute.name == "source" && attribute.value == "test measurements"));
     assert_eq!(
         file.axis_names("/measurements/plain_2d").unwrap(),
         ["Dimension 0", "Dimension 1"]
@@ -151,6 +178,17 @@ fn exact_quartiles_outlier_and_group_attribute() {
         .distribution("/measurements/array_fill", &array_fill_stats, 16)
         .unwrap();
     assert_eq!(array_fill_distribution.bins.iter().sum::<u128>(), 1);
+    let two_markers = file.statistics("/measurements/two_markers", 10).unwrap();
+    assert_eq!((two_markers.fill, two_markers.valid), (2, 3));
+    assert_eq!(two_markers.median, Some(2.0));
+    assert_eq!(two_markers.first_quartile, Some(1.5));
+    assert_eq!(two_markers.third_quartile, Some(2.5));
+    let two_markers_distribution = file
+        .distribution("/measurements/two_markers", &two_markers, 8)
+        .unwrap();
+    assert_eq!(two_markers_distribution.bins.iter().sum::<u128>(), 3);
+    assert_eq!(two_markers_distribution.lower_whisker, 1.0);
+    assert_eq!(two_markers_distribution.upper_whisker, 3.0);
     assert_eq!(
         file.region("/measurements/array_fill", &[0], &[2])
             .unwrap()

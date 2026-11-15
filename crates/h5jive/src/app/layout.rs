@@ -294,7 +294,13 @@ impl App {
                                         .size([0.0, 0.0])
                                         .build(ui, || {
                                             if let Some(file) = self.files.get(index) {
-                                                ui.text_wrapped(&file.name);
+                                                draw_file_root(
+                                                    ui,
+                                                    file,
+                                                    index,
+                                                    &mut self.selection,
+                                                    &self.settings.palette,
+                                                );
                                                 ui.separator();
                                                 for entry in &file.tree.children {
                                                     draw_entry(
@@ -302,6 +308,7 @@ impl App {
                                                         entry,
                                                         file,
                                                         index,
+                                                        false,
                                                         &mut self.selection,
                                                         &mut self.tree_geolocation_cache,
                                                         &self.settings.dataset_rules,
