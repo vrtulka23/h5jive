@@ -189,4 +189,4 @@ The default Natural Earth map background uses
 H5Jive is maintained and released under the
 [MIT license](LICENSE).
 
-<small>AI tools assisted with parts of this project, and errors or inconsistencies may remain. Contributions and corrections are welcome: please <a href="https://github.com/vrtulka23/h5jive/issues">open an issue</a> or <a href="https://github.com/vrtulka23/h5jive/pulls">submit a pull request</a>.</small>
+<small>H5Jive was developed with AI-assisted tooling. Design decisions, integration, testing, and maintenance remain the responsibility of the project maintainer.</small>
