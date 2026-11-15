@@ -24,6 +24,7 @@ pub(crate) struct DatasetSource {
     pub tags: Vec<String>,
     pub product_regex: String,
     pub cache_path: PathBuf,
+    #[allow(dead_code)] // Reserved for the future overpass plugin.
     pub overpass: OverpassDiscovery,
 }
 

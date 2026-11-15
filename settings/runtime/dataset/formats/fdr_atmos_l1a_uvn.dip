@@ -1,5 +1,5 @@
-# FDR4ATMOS Level 1A UVN contains GOME and SCIAMACHY observation groups.
 dataset_formats[fdr_atmos_l1a_uvn] : dataset_format
+  ?descr "FDR4ATMOS Level 1A UVN contains GOME and SCIAMACHY observation groups."
   name = "FDR4ATMOS Level 1A UVN"
   identification
     file_glob = "ESA_FDR_ATMOS__L1A_UVN__*.nc"

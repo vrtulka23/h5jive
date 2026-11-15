@@ -6,6 +6,8 @@ mod dataset_index;
 mod geospatial;
 mod heatmap;
 mod model;
+// Retained as the tested backend for a future overpass plugin.
+#[allow(dead_code)]
 mod overpass;
 mod pinned_default;
 mod value_visibility;

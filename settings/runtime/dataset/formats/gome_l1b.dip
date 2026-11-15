@@ -1,5 +1,5 @@
-# ERS-2 GOME L1B groups repeat this layout under each band.
 dataset_formats[gome_l1b] : dataset_format
+  ?descr "ERS-2 GOME L1B groups repeat this layout under each band."
   name = "GOME Level 1B"
   identification
     file_glob = "ER2_RPRO_GOM_L1B*.nc"

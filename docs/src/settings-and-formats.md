@@ -6,8 +6,8 @@ The editable project is `settings/runtime/DIPfile`. It loads the viewer
 configuration, appearance profiles, PICS catalog, and their schemas. Values
 such as map zoom, point limits, color ranges, and view defaults live in DIPL.
 Constraints that DIPL can express belong in schemas rather than duplicated
-Rust checks. The dataset-format schema checks overpass grouping depth, scan
-direction options, and the syntax and required presence of scan flag lists.
+Rust checks. The dataset-format schema checks scan direction options and the
+syntax and required presence of scan flag lists.
 Rust still converts those lists to integers and checks that forward and
 backward codes do not overlap.
 
@@ -23,10 +23,25 @@ project.
 The main files are:
 
 - `settings/runtime/viewer.dip` and `settings/runtime/schemas/viewer.dip`
-- `settings/runtime/pics.dip` and the PICS schemas
+- `settings/runtime/pics/*.dip` and the PICS schemas
 - `settings/runtime/dataset/formats/*.dip` and `settings/runtime/schemas/dataset_format.dip`
 - `settings/runtime/dataset/sources/*.dip` and `settings/runtime/schemas/dataset_source.dip`
 - `settings/runtime/themes/*.dip` and `settings/runtime/schemas/appearance.dip`
+
+PICS source pages use DIPL's `?url` metadata on each `pics[...]` entry, rather
+than a `source_url` value. If an older local override sets `source_url`, remove
+that assignment; each catalog URL is attached to its site entry under
+`settings/runtime/pics/`. The directory has four catalog files for CEOS
+reference sites, other USGS catalog sites, desert PICS, and reference stations.
+Each file is registered in `settings/runtime/DIPfile`.
+The six CEOS reference sites have published CEOS and CNES regions. Other USGS
+catalog sites use published CNES and SDSU regions, whose catalog centers may
+lie outside the regions. A labelled regional or station search window helps
+find overpasses but does not define calibration pixels.
+Use `h5jive --settings-help 'dataset_sources[gome].product_regex'` to read a
+setting's DIPL description. The same command accepts other DIPL paths, such as
+`pics[algeria_3]`, and shows source URLs where available. The schema also
+provides DIPL `?example` metadata for product regexes and scan flag lists.
 
 The `h5jive` appearance profile matches the project's static page: deep
 charcoal backgrounds, sage text, and orange/copper accents. It is the
@@ -79,25 +94,6 @@ Each source index is a JSON file named after its source ID. A completed refresh
 replaces it; closing the app does not delete it. When the configured root or
 product regex changes, the old index is ignored until the next refresh. You can
 delete `.cache/datasets/` to clear all saved indexes; scans will recreate them.
-
-The browser can check products against individual PICS regions on demand. Choose
-an **Overpass area** and click **Check overpasses** for the selected repository.
-The background check reads only latitude and longitude coordinate slabs, not
-observation values, and stops reading a group once a pixel center enters the
-area. It uses at most two reader threads to limit disk contention, reports
-progress, and can be cancelled. Completed checks are saved under
-`settings/runtime/.cache/datasets/`, which Git ignores, and reused by **Check
-overpasses** when file size and modification time are unchanged. Selecting an
-area restores saved matches for products with the indexed size without opening
-them; **Refresh overpasses** validates their modification times. Click **Show
-overpasses** to filter the table to matching products, then **Show all products**
-to clear that filter. Products with multiple geolocation groups have a group
-selector. The check uses pixel centers, so a footprint touching an area without
-its center entering it does not count as an overpass.
-
-The `overpass_group_depth` format setting controls how hits within one product
-are separated. Zero gives one result per product. A depth of one reports
-top-level groups independently.
 
 ## Supported data
 

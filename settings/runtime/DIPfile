@@ -75,7 +75,13 @@ sources[]
 code[]
   file = "viewer.dip"
 code[]
-  file = "pics.dip"
+  file = "pics/ceos_reference.dip"
+code[]
+  file = "pics/usgs_catalog.dip"
+code[]
+  file = "pics/desert_pics.dip"
+code[]
+  file = "pics/reference_stations.dip"
 code[]
   file = "dataset/formats/gome_l1b.dip"
 code[]

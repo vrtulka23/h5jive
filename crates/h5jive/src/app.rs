@@ -252,7 +252,14 @@ struct FilePickerState {
 pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = env::args().skip(1).collect();
     if args.iter().any(|arg| arg == "--help" || arg == "-h") {
-        println!("H5Jive [--inspect] [--view-VIEW] [FILE_A[:/DATASET]] [FILE_B[:/DATASET]]\nVIEW: data, 1d-profiles, 2d-slice, 3d, world-map, globe (requires :/DATASET)\nReads HDF5 and NetCDF files. DIPL: settings/runtime/DIPfile in source or settings/DIPfile in installs; overrides.dip beside it");
+        println!("H5Jive [--inspect] [--view-VIEW] [FILE_A[:/DATASET]] [FILE_B[:/DATASET]]\nH5Jive --settings-help DIPL_PATH\nVIEW: data, 1d-profiles, 2d-slice, 3d, world-map, globe (requires :/DATASET)\nReads HDF5 and NetCDF files. DIPL: settings/runtime/DIPfile in source or settings/DIPfile in installs; overrides.dip beside it");
+        return Ok(());
+    }
+    if args.first().is_some_and(|arg| arg == "--settings-help") {
+        if args.len() != 2 {
+            return Err("--settings-help requires one DIPL path".into());
+        }
+        println!("{}", settings_help(&args[1])?);
         return Ok(());
     }
     let (inspect, view_override, inputs) = parse_startup_args(&args)?;

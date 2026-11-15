@@ -1,4 +1,4 @@
-?descr "USGS PICS catalog site with two published regions (not one of the six CEOS reference PICS)"
+?descr "USGS PICS catalog site with published CNES and SDSU regions; its catalog center may lie outside either region."
 name str
 country str
 center_latitude float
@@ -13,7 +13,6 @@ altitude_m int
 landsat_wrs_2 str
 status str
   !options ["Active", "Inactive"]
-source_url str
 roi_1_name str
 roi_1_south float
   !condition ({.} >= -90 && {.} < {.roi_1_north})

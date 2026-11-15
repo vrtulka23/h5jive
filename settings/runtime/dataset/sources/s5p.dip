@@ -1,4 +1,3 @@
-# Repository root defaults to settings/; set the host path in overrides.dip.
 dataset_sources[s5p] : dataset_source
   name = "Sentinel-5P TROPOMI L1B"
   root = "./"

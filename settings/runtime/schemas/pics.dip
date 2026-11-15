@@ -16,13 +16,13 @@ ceos_west float
 ceos_east float
   !condition ({.} <= 180 && {.} > {.ceos_west})
 cnes_south float
-  !condition ({.} >= -90 && {.} < {.cnes_north})
+  !condition ({.} >= {.ceos_south} && {.} < {.cnes_north})
 cnes_north float
-  !condition ({.} <= 90 && {.} > {.cnes_south})
+  !condition ({.} <= {.ceos_north} && {.} > {.cnes_south})
 cnes_west float
-  !condition ({.} >= -180 && {.} < {.cnes_east})
+  !condition ({.} >= {.ceos_west} && {.} < {.cnes_east})
 cnes_east float
-  !condition ({.} <= 180 && {.} > {.cnes_west})
+  !condition ({.} <= {.ceos_east} && {.} > {.cnes_west})
 usable_km_1 int
   !condition ({.} > 0)
 usable_km_2 int
@@ -32,5 +32,3 @@ altitude_m int
 landsat_wrs_2 str
 status str
   !options ["Active", "Inactive"]
-source_url str
-  ?descr "USGS EROS Cal/Val Catalog site page"

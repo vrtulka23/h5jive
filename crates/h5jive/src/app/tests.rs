@@ -4,9 +4,9 @@ use super::{
     heatmap_visible_bounds, heatmap_zoom_limits, human_bytes, load_heatmap_overview,
     load_heatmap_tile, load_map_data, load_profile, overview_sample_index, parse_input_spec,
     parse_profile_indexes, parse_startup_args, resolve_startup_selection, scan_heatmap_range,
-    AttributeValue, ColormapPreset, File, GeoViewControls, MapViewport, PinnedDefault, ProfileBin,
-    ProfileData, ProfileLine, ProfileSlice, ScanFilter, Selection, Settings, SpecialValue,
-    TableSlice, ThemeColors, ValueVisibility, ViewMode, WorkspaceMode,
+    settings_help, AttributeValue, ColormapPreset, File, GeoViewControls, MapViewport,
+    PinnedDefault, ProfileBin, ProfileData, ProfileLine, ProfileSlice, ScanFilter, Selection,
+    Settings, SpecialValue, TableSlice, ThemeColors, ValueVisibility, ViewMode, WorkspaceMode,
 };
 use h5jive_data::ScanDirectionClass;
 use scinumtools3::Project;
@@ -134,6 +134,26 @@ fn dataset_formats_load_from_dipl() {
     assert_eq!(scan.forward_values, [0]);
     assert_eq!(scan.backward_values, [1]);
     assert_eq!(scan.default_filter, ScanFilter::Forward);
+    let project =
+        Project::load(Path::new(env!("CARGO_MANIFEST_DIR")).join("../../settings/runtime/DIPfile"))
+            .unwrap();
+    assert_eq!(
+        project
+            .node("dataset_formats[gome2_l1b]")
+            .unwrap()
+            .metadata("descr")
+            .unwrap()
+            .as_deref(),
+        Some("MetOp-A/B/C GOME-2 Level 1B share the same geolocation layout.")
+    );
+}
+
+#[test]
+fn settings_help_shows_dipl_descriptions_and_source_urls() {
+    let source = settings_help("dataset_sources[gome].product_regex").unwrap();
+    assert!(source.contains("Description: Regex matched against the relative path"));
+    let site = settings_help("pics[algeria_3]").unwrap();
+    assert!(site.contains("Source: https://calval.cr.usgs.gov/apps/algeria-3"));
 }
 
 #[test]
@@ -419,6 +439,46 @@ fn pics_catalog_loads_reference_and_additional_regions() {
         }
         assert!(site.source_url.starts_with("https://"));
     }
+    let project =
+        Project::load(Path::new(env!("CARGO_MANIFEST_DIR")).join("../../settings/runtime/DIPfile"))
+            .unwrap();
+    let site = project.node("pics[algeria_3]").unwrap();
+    assert_eq!(
+        site.metadata("url").unwrap().as_deref(),
+        Some("https://calval.cr.usgs.gov/apps/algeria-3")
+    );
+    assert!(project.node("pics[algeria_3].source_url").is_err());
+}
+
+#[test]
+fn pics_schema_rejects_cnes_region_outside_ceos_region() {
+    let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../settings/runtime");
+    let temporary = std::env::temp_dir().join(format!(
+        "h5jive-pics-schema-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    copy_settings_for_schema_test(&source, &temporary);
+    let catalog = temporary.join("pics/ceos_reference.dip");
+    let original = std::fs::read_to_string(&catalog).unwrap();
+    assert!(Project::load(temporary.join("DIPfile")).is_ok());
+    for (valid, invalid) in [
+        ("cnes_south = 30.22", "cnes_south = 29.70"),
+        ("cnes_north = 30.42", "cnes_north = 30.80"),
+        ("cnes_west = 7.56", "cnes_west = 7.10"),
+        ("cnes_east = 7.76", "cnes_east = 8.20"),
+    ] {
+        assert!(original.contains(valid));
+        std::fs::write(&catalog, original.replacen(valid, invalid, 1)).unwrap();
+        assert!(
+            Project::load(temporary.join("DIPfile")).is_err(),
+            "DIPL accepted {invalid}"
+        );
+    }
+    std::fs::remove_dir_all(temporary).unwrap();
 }
 
 #[test]

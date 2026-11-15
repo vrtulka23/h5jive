@@ -1,4 +1,3 @@
-# Repository root defaults to settings/; set the host path in overrides.dip.
 dataset_sources[gome2] : dataset_source
   name = "GOME-2 L1B"
   root = "./"

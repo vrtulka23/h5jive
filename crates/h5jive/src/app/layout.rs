@@ -866,22 +866,6 @@ impl App {
                 open = self.dataset_browser.draw(
                     ui,
                     &self.settings.dataset_sources,
-                    &self
-                        .settings
-                        .pics_sites
-                        .iter()
-                        .enumerate()
-                        .flat_map(|(site_index, site)| {
-                            site.regions
-                                .iter()
-                                .enumerate()
-                                .map(move |(region_index, region)| OverpassArea {
-                                    key: format!("{site_index}/{region_index}"),
-                                    label: format!("{} / {}", site.name, region.name),
-                                    bounds: region.bounds.map(f64::from),
-                                })
-                        })
-                        .collect::<Vec<_>>(),
                     self.pending_browser_b.as_deref(),
                     &self.settings.palette,
                     browser_height,

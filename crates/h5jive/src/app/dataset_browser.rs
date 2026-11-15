@@ -1,37 +1,11 @@
 use super::*;
 use std::{
-    collections::{BTreeSet, HashMap},
     path::Path,
     sync::{
         atomic::{AtomicBool, Ordering},
         Arc,
     },
 };
-
-fn count_overpass_hits(
-    results: &HashMap<String, Result<Vec<OverpassGroupResult>, String>>,
-) -> usize {
-    results
-        .values()
-        .filter(|result| {
-            result
-                .as_ref()
-                .is_ok_and(|groups| groups.iter().any(|group| group.hit))
-        })
-        .count()
-}
-
-fn overpass_group_names(
-    results: &HashMap<String, Result<Vec<OverpassGroupResult>, String>>,
-) -> Vec<String> {
-    results
-        .values()
-        .filter_map(|result| result.as_ref().ok())
-        .flat_map(|groups| groups.iter().map(|group| group.name.clone()))
-        .collect::<BTreeSet<_>>()
-        .into_iter()
-        .collect()
-}
 
 struct SourceIndex {
     products: Vec<Product>,
@@ -45,23 +19,6 @@ struct SourceIndex {
     last_availability_check: Option<std::time::Instant>,
     metadata_job: Option<mpsc::Receiver<(String, Result<[String; 4], String>)>>,
     metadata_status: Option<String>,
-    overpass_area_key: Option<String>,
-    overpass_running_area_key: Option<String>,
-    overpass_results: HashMap<String, Result<Vec<OverpassGroupResult>, String>>,
-    overpass_groups: Vec<String>,
-    overpass_cache_receiver: Option<
-        mpsc::Receiver<(
-            String,
-            HashMap<String, Result<Vec<OverpassGroupResult>, String>>,
-        )>,
-    >,
-    overpass_receiver: Option<mpsc::Receiver<OverpassMessage>>,
-    overpass_cancel: Option<Arc<AtomicBool>>,
-    overpass_done: usize,
-    overpass_total: usize,
-    overpass_hits: usize,
-    overpass_cancelled: bool,
-    overpass_error: Option<String>,
 }
 
 pub(super) struct DatasetBrowser {
@@ -79,9 +36,6 @@ pub(super) struct DatasetBrowser {
     sort_descending: bool,
     dirty: bool,
     product_footer_height: f32,
-    selected_area: usize,
-    only_overpasses: bool,
-    selected_group: usize,
 }
 
 impl DatasetBrowser {
@@ -109,18 +63,6 @@ impl DatasetBrowser {
                     last_availability_check: None,
                     metadata_job: None,
                     metadata_status: None,
-                    overpass_area_key: None,
-                    overpass_running_area_key: None,
-                    overpass_results: HashMap::new(),
-                    overpass_groups: Vec::new(),
-                    overpass_cache_receiver: None,
-                    overpass_receiver: None,
-                    overpass_cancel: None,
-                    overpass_done: 0,
-                    overpass_total: 0,
-                    overpass_hits: 0,
-                    overpass_cancelled: false,
-                    overpass_error: None,
                 }
             })
             .collect();
@@ -139,9 +81,6 @@ impl DatasetBrowser {
             sort_descending: false,
             dirty: true,
             product_footer_height: 105.0,
-            selected_area: 0,
-            only_overpasses: false,
-            selected_group: 0,
         }
     }
 
@@ -153,10 +92,6 @@ impl DatasetBrowser {
                     Some("index")
                 } else if source.metadata_job.is_some() {
                     Some("metadata")
-                } else if source.overpass_receiver.is_some()
-                    || source.overpass_cache_receiver.is_some()
-                {
-                    Some("overpasses")
                 } else if source.availability_job.is_some() {
                     Some("source check")
                 } else {
@@ -168,70 +103,6 @@ impl DatasetBrowser {
 
     pub fn poll(&mut self, sources: &[DatasetSource]) {
         for (number, (index, config)) in self.sources.iter_mut().zip(sources).enumerate() {
-            if let Some(receiver) = &index.overpass_cache_receiver {
-                match receiver.try_recv() {
-                    Ok((key, results)) => {
-                        if index.overpass_area_key.as_deref() == Some(key.as_str()) {
-                            index.overpass_done = results.len();
-                            index.overpass_hits = count_overpass_hits(&results);
-                            index.overpass_total = index.products.len();
-                            index.overpass_groups = overpass_group_names(&results);
-                            index.overpass_results = results;
-                            if number == self.selected_source && !index.overpass_results.is_empty()
-                            {
-                                self.only_overpasses = true;
-                            }
-                            self.dirty = true;
-                        }
-                        index.overpass_cache_receiver = None;
-                    }
-                    Err(mpsc::TryRecvError::Disconnected) => index.overpass_cache_receiver = None,
-                    Err(mpsc::TryRecvError::Empty) => {}
-                }
-            }
-            if let Some(receiver) = &index.overpass_receiver {
-                loop {
-                    match receiver.try_recv() {
-                        Ok(OverpassMessage::Progress { done, total, hits }) => {
-                            index.overpass_done = done;
-                            index.overpass_total = total;
-                            index.overpass_hits = hits;
-                        }
-                        Ok(OverpassMessage::Finished {
-                            results,
-                            cancelled,
-                            cache_error,
-                        }) => {
-                            if index.overpass_area_key == index.overpass_running_area_key {
-                                index.overpass_done = results.len();
-                                index.overpass_hits = count_overpass_hits(&results);
-                                index.overpass_groups = overpass_group_names(&results);
-                                index.overpass_results = results;
-                                index.overpass_cancelled = cancelled;
-                                index.overpass_error = cache_error;
-                                if number == self.selected_source
-                                    && !index.overpass_results.is_empty()
-                                {
-                                    self.only_overpasses = true;
-                                }
-                                self.dirty = true;
-                            }
-                            index.overpass_running_area_key = None;
-                            index.overpass_receiver = None;
-                            index.overpass_cancel = None;
-                            self.dirty = true;
-                            break;
-                        }
-                        Err(mpsc::TryRecvError::Empty) => break,
-                        Err(mpsc::TryRecvError::Disconnected) => {
-                            index.overpass_receiver = None;
-                            index.overpass_cancel = None;
-                            index.overpass_cancelled = true;
-                            break;
-                        }
-                    }
-                }
-            }
             if let Some(job) = &index.metadata_job {
                 match job.try_recv() {
                     Ok((relative, Ok(fields))) => {
@@ -308,14 +179,6 @@ impl DatasetBrowser {
                             Ok((products, cache_error)) => {
                                 index.products = products;
                                 index.error = cache_error;
-                                index.overpass_area_key = None;
-                                index.overpass_cache_receiver = None;
-                                index.overpass_results.clear();
-                                index.overpass_groups.clear();
-                                if number == self.selected_source {
-                                    self.only_overpasses = false;
-                                    self.selected_group = 0;
-                                }
                                 if number == self.selected_source
                                     && self.selected_product.as_ref().is_some_and(|selected| {
                                         !index
@@ -375,68 +238,6 @@ impl DatasetBrowser {
         index.receiver = Some(receiver);
     }
 
-    fn check_overpasses(
-        &mut self,
-        source_number: usize,
-        source: &DatasetSource,
-        area: &OverpassArea,
-    ) {
-        let index = &mut self.sources[source_number];
-        if index.overpass_receiver.is_some() {
-            return;
-        }
-        let products = index.products.clone();
-        let source = source.clone();
-        let area = area.clone();
-        let area_key = area.key.clone();
-        let (sender, receiver) = mpsc::channel();
-        let cancel = Arc::new(AtomicBool::new(false));
-        let worker_cancel = Arc::clone(&cancel);
-        thread::spawn(move || scan_overpasses(&source, &products, &area, &sender, &worker_cancel));
-        index.overpass_area_key = Some(area_key.clone());
-        index.overpass_running_area_key = Some(area_key);
-        index.overpass_cache_receiver = None;
-        index.overpass_receiver = Some(receiver);
-        index.overpass_cancel = Some(cancel);
-        index.overpass_done = 0;
-        index.overpass_total = index.products.len();
-        index.overpass_hits = 0;
-        index.overpass_cancelled = false;
-        index.overpass_error = None;
-        self.dirty = true;
-    }
-
-    fn show_cached_area(
-        &mut self,
-        source_number: usize,
-        source: &DatasetSource,
-        area: &OverpassArea,
-    ) {
-        let index = &mut self.sources[source_number];
-        if index.overpass_area_key.as_deref() == Some(area.key.as_str()) {
-            return;
-        }
-        let source = source.clone();
-        let products = index.products.clone();
-        let area = area.clone();
-        let area_key = area.key.clone();
-        let (sender, receiver) = mpsc::channel();
-        thread::spawn(move || {
-            let results = cached_overpass_results(&source, &products, &area);
-            let _ = sender.send((area.key, results));
-        });
-        index.overpass_area_key = Some(area_key);
-        index.overpass_results.clear();
-        index.overpass_groups.clear();
-        index.overpass_cache_receiver = Some(receiver);
-        index.overpass_done = 0;
-        index.overpass_total = index.products.len();
-        index.overpass_hits = 0;
-        self.only_overpasses = false;
-        self.selected_group = 0;
-        self.dirty = true;
-    }
-
     fn read_selected_metadata(
         &mut self,
         source_number: usize,
@@ -473,31 +274,12 @@ impl DatasetBrowser {
             self.sort_column,
             self.sort_descending,
         );
-        if self.only_overpasses {
-            let selected_group = self
-                .selected_group
-                .checked_sub(1)
-                .and_then(|index| source.overpass_groups.get(index));
-            self.filtered.retain(|&position| {
-                source
-                    .overpass_results
-                    .get(&source.products[position].relative_path)
-                    .is_some_and(|result| {
-                        result.as_ref().is_ok_and(|groups| {
-                            groups.iter().any(|group| {
-                                group.hit && selected_group.is_none_or(|name| name == &group.name)
-                            })
-                        })
-                    })
-            });
-        }
     }
 
     pub fn draw(
         &mut self,
         ui: &Ui,
         sources: &[DatasetSource],
-        areas: &[OverpassArea],
         pending_b: Option<&Path>,
         palette: &Palette,
         height: f32,
@@ -537,8 +319,6 @@ impl DatasetBrowser {
                     if let Some(first) = sources.iter().position(visible) {
                         self.selected_source = first;
                         self.selected_product = None;
-                        self.only_overpasses = false;
-                        self.selected_group = 0;
                         self.dirty = true;
                     }
                 }
@@ -606,8 +386,6 @@ impl DatasetBrowser {
                     if clicked {
                         self.selected_source = number;
                         self.selected_product = None;
-                        self.only_overpasses = false;
-                        self.selected_group = 0;
                         self.dirty = true;
                     }
                 }
@@ -634,9 +412,6 @@ impl DatasetBrowser {
                 }
                 let source_number = self.selected_source;
                 let source = &sources[source_number];
-                if let Some(area) = areas.get(self.selected_area) {
-                    self.show_cached_area(source_number, source, area);
-                }
                 let index = &self.sources[source_number];
                 ui.text(&source.name);
                 ui.same_line();
@@ -714,82 +489,6 @@ impl DatasetBrowser {
                 }
                 if date_query(&self.date_search).is_none() {
                     ui.text_disabled("Date accepts digits, hyphens, or slashes.");
-                }
-                if !areas.is_empty() {
-                    ui.text("Overpass area");
-                    ui.same_line();
-                    let labels: Vec<&str> = areas.iter().map(|area| area.label.as_str()).collect();
-                    ui.set_next_item_width((ui.content_region_avail()[0] * 0.48).max(100.0));
-                    if ui.combo_simple_string("##overpass_area", &mut self.selected_area, &labels) {
-                        self.only_overpasses = false;
-                        self.selected_group = 0;
-                        self.dirty = true;
-                    }
-                    let area = &areas[self.selected_area.min(areas.len() - 1)];
-                    self.show_cached_area(source_number, source, area);
-                    if self.sources[source_number].overpass_receiver.is_none()
-                        && self.sources[source_number].available != Some(false)
-                        && !self.sources[source_number].scanning
-                    {
-                        ui.same_line();
-                        if ui.button(if self.sources[source_number].overpass_results.is_empty() {
-                            "Check overpasses"
-                        } else {
-                            "Refresh overpasses"
-                        }) {
-                            self.check_overpasses(source_number, source, area);
-                        }
-                    }
-                    if let Some(cancel) = &self.sources[source_number].overpass_cancel {
-                        ui.same_line();
-                        if ui.button("Cancel check") {
-                            cancel.store(true, Ordering::Relaxed);
-                        }
-                    }
-                    let index = &self.sources[source_number];
-                    if index.overpass_receiver.is_some() {
-                        ui.text(format!(
-                            "Checking {}/{} products · {} hits",
-                            index.overpass_done, index.overpass_total, index.overpass_hits
-                        ));
-                    } else if !index.overpass_results.is_empty() {
-                        let label = if index.overpass_cancelled {
-                            "Check stopped"
-                        } else {
-                            "Saved checks"
-                        };
-                        ui.text(format!(
-                            "{label}: {}/{} products · {} hits",
-                            index.overpass_done, index.overpass_total, index.overpass_hits
-                        ));
-                    }
-                    if !index.overpass_results.is_empty() {
-                        if index.overpass_groups.len() > 1 {
-                            let mut labels = vec!["Any group"];
-                            labels.extend(index.overpass_groups.iter().map(String::as_str));
-                            ui.set_next_item_width(180.0);
-                            if ui.combo_simple_string(
-                                "##overpass_group",
-                                &mut self.selected_group,
-                                &labels,
-                            ) {
-                                self.dirty = true;
-                            }
-                            ui.same_line();
-                        }
-                        let label = if self.only_overpasses {
-                            "Show all products"
-                        } else {
-                            "Show overpasses"
-                        };
-                        if ui.button(label) {
-                            self.only_overpasses = !self.only_overpasses;
-                            self.dirty = true;
-                        }
-                    }
-                    if let Some(error) = &self.sources[source_number].overpass_error {
-                        ui.text_wrapped(format!("Overpass cache: {error}"));
-                    }
                 }
                 self.rebuild_visible();
                 ui.separator();
@@ -890,27 +589,6 @@ impl DatasetBrowser {
                 if let Some(relative) = &self.selected_product {
                     let path = source.root.join(relative);
                     ui.text_wrapped(path.display().to_string());
-                    if let Some(result) = self.sources[source_number].overpass_results.get(relative)
-                    {
-                        match result {
-                            Ok(groups) => ui.text_disabled(format!(
-                                "Overpass: {}",
-                                groups
-                                    .iter()
-                                    .map(|group| format!(
-                                        "{} {}",
-                                        group.name,
-                                        if group.hit { "yes" } else { "no" }
-                                    ))
-                                    .collect::<Vec<_>>()
-                                    .join(" · ")
-                            )),
-                            Err(error) => ui.text_colored(
-                                [0.9, 0.3, 0.28, 1.0],
-                                format!("Overpass check: {error}"),
-                            ),
-                        }
-                    }
                     if ui.button("Open as A") {
                         open = Some((0, path.clone()));
                     }
@@ -1030,18 +708,6 @@ mod tests {
             last_availability_check: None,
             metadata_job: None,
             metadata_status: None,
-            overpass_area_key: None,
-            overpass_running_area_key: None,
-            overpass_results: HashMap::new(),
-            overpass_groups: Vec::new(),
-            overpass_cache_receiver: None,
-            overpass_receiver: None,
-            overpass_cancel: None,
-            overpass_done: 0,
-            overpass_total: 0,
-            overpass_hits: 0,
-            overpass_cancelled: false,
-            overpass_error: None,
         });
         browser.rebuild_visible();
         assert_eq!(browser.filtered.len(), 70_001);
@@ -1092,18 +758,6 @@ mod tests {
             last_availability_check: None,
             metadata_job: None,
             metadata_status: None,
-            overpass_area_key: None,
-            overpass_running_area_key: None,
-            overpass_results: HashMap::new(),
-            overpass_groups: Vec::new(),
-            overpass_cache_receiver: None,
-            overpass_receiver: None,
-            overpass_cancel: None,
-            overpass_done: 0,
-            overpass_total: 0,
-            overpass_hits: 0,
-            overpass_cancelled: false,
-            overpass_error: None,
         });
         for (label, name, date, orbit) in [
             ("all", "", "", ""),
@@ -1154,12 +808,7 @@ mod tests {
         ui.window("Dataset browser smoke")
             .size([1100.0, 700.0], Condition::Always)
             .build(|| {
-                let areas = [OverpassArea {
-                    key: "test".into(),
-                    label: "Test area".into(),
-                    bounds: [-1.0, -1.0, 1.0, 1.0],
-                }];
-                browser.draw(ui, &sources, &areas, None, &settings.palette, 640.0);
+                browser.draw(ui, &sources, None, &settings.palette, 640.0);
             });
     }
 

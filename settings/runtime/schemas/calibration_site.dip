@@ -1,4 +1,4 @@
-?descr "A sourced calibration or atmospheric reference location with one search region"
+?descr "Sourced calibration or reference location with one overpass search region; a regional search window does not define calibration pixels."
 name str
 country str
 category str
@@ -19,4 +19,3 @@ roi_east float
 status str
   !options ["Active", "Reference", "Historical"]
 notes str
-source_url str

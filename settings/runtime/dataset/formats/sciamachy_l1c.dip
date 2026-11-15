@@ -1,5 +1,5 @@
-# ENVISAT SCIAMACHY Level 1C bands use sibling observation and geodata groups.
 dataset_formats[sciamachy_l1c] : dataset_format
+  ?descr "ENVISAT SCIAMACHY Level 1C bands use sibling observation and geodata groups."
   name = "SCIAMACHY Level 1C"
   identification
     file_glob = "EN1_RPRO_SCI_____1C_*.nc"

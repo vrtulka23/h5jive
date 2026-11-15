@@ -1,5 +1,5 @@
-# MetOp-A/B/C GOME-2 Level 1B share the same geolocation layout.
 dataset_formats[gome2_l1b] : dataset_format
+  ?descr "MetOp-A/B/C GOME-2 Level 1B share the same geolocation layout."
   name = "GOME-2 Level 1B"
   identification
     file_glob = "*_gome.nc"

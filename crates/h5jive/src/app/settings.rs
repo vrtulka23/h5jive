@@ -190,6 +190,7 @@ pub(super) struct PicsSite {
 fn read_pics_sites(dip: &Project) -> Result<Vec<PicsSite>, Box<dyn std::error::Error>> {
     let mut sites = Vec::new();
     for (id, _) in dip.node("pics")?.entries()? {
+        let site_node = dip.node(&format!("pics[{id}]"))?;
         let key = |field: &str| format!("pics[{id}].{field}");
         let number = |field: &str| dip.node(&key(field))?.as_f64().map(|value| value as f32);
         let reference = dip.node(&key("ceos_west")).is_ok();
@@ -250,7 +251,12 @@ fn read_pics_sites(dip: &Project) -> Result<Vec<PicsSite>, Box<dyn std::error::E
             } else {
                 String::new()
             },
-            source_url: dip.node(&key("source_url"))?.as_string()?,
+            source_url: site_node.metadata("url")?.ok_or_else(|| {
+                std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    format!("missing ?url metadata for pics[{id}]"),
+                )
+            })?,
         });
     }
     sites.sort_by(|a, b| a.name.cmp(&b.name));
@@ -517,41 +523,57 @@ pub(super) struct Settings {
     pub(super) title: String,
     pub(super) palette: Palette,
 }
+fn load_runtime_project() -> Result<(Project, PathBuf), Box<dyn std::error::Error>> {
+    let local_project = std::path::Path::new("settings/runtime/DIPfile");
+    // An extracted release keeps its editable settings beside the executable.
+    let executable = std::env::current_exe()?;
+    // Windows canonicalize() and current_exe() add a \\?\ verbatim prefix
+    // that the SNT3 C++ loader cannot reopen after its MinGW std::filesystem::absolute
+    // misparses it as a relative path. dunce strips this prefix safely on Windows.
+    let executable = dunce::canonicalize(&executable).unwrap_or(executable);
+    let bundled = executable
+        .parent()
+        .map(|directory| directory.join("settings/DIPfile"));
+    let project = if let Some(settings_dir) = std::env::var_os("H5JIVE_SETTINGS_DIR") {
+        let directory = std::path::PathBuf::from(settings_dir);
+        let direct = directory.join("DIPfile");
+        if direct.exists() {
+            direct
+        } else {
+            directory.join("runtime/DIPfile")
+        }
+    } else if let Some(packaged) = packaged_settings_project(&executable)? {
+        packaged
+    } else if local_project.exists() {
+        local_project.to_path_buf()
+    } else if let Some(bundled) = bundled.filter(|path| path.exists()) {
+        bundled
+    } else {
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../settings/runtime/DIPfile")
+    };
+    let project = dunce::simplified(&project);
+    let override_path = project.parent().unwrap().join("overrides.dip");
+    if !override_path.exists() {
+        std::fs::write(&override_path, "# Local settings overrides\n")?;
+    }
+    Ok((Project::load(&project)?, project.to_path_buf()))
+}
+
+pub(super) fn settings_help(path: &str) -> Result<String, Box<dyn std::error::Error>> {
+    let (project, _) = load_runtime_project()?;
+    let node = project.node(path)?;
+    let mut help = path.to_owned();
+    for (key, label) in [("descr", "Description"), ("url", "Source")] {
+        if let Some(value) = node.metadata(key)? {
+            help.push_str(&format!("\n{label}: {value}"));
+        }
+    }
+    Ok(help)
+}
+
 impl Settings {
     pub(super) fn load() -> Result<Self, Box<dyn std::error::Error>> {
-        let local_project = std::path::Path::new("settings/runtime/DIPfile");
-        // An extracted release keeps its editable settings beside the executable.
-        let executable = std::env::current_exe()?;
-        // Windows canonicalize() and current_exe() add a \\?\ verbatim prefix
-        // that the SNT3 C++ loader cannot reopen after its MinGW std::filesystem::absolute
-        // misparses it as a relative path. dunce strips this prefix safely on Windows.
-        let executable = dunce::canonicalize(&executable).unwrap_or(executable);
-        let bundled = executable
-            .parent()
-            .map(|directory| directory.join("settings/DIPfile"));
-        let project = if let Some(settings_dir) = std::env::var_os("H5JIVE_SETTINGS_DIR") {
-            let directory = std::path::PathBuf::from(settings_dir);
-            let direct = directory.join("DIPfile");
-            if direct.exists() {
-                direct
-            } else {
-                directory.join("runtime/DIPfile")
-            }
-        } else if let Some(packaged) = packaged_settings_project(&executable)? {
-            packaged
-        } else if local_project.exists() {
-            local_project.to_path_buf()
-        } else if let Some(bundled) = bundled.filter(|path| path.exists()) {
-            bundled
-        } else {
-            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../settings/runtime/DIPfile")
-        };
-        let project = dunce::simplified(&project);
-        let override_path = project.parent().unwrap().join("overrides.dip");
-        if !override_path.exists() {
-            std::fs::write(&override_path, "# Local settings overrides\n")?;
-        }
-        let dip = Project::load(project)?;
+        let (dip, project) = load_runtime_project()?;
         let values = ViewerValues(&dip);
         let default_view = values.string("application.default_view")?;
         let default_view = ViewMode::from_key(&default_view)
