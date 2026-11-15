@@ -13,6 +13,9 @@
 H5Jive is a native desktop explorer for HDF5 and NetCDF data. Browse local
 products, inspect dataset metadata and statistics, and view tables, profiles,
 2D slices, 3D volumes, and geolocated satellite swaths on a map or globe.
+The Rust UI uses Dear ImGui. On Linux, H5Jive supports X11, including
+[SSH X11 forwarding](docs/src/getting-started.md#run-over-ssh-with-x11-forwarding)
+when the forwarded X server supports OpenGL.
 
 **Plugin Lab** is the third workspace mode. It hosts optional tools that reuse
 H5Jive's file access and visualizations. Try the bundled
@@ -23,7 +26,7 @@ the [Plugin Lab catalog](plugins/README.md).
 <p align="center">
   <a href="assets/view-globe.png"><img src="assets/readme-globe-teaser.jpg" width="620" alt="H5Jive globe view showing GOME-2 satellite radiance pixels over Earth, alongside the dataset tree and display controls" /></a>
 </p>
-<small>H5Jive globe view.</small>[^globe-credit]
+<p align="center"><small>H5Jive globe view · <a href="#screenshot-credit">data credit</a></small></p>
 
 ## Install
 
@@ -179,12 +182,11 @@ The optional Blue Marble map background is credited to
 The default Natural Earth map background uses
 [public-domain Natural Earth data](https://www.naturalearthdata.com/about/terms-of-use/).
 
+### Screenshot credit
+
+<small>The globe screenshot contains a modified excerpt of EUMETSAT Metop-B GOME-2 Level 1B data (2013). © EUMETSAT 2013. Data: <a href="https://creativecommons.org/licenses/by/4.0/">CC BY 4.0</a> (<a href="examples/satellite/LICENSE.md">sample licence details</a>). Map background: <a href="https://www.naturalearthdata.com/about/terms-of-use/">Natural Earth</a>.</small>
+
 H5Jive is maintained and released under the
 [MIT license](LICENSE).
 
 <small>AI tools assisted with parts of this project, and errors or inconsistencies may remain. Contributions and corrections are welcome: please <a href="https://github.com/vrtulka23/h5jive/issues">open an issue</a> or <a href="https://github.com/vrtulka23/h5jive/pulls">submit a pull request</a>.</small>
-
-[^globe-credit]: Screenshot contains a modified excerpt of EUMETSAT Metop-B
-    GOME-2 Level 1B data (2013). © EUMETSAT 2013. Data: [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/)
-    ([sample licence details](examples/satellite/LICENSE.md)). Map background:
-    [Natural Earth](https://www.naturalearthdata.com/about/terms-of-use/).
