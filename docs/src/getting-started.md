@@ -7,6 +7,13 @@ contain the executable and a runtime `settings/` directory. The installers
 verify the archive checksum and place the files in a user-owned directory.
 They preserve `settings/overrides.dip` when upgrading.
 
+The macOS DMGs are currently ad hoc signed and not Apple notarized. If macOS
+shows “Apple could not verify H5Jive is free of malware,” confirm that the DMG
+came from the [official release](https://github.com/vrtulka23/h5jive/releases/latest).
+After trying to open the app once, go to **System Settings → Privacy & Security**
+and select **Open Anyway**. This allows this app without disabling Gatekeeper
+system-wide. See [Apple's instructions](https://support.apple.com/en-us/102445).
+
 On macOS or Linux:
 
 ```sh

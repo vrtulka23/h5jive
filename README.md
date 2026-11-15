@@ -28,10 +28,16 @@ and a Linux AppImage. The Windows setup installs for the current
 user without an administrator password. On macOS, drag `H5Jive.app` from the disk image into
 `~/Applications`. On Linux, make the AppImage executable and run it. These
 packages keep DIPL settings and caches in your user directory; local
-`overrides.dip` values survive app upgrades. The macOS disk images are not yet
-Developer ID signed or notarized, so macOS may ask you to use **Open Anyway**
-in Privacy & Security when opening the app for the first time. If Linux lacks
-FUSE support, run the AppImage with `--appimage-extract-and-run`.
+`overrides.dip` values survive app upgrades.
+
+**Release signing:** The Windows installer and executable and the Linux
+AppImage are currently unsigned. The macOS app has an ad hoc signature but is
+not Developer ID signed or notarized. Windows may show a SmartScreen or
+"Unknown publisher" prompt; macOS may require **Open Anyway** in Privacy &
+Security on first launch. Linux may require you to mark the AppImage executable.
+Download from the [official release](https://github.com/vrtulka23/h5jive/releases/latest)
+and use the published checksums below to check the downloaded file. If Linux
+lacks FUSE support, run the AppImage with `--appimage-extract-and-run`.
 
 | System | Installer or app image | Portable archive |
 | --- | --- | --- |
