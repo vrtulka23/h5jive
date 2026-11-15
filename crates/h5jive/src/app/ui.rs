@@ -133,6 +133,17 @@ mod navigation_tests {
     use dear_app::imgui::{Condition, Context};
 
     #[test]
+    fn loading_indicator_stays_centered_as_label_width_changes() {
+        let center = [640.0, 15.0];
+        for width in [55.0, 180.0, 330.0] {
+            let (min, max) = loading_indicator_bounds(center, width);
+            assert_eq!((min[0] + max[0]) * 0.5, center[0]);
+            assert_eq!((min[1] + max[1]) * 0.5, center[1]);
+            assert_eq!(max[0] - min[0], width + 42.0);
+        }
+    }
+
+    #[test]
     fn selected_group_and_dataset_render_without_scope_errors() {
         let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../examples/arrays/space_demo.hdf5");
@@ -362,14 +373,19 @@ pub(super) fn draw_workspace_mode_icon(
     }
 }
 
-pub(super) fn draw_loading_indicator(ui: &Ui, top_right: [f32; 2], label: &str, palette: &Palette) {
+fn loading_indicator_bounds(center: [f32; 2], text_width: f32) -> ([f32; 2], [f32; 2]) {
+    let half_width = (text_width + 42.0) * 0.5;
+    (
+        [center[0] - half_width, center[1] - 12.5],
+        [center[0] + half_width, center[1] + 12.5],
+    )
+}
+
+pub(super) fn draw_loading_indicator(ui: &Ui, center: [f32; 2], label: &str, palette: &Palette) {
     let draw = ui.get_foreground_draw_list();
     let text_size = ui.calc_text_size(label);
-    let height = 25.0;
-    let width = text_size[0] + 42.0;
-    let min = [top_right[0] - width, top_right[1] - height * 0.5];
-    let max = [top_right[0], top_right[1] + height * 0.5];
-    let center = [min[0] + 16.0, top_right[1]];
+    let (min, max) = loading_indicator_bounds(center, text_size[0]);
+    let spinner_center = [min[0] + 16.0, center[1]];
     let rounding = ui.clone_style().frame_rounding();
     draw.add_rect(min, max, palette.panel)
         .rounding(rounding)
@@ -380,7 +396,7 @@ pub(super) fn draw_loading_indicator(ui: &Ui, top_right: [f32; 2], label: &str, 
         .thickness(1.5)
         .build();
     draw.add_text(
-        [min[0] + 32.0, top_right[1] - text_size[1] * 0.5],
+        [min[0] + 32.0, center[1] - text_size[1] * 0.5],
         palette.text,
         label,
     );
@@ -397,12 +413,12 @@ pub(super) fn draw_loading_indicator(ui: &Ui, top_right: [f32; 2], label: &str, 
         ];
         draw.add_line(
             [
-                center[0] + direction[0] * 5.0,
-                center[1] + direction[1] * 5.0,
+                spinner_center[0] + direction[0] * 5.0,
+                spinner_center[1] + direction[1] * 5.0,
             ],
             [
-                center[0] + direction[0] * 9.0,
-                center[1] + direction[1] * 9.0,
+                spinner_center[0] + direction[0] * 9.0,
+                spinner_center[1] + direction[1] * 9.0,
             ],
             color,
         )

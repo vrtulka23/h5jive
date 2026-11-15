@@ -429,6 +429,13 @@ impl App {
                     }
                 }
             }
+            if data.preview {
+                draw.add_text(
+                    [cursor[0] + 12.0, cursor[1] + 12.0],
+                    palette.text,
+                    "Sampled preview · refining",
+                );
+            }
         }
         let mut hovered_pics = false;
         if options.show_pics {
@@ -599,6 +606,7 @@ impl App {
         }
         if changes.refresh_data {
             self.map_job = None;
+            self.map_load_generation.fetch_add(1, Ordering::Relaxed);
         }
         self.globe_footer_height = (ui.cursor_pos_y() - content_start_y - area[1]).max(1.0);
     }

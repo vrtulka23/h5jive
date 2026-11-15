@@ -318,10 +318,26 @@ fn sample_spatial_plane(
     width: usize,
     spectral: usize,
 ) -> Result<Region, String> {
-    let rows_per_read = (1_000_000 / width).max(1);
+    sample_spatial_plane_with_cancel(file, path, shape, time, rows, width, spectral, &|| false)
+}
+
+fn sample_spatial_plane_with_cancel(
+    file: &File,
+    path: &str,
+    shape: &[usize],
+    time: usize,
+    rows: usize,
+    width: usize,
+    spectral: usize,
+    cancelled: &dyn Fn() -> bool,
+) -> Result<Region, String> {
+    let rows_per_read = (1_000_000 / width).clamp(1, 512);
     let mut data = Vec::with_capacity(rows * width);
     let mut fill_value = None;
     for first in (0..rows).step_by(rows_per_read) {
+        if cancelled() {
+            return Err("Map loading cancelled".into());
+        }
         let count_rows = (rows - first).min(rows_per_read);
         let (start, count) = if shape.len() == 4 {
             (
@@ -387,6 +403,115 @@ pub(crate) fn load_map_data_with_batch_limit(
     max_points: usize,
     batch_limit: usize,
 ) -> Result<MapData, String> {
+    load_map_data_inner(
+        file,
+        path,
+        shape,
+        geolocation,
+        time,
+        spectral,
+        max_points,
+        batch_limit,
+        None,
+        false,
+    )
+}
+
+pub(crate) fn load_map_preview(
+    file: &File,
+    path: &str,
+    shape: &[usize],
+    geolocation: &Geolocation,
+    time: Option<usize>,
+    spectral: usize,
+    max_points: usize,
+) -> Result<MapData, String> {
+    load_map_data_inner(
+        file,
+        path,
+        shape,
+        geolocation,
+        time,
+        spectral,
+        max_points,
+        250_000,
+        None,
+        true,
+    )
+}
+
+pub(crate) fn load_map_data_with_radiance(
+    file: &File,
+    path: &str,
+    shape: &[usize],
+    geolocation: &Geolocation,
+    time: Option<usize>,
+    spectral: usize,
+    max_points: usize,
+    radiance: &Region,
+) -> Result<MapData, String> {
+    load_map_data_inner(
+        file,
+        path,
+        shape,
+        geolocation,
+        time,
+        spectral,
+        max_points,
+        250_000,
+        Some(radiance),
+        false,
+    )
+}
+
+#[cfg(test)]
+pub(crate) fn read_map_radiance_plane(
+    file: &File,
+    path: &str,
+    shape: &[usize],
+    time: Option<usize>,
+    spectral: usize,
+) -> Result<Region, String> {
+    read_map_radiance_plane_with_cancel(file, path, shape, time, spectral, &|| false)
+}
+
+pub(crate) fn read_map_radiance_plane_with_cancel(
+    file: &File,
+    path: &str,
+    shape: &[usize],
+    time: Option<usize>,
+    spectral: usize,
+    cancelled: &dyn Fn() -> bool,
+) -> Result<Region, String> {
+    let (rows, width) = if shape.len() >= 3 {
+        (shape[1], shape[2])
+    } else {
+        (shape[0], shape[1])
+    };
+    sample_spatial_plane_with_cancel(
+        file,
+        path,
+        shape,
+        time.unwrap_or(0),
+        rows,
+        width,
+        spectral,
+        cancelled,
+    )
+}
+
+fn load_map_data_inner(
+    file: &File,
+    path: &str,
+    shape: &[usize],
+    geolocation: &Geolocation,
+    time: Option<usize>,
+    spectral: usize,
+    max_points: usize,
+    batch_limit: usize,
+    radiance: Option<&Region>,
+    preview: bool,
+) -> Result<MapData, String> {
     if shape.iter().any(|&size| size == 0) {
         return Err("Empty dataset".into());
     }
@@ -433,7 +558,8 @@ pub(crate) fn load_map_data_with_batch_limit(
     let col_target = nx.min((budget_per_time / row_target).max(1));
     let rows = sampled_indexes(ny, row_target);
     let columns = sampled_indexes(nx, col_target);
-    let aggregate_footprints = (rows.len() < ny || columns.len() < nx)
+    let aggregate_footprints = !preview
+        && (rows.len() < ny || columns.len() < nx)
         && nx > 1
         && ny > 1
         && bounds_lat.is_some()
@@ -446,9 +572,10 @@ pub(crate) fn load_map_data_with_batch_limit(
     let mut range: Option<(f64, f64)> = None;
     for t in times {
         let spectral = spectral.min(shape[shape.len() - 1] - 1);
-        let all_values = aggregate_footprints
+        let all_values_owned = (aggregate_footprints && radiance.is_none())
             .then(|| sample_spatial_plane(file, path, shape, t, ny, nx, spectral))
             .transpose()?;
+        let all_values = radiance.or(all_values_owned.as_ref());
         let all_latitudes = aggregate_footprints
             .then(|| {
                 sample_spatial_plane(
@@ -495,7 +622,7 @@ pub(crate) fn load_map_data_with_batch_limit(
         } else {
             None
         };
-        let values_batch = batch_rows
+        let values_batch = (batch_rows && all_values.is_none())
             .then(|| sample_all_rows(file, path, shape, t, ny, nx, spectral))
             .transpose()?;
         let latitudes_batch = batch_rows
@@ -569,7 +696,7 @@ pub(crate) fn load_map_data_with_batch_limit(
         };
         for (row_index, &y) in rows.iter().enumerate() {
             // One contiguous row read per variable keeps both HDF5 and NetCDF access bounded.
-            let values = if let Some(batch) = all_values.as_ref().or(values_batch.as_ref()) {
+            let values = if let Some(batch) = all_values.or(values_batch.as_ref()) {
                 batch_row(batch, y, nx)
             } else {
                 sample_line(file, path, shape, t, y, nx, spectral)?
@@ -668,11 +795,13 @@ pub(crate) fn load_map_data_with_batch_limit(
                 {
                     continue;
                 }
-                let value = all_values
-                    .as_ref()
-                    .and_then(|all| {
-                        cell_average(all, nx, row_cells[row_index], column_cells[column_index])
+                let value = aggregate_footprints
+                    .then(|| {
+                        all_values.and_then(|all| {
+                            cell_average(all, nx, row_cells[row_index], column_cells[column_index])
+                        })
                     })
+                    .flatten()
                     .unwrap_or(values.data[x]);
                 let special = SpecialValue::from_value(value, values.fill_value);
                 if let Some(finite) = finite_value(value, values.fill_value) {
@@ -779,5 +908,6 @@ pub(crate) fn load_map_data_with_batch_limit(
         points,
         range,
         aggregated: aggregate_footprints,
+        preview,
     })
 }

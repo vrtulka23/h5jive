@@ -10,6 +10,14 @@ pub(crate) struct MapKey {
     pub(crate) max_points: usize,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct MapPlaneKey {
+    pub(crate) file: usize,
+    pub(crate) path: String,
+    pub(crate) time: usize,
+    pub(crate) spectral: usize,
+}
+
 pub(crate) struct MapPoint {
     pub(crate) latitude: f32,
     pub(crate) longitude: f32,
@@ -22,6 +30,7 @@ pub(crate) struct MapData {
     pub(crate) points: Vec<MapPoint>,
     pub(crate) range: Option<(f64, f64)>,
     pub(crate) aggregated: bool,
+    pub(crate) preview: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]

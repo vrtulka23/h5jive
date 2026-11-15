@@ -169,6 +169,53 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "manual preview and cached-plane measurement with a local S5P product"]
+    fn benchmark_s5p_preview_and_cached_map() {
+        let fixture = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(
+            "../../../mock_datasets/S5P/S5P_OFFL_L1B_RA_BD3_20260130T102501_20260130T120631_43003_03_030000_20260130T135257.nc",
+        );
+        if !fixture.exists() {
+            return;
+        }
+        let file = File::open(&fixture).unwrap();
+        let dataset = "/BAND3_RADIANCE/STANDARD_MODE/OBSERVATIONS/radiance";
+        let shape = file.dataset_info(dataset).unwrap().shape;
+        let geo = file.geolocation(dataset).unwrap().unwrap();
+        let preview_start = std::time::Instant::now();
+        let preview = load_map_preview(&file, dataset, &shape, &geo, Some(0), 248, 30_000).unwrap();
+        eprintln!(
+            "S5P sampled preview: {:.2}s, {} points",
+            preview_start.elapsed().as_secs_f64(),
+            preview.points.len()
+        );
+        let read_start = std::time::Instant::now();
+        let plane = read_map_radiance_plane(&file, dataset, &shape, Some(0), 248).unwrap();
+        eprintln!(
+            "S5P radiance plane read: {:.2}s",
+            read_start.elapsed().as_secs_f64()
+        );
+        for budget in [30_000, 120_000] {
+            let start = std::time::Instant::now();
+            let map = load_map_data_with_radiance(
+                &file,
+                dataset,
+                &shape,
+                &geo,
+                Some(0),
+                248,
+                budget,
+                &plane,
+            )
+            .unwrap();
+            eprintln!(
+                "S5P cached-plane map {budget} points: {:.2}s, {} output points",
+                start.elapsed().as_secs_f64(),
+                map.points.len()
+            );
+        }
+    }
+
+    #[test]
     fn batched_and_row_reads_produce_the_same_map() {
         let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../examples/satellite/gome2_band3_20130106_gome.nc");
@@ -190,7 +237,17 @@ mod tests {
         let rows =
             load_map_data_with_batch_limit(&file, dataset, &shape, &geo, Some(0), 32, 30_000, 0)
                 .unwrap();
+        let plane = read_map_radiance_plane(&file, dataset, &shape, Some(0), 32).unwrap();
+        assert!(
+            read_map_radiance_plane_with_cancel(&file, dataset, &shape, Some(0), 32, &|| true,)
+                .unwrap_err()
+                .contains("cancelled")
+        );
+        let cached =
+            load_map_data_with_radiance(&file, dataset, &shape, &geo, Some(0), 32, 30_000, &plane)
+                .unwrap();
         assert_eq!(batched.range, rows.range);
+        assert_eq!(batched.range, cached.range);
         assert_eq!(batched.points.len(), rows.points.len());
         for (left, right) in batched.points.iter().zip(&rows.points) {
             assert_eq!(left.latitude, right.latitude);
@@ -199,6 +256,14 @@ mod tests {
             assert_eq!(left.special, right.special);
             assert_eq!(left.footprint, right.footprint);
         }
+        for (left, right) in batched.points.iter().zip(&cached.points) {
+            assert_eq!(left.value.to_bits(), right.value.to_bits());
+            assert_eq!(left.footprint, right.footprint);
+        }
+        let preview = load_map_preview(&file, dataset, &shape, &geo, Some(0), 32, 500).unwrap();
+        assert!(preview.preview);
+        assert!(!preview.aggregated);
+        assert!(!preview.points.is_empty());
     }
 
     #[test]

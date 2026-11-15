@@ -49,11 +49,13 @@ cargo run -p h5jive --example generate_gome2_band3 -- \
 ## Performance checks
 
 The ignored release-mode tests measure product filtering with 70,000 rows and
-world-map loading from a local GOME-2 mock product:
+world-map loading from local GOME-2 and S5P products:
 
 ```sh
 cargo test -p h5jive --release benchmark_ -- --ignored --nocapture --test-threads=1
 ```
 
-The map benchmark skips itself if `../mock_datasets/GOME2/01/12/20130112080756Z_32344_gome.nc`
-is unavailable. Timings depend on the filesystem cache and storage device.
+The map benchmarks skip themselves when their files in `../mock_datasets/`
+are unavailable. The S5P preview benchmark compares the sampled first view,
+radiance-plane decoding, and map rebuilding from a decoded plane. Timings
+depend on the filesystem cache and storage device.

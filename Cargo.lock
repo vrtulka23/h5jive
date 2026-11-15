@@ -1180,6 +1180,7 @@ dependencies = [
  "hdf5-metno",
  "hdf5-metno-sys",
  "image",
+ "libc",
  "regex",
  "scinumtools3",
  "scinumtools3-build",

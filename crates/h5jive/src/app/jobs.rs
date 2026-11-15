@@ -35,13 +35,18 @@ impl App {
         if self.view == view {
             return;
         }
+        let keep_map_job = matches!(self.view, ViewMode::WorldMap | ViewMode::Globe)
+            && matches!(view, ViewMode::WorldMap | ViewMode::Globe);
         self.view_load_generation.fetch_add(1, Ordering::Relaxed);
         self.heatmap_tile_job = None;
         self.heatmap_overview_job = None;
         self.heatmap_range_job = None;
         self.volume_job = None;
         self.volume_raster_job = None;
-        self.map_job = None;
+        if !keep_map_job {
+            self.map_job = None;
+            self.map_load_generation.fetch_add(1, Ordering::Relaxed);
+        }
         self.heatmap_navigation_at = None;
         self.volume_navigation_at = None;
         self.view = view;
@@ -319,6 +324,15 @@ impl App {
         let details_changed = details_key != self.details_key;
         if details_changed {
             self.details_key = details_key;
+            let selected_raw_bytes = self.selection.as_ref().and_then(|selection| {
+                self.files
+                    .get(selection.file)?
+                    .dataset_info(&selection.path)
+                    .ok()
+                    .map(|info| info.byte_size)
+            });
+            self.resource_monitor
+                .set_selected_raw_bytes(selected_raw_bytes);
             self.details_default_pending = true;
             self.statistics_cache = None;
             self.statistics_job = None;
@@ -360,6 +374,8 @@ impl App {
             self.volume_raster_job = None;
             self.map_cache = None;
             self.map_job = None;
+            self.map_plane = None;
+            self.map_load_generation.fetch_add(1, Ordering::Relaxed);
             self.axis_names = self
                 .selection_key
                 .as_ref()

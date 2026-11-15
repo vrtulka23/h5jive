@@ -77,6 +77,16 @@ the special-value colors.
   Pixel style buttons apply immediately; color, opacity, PICS, and data
   controls apply when **Update** is clicked.
 
+For large geolocated datasets, the map and globe first show a labeled sampled
+preview, then replace it with the full map (area-averaged at reduced detail).
+Zoom changes reuse
+the decoded radiance plane in memory; selecting a different dataset releases
+that plane. A local disk cache also speeds up later visits to the same source,
+time, and spectral channel. It is limited to 512 MiB and invalidated when the
+source file changes. Set `H5JIVE_MAP_CACHE=off` to disable it, or set
+`H5JIVE_MAP_CACHE_DIR` to choose its location. The 3D view uses its own
+separate in-memory overview and refinement caches.
+
 Each plot view has Reset and zoom controls below the value buttons and above
 its legend. They act immediately. Reset restores the initial plot limits or
 camera position and orientation.

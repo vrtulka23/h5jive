@@ -140,6 +140,6 @@ mod tests {
                     &settings.palette,
                 );
             });
-        draw_loading_indicator(&ui, [790.0, 15.0], "Loading map + stats", &settings.palette);
+        draw_loading_indicator(&ui, [400.0, 15.0], "Loading map + stats", &settings.palette);
     }
 }

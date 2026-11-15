@@ -7,6 +7,7 @@ mod geo_texture;
 mod jobs;
 mod layout;
 mod model;
+mod monitor;
 #[path = "plugins/mod.rs"]
 mod plugins;
 mod settings;
@@ -21,6 +22,7 @@ use export::*;
 use file_drop::*;
 use geo_texture::*;
 use model::*;
+use monitor::*;
 use settings::*;
 use ui::*;
 use views::*;
@@ -81,6 +83,11 @@ enum PlotNavAction {
 
 #[derive(Clone, Copy)]
 struct VolumeRotation([f32; 4]);
+
+enum MapJobUpdate {
+    Preview(MapData),
+    Complete(Result<(MapData, Option<Arc<Region>>), String>),
+}
 
 struct App {
     files: Vec<File>,
@@ -156,7 +163,9 @@ struct App {
     volume_range_drag: Option<(usize, bool)>,
     volume_footer_height: f32,
     map_cache: Option<(MapKey, Result<MapData, String>)>,
-    map_job: Option<(MapKey, mpsc::Receiver<Result<MapData, String>>)>,
+    map_job: Option<(MapKey, mpsc::Receiver<MapJobUpdate>)>,
+    map_plane: Option<(MapPlaneKey, Arc<Region>)>,
+    map_load_generation: Arc<AtomicU64>,
     map_controls: GeoViewControls,
     globe_controls: GeoViewControls,
     selected_pics: usize,
@@ -194,6 +203,7 @@ struct App {
     show_about: bool,
     show_section_help: bool,
     settings: Settings,
+    resource_monitor: ResourceMonitor,
 }
 
 impl Application for App {
@@ -244,7 +254,12 @@ impl Application for App {
         let ui = frame.ui();
         let plot_ctx = frame.addons().implot().expect("ImPlot add-on enabled");
         let plot_ui = ui.implot(plot_ctx);
+        let frame_start = Instant::now();
         self.draw(ui, &plot_ui, plot_ctx);
+        self.resource_monitor.record_ui_time(frame_start.elapsed());
+        let _ = frame
+            .wake_handle()
+            .request_redraw_at(self.resource_monitor.next_sample_at());
         if self.pending_export.is_some() {
             let _ = frame.wake_handle().request_redraw_at(
                 std::time::Instant::now() + std::time::Duration::from_millis(80),
@@ -404,6 +419,8 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
         volume_footer_height: 260.0,
         map_cache: None,
         map_job: None,
+        map_plane: None,
+        map_load_generation: Arc::new(AtomicU64::new(0)),
         map_controls: GeoViewControls::new(settings.map_show_pics)
             .with_dummy_rgb(settings.palette.accent),
         globe_controls: GeoViewControls::new(settings.map_show_pics)
@@ -443,6 +460,7 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
         },
         sidebar_width: settings.sidebar_width,
         details_panel_fraction: settings.details_panel_fraction,
+        resource_monitor: ResourceMonitor::new(),
         show_about: false,
         show_section_help: false,
         settings,

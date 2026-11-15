@@ -89,6 +89,7 @@ impl App {
         let _item_spacing = ui.push_style_var(StyleVar::ItemSpacing([PANEL_GAP, PANEL_GAP]));
         let _frame_padding = ui.push_style_var(StyleVar::FramePadding(CONTROL_FRAME_PADDING));
         let _inner_spacing = ui.push_style_var(StyleVar::ItemInnerSpacing(CONTROL_INNER_SPACING));
+        self.resource_monitor.sample();
         let size = ui.io().display_size();
         let menu_height = ui
             .main_menu_bar(|| {
@@ -154,6 +155,24 @@ impl App {
                     if ui.menu_item("About H5Jive") {
                         self.show_about = true;
                     }
+                }
+                ui.same_line();
+                let mut label = self.resource_monitor.label(true);
+                let padding = ui.clone_style().window_padding()[0];
+                let mut x = ui.window_size()[0] - padding - ui.calc_text_size(&label)[0];
+                if x <= ui.cursor_pos_x() + 16.0 {
+                    label = self.resource_monitor.label(false);
+                    x = ui.window_size()[0] - padding - ui.calc_text_size(&label)[0];
+                }
+                if x > ui.cursor_pos_x() + 16.0 {
+                    ui.set_cursor_pos_x(x);
+                    ui.text_colored(palette.muted, label);
+                    ui.set_item_tooltip(
+                        "RAM: resident memory used by the whole H5Jive process (CPU memory).\n\
+                         UI: average time spent building a UI frame during the last second; excludes GPU rendering.\n\
+                         Raw: uncompressed byte size of the selected dataset, not its measured memory use.\n\
+                         Compare RAM before and after loading or processing a dataset to observe its impact.",
+                    );
                 }
                 ui.window_size()[1]
             })
@@ -536,7 +555,7 @@ impl App {
             }
             draw_loading_indicator(
                 ui,
-                [size[0] - 6.0, menu_height * 0.5],
+                [size[0] * 0.5, menu_height * 0.5],
                 &label,
                 &self.settings.palette,
             );
@@ -1238,6 +1257,8 @@ impl App {
         self.applied_volume = None;
         self.map_cache = None;
         self.map_job = None;
+        self.map_plane = None;
+        self.map_load_generation.fetch_add(1, Ordering::Relaxed);
         self.map_controls = GeoViewControls::new(self.settings.map_show_pics)
             .with_dummy_rgb(self.settings.palette.accent);
         self.globe_controls = GeoViewControls::new(self.settings.map_show_pics)
