@@ -109,6 +109,14 @@ native SNT3 build; otherwise the crate's bundled SNT3 source is used.
 You can also browse the system folders and set or replace input file A and B
 from the **Files** menu while the viewer is running; both file trees remain
 available in the sidebar.
+You can also drag one local file at a time over the H5Jive window. Two drop panels appear:
+drop on the left for File A or on the right for File B. If File A is empty,
+a file dropped on B waits until A is loaded. Native file drops are supported
+on macOS, Windows, and Linux X11. The current window library does not deliver
+file-drop events on Wayland; use **Files** → **Browse** there.
+For an H5Jive window forwarded over SSH, the dropped path must exist on the
+remote machine; dragging a file that exists only on your local computer does
+not transfer its contents.
 
 ## Try the examples
 

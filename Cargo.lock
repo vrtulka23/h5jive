@@ -1185,6 +1185,8 @@ dependencies = [
  "scinumtools3-build",
  "serde",
  "serde_json",
+ "winit",
+ "x11rb",
  "xcap 0.4.0",
  "xcap 0.9.8",
 ]

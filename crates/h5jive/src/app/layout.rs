@@ -242,6 +242,7 @@ impl App {
             self.draw_file_picker(ui);
             self.draw_global_loading_overlay(ui, size, top_menu_height);
             self.draw_global_error_overlay(ui, size, menu_height);
+            self.draw_file_drop_overlay(ui, size);
             return;
         }
         if self.workspace_mode != WorkspaceMode::DataInspector {
@@ -251,6 +252,7 @@ impl App {
             self.draw_file_picker(ui);
             self.draw_global_loading_overlay(ui, size, top_menu_height);
             self.draw_global_error_overlay(ui, size, menu_height);
+            self.draw_file_drop_overlay(ui, size);
             return;
         }
         let side = self.sidebar_width.clamp(
@@ -411,6 +413,65 @@ impl App {
         self.draw_export_dialog(ui);
         self.draw_global_loading_overlay(ui, size, top_menu_height);
         self.draw_global_error_overlay(ui, size, menu_height);
+        self.draw_file_drop_overlay(ui, size);
+    }
+
+    fn draw_file_drop_overlay(&self, ui: &Ui, size: [f32; 2]) {
+        if !self.file_drop.hovering {
+            return;
+        }
+        let draw = ui.get_foreground_draw_list();
+        draw.add_rect([0.0, 0.0], size, [0.0, 0.0, 0.0, 0.68])
+            .filled(true)
+            .build();
+        let margin = 24.0;
+        let gap = 16.0;
+        let half_width = ((size[0] - margin * 2.0 - gap) * 0.5).max(1.0);
+        let selected = drop_slot(self.file_drop.pointer_x, size[0]);
+        for slot in 0..2 {
+            let min = [margin + slot as f32 * (half_width + gap), margin];
+            let max = [min[0] + half_width, (size[1] - margin).max(margin + 1.0)];
+            let active = selected == Some(slot);
+            let fill = if active {
+                mix_color(
+                    self.settings.palette.panel,
+                    self.settings.palette.accent,
+                    0.30,
+                )
+            } else {
+                self.settings.palette.panel
+            };
+            draw.add_rect(min, max, fill)
+                .filled(true)
+                .rounding(12.0)
+                .build();
+            draw.add_rect(
+                min,
+                max,
+                if active {
+                    self.settings.palette.accent
+                } else {
+                    self.settings.palette.border
+                },
+            )
+            .rounding(12.0)
+            .thickness(if active { 3.0 } else { 1.0 })
+            .build();
+            let label = if slot == 0 {
+                "Drop as File A"
+            } else {
+                "Drop as File B"
+            };
+            let text_size = ui.calc_text_size(label);
+            draw.add_text(
+                [
+                    (min[0] + max[0] - text_size[0]) * 0.5,
+                    (min[1] + max[1] - text_size[1]) * 0.5,
+                ],
+                self.settings.palette.text,
+                label,
+            );
+        }
     }
 
     fn draw_global_loading_overlay(&self, ui: &Ui, size: [f32; 2], menu_height: f32) {
@@ -1031,6 +1092,16 @@ impl App {
             self.load_file_slot(slot);
         } else if cancel || !opened {
             self.file_picker = None;
+        }
+    }
+
+    pub(super) fn open_dropped_file(&mut self, slot: usize, path: PathBuf) {
+        self.file_path_inputs[slot] = path.display().to_string();
+        if slot == 1 && self.files.is_empty() {
+            self.pending_browser_b = Some(path);
+            self.file_error = Some("File B is queued. Load File A to open it.".into());
+        } else {
+            self.load_file_slot(slot);
         }
     }
 

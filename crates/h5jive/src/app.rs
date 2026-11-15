@@ -2,6 +2,7 @@ mod data_toolkit;
 mod dataset_browser;
 mod details;
 mod export;
+mod file_drop;
 mod geo_texture;
 mod jobs;
 mod layout;
@@ -17,6 +18,7 @@ mod volume_raycast;
 use crate::core::*;
 use dataset_browser::*;
 use export::*;
+use file_drop::*;
 use geo_texture::*;
 use model::*;
 use settings::*;
@@ -30,7 +32,8 @@ use dear_app::{
         FontSource, ListClipper, MouseCursor, StyleColor, StyleVar, TabItemFlags, TableColumnFlags,
         TableColumnStateFlags, TableFlags, TableOptions, TableSizingPolicy, Ui, WindowFlags,
     },
-    run as run_app, wgpu, AppConfig, Application, FrameContext, InitContext, RunError, Theme,
+    run as run_app, wgpu, AppConfig, Application, EventContext, FrameContext, InitContext,
+    PrepareFrameContext, RunError, Theme,
 };
 use dear_implot::{
     AxisFlags, Colormap, HeatmapPlot, ImPlotExt, ImPlotPoint, ItemFlags, Plot, PlotCond,
@@ -88,6 +91,7 @@ struct App {
     file_open_paths: [Option<PathBuf>; 2],
     pending_browser_b: Option<PathBuf>,
     file_picker: Option<FilePickerState>,
+    file_drop: FileDropState,
     export_dialog: Option<ExportDialog>,
     pending_export: Option<PendingExport>,
     view_rect: [f32; 4],
@@ -202,7 +206,36 @@ impl Application for App {
         Ok(())
     }
 
+    fn event(&mut self, context: &mut EventContext<'_>) -> Result<(), RunError> {
+        if context.window_id() != context.main_window().id() {
+            return Ok(());
+        }
+        match self
+            .file_drop
+            .handle_event(context.event(), context.window())
+        {
+            DropAction::Open(slot, path) => self.open_dropped_file(slot, path),
+            DropAction::UnknownPosition => {
+                self.file_error = Some("Could not determine the drop target. Use Browse A or Browse B to open the file.".into());
+            }
+            DropAction::None => {}
+        }
+        Ok(())
+    }
+
+    fn prepare_frame(&mut self, context: &mut PrepareFrameContext<'_>) -> Result<(), RunError> {
+        if self.file_drop.hovering {
+            self.file_drop.refresh_pointer(context.window());
+        }
+        Ok(())
+    }
+
     fn frame(&mut self, frame: &mut FrameContext<'_>) -> Result<(), RunError> {
+        if self.file_drop.hovering {
+            let _ = frame
+                .wake_handle()
+                .request_redraw_at(Instant::now() + Duration::from_millis(33));
+        }
         self.advance_export();
         self.ensure_earth_texture(frame.gpu());
         if self.view == ViewMode::Spatial3d {
@@ -314,6 +347,7 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
         file_open_paths: [None, None],
         pending_browser_b: None,
         file_picker: None,
+        file_drop: FileDropState::default(),
         export_dialog: None,
         pending_export: None,
         view_rect: [0.0; 4],
