@@ -20,45 +20,43 @@ H5Jive's file access and visualizations. Try the bundled
 [contributor guide](docs/src/plugin-lab.md) to build and share a plugin through
 the [Plugin Lab catalog](plugins/README.md).
 
-## Install for your account
+<p align="center">
+  <a href="assets/view-globe.png"><img src="assets/readme-globe-teaser.jpg" width="620" alt="H5Jive globe view showing GOME-2 satellite radiance pixels over Earth, alongside the dataset tree and display controls" /></a>
+</p>
+<p align="center"><small>Globe view with a modified excerpt of EUMETSAT Metop-B GOME-2 Level 1B data (2013). © EUMETSAT 2013 · <a href="https://creativecommons.org/licenses/by/4.0/">CC BY 4.0</a> · Map: <a href="https://www.naturalearthdata.com/about/terms-of-use/">Natural Earth</a>.</small></p>
 
-The install scripts fetch the latest [release](https://github.com/vrtulka23/h5jive/releases/latest),
-check its SHA-256 checksum, and install H5Jive in your user directory. They
-need no administrator rights and preserve local DIPL settings on upgrades.
-The macOS and Linux script requires `curl` and `tar`.
+## Install
 
-**macOS or Linux:**
+The recommended install scripts download the latest
+[release](https://github.com/vrtulka23/h5jive/releases/latest), check its
+SHA-256 checksum, and install H5Jive for your account. They need no
+administrator rights and preserve local settings when you upgrade.
+
+### macOS and Linux
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/vrtulka23/h5jive/main/install.sh | sh
 ```
 
-**Windows PowerShell:**
+This requires `curl` and `tar`. It places the launcher at
+`~/.local/bin/h5jive`; add `~/.local/bin` to your `PATH` if needed.
+
+### Windows PowerShell
 
 ```powershell
 curl.exe -fsSL https://raw.githubusercontent.com/vrtulka23/h5jive/main/install.ps1 -o "$env:TEMP\h5jive-install.ps1"
 powershell -NoProfile -ExecutionPolicy Bypass -File "$env:TEMP\h5jive-install.ps1"
 ```
 
-The Unix launcher is placed at `~/.local/bin/h5jive`; add that directory
-to `PATH` if needed. Windows installs to `%LOCALAPPDATA%\Programs\H5Jive`
-and adds that directory to the user `PATH`. Open a new terminal after installing.
-To install a specific release, pass `--version vX.Y.Z` to the Unix script or
-`-Version vX.Y.Z` to the PowerShell script.
+This installs to `%LOCALAPPDATA%\Programs\H5Jive` and adds that directory to
+your user `PATH`. Open a new terminal after installing.
 
-**Release signing:** The Windows installer and executable and the Linux
-AppImage are currently unsigned. The macOS builds have ad hoc signatures but
-are not Developer ID signed or notarized. Windows may show SmartScreen or
-"Unknown publisher"; macOS may require **Open Anyway** in Privacy & Security
-on first launch. Download from the official release above.
+For version selection and other options, see the
+[getting started guide](docs/src/getting-started.md).
 
-### Manual downloads
+### Manual packages
 
-The same release also provides a Windows setup `.exe`, macOS DMGs, a Linux
-AppImage, and portable archives for manual installation. On macOS, drag
-`H5Jive.app` from the DMG into `~/Applications`. On Linux, mark the AppImage
-executable before running it; if FUSE is unavailable, use
-`--appimage-extract-and-run`.
+Prefer to install manually? Download a package from the same release:
 
 | System | Installer or app image | Portable archive |
 | --- | --- | --- |
@@ -67,40 +65,36 @@ executable before running it; if FUSE is unavailable, use
 | macOS Apple Silicon | [DMG](https://github.com/vrtulka23/h5jive/releases/latest/download/h5jive-macos-aarch64.dmg) | [tar.gz](https://github.com/vrtulka23/h5jive/releases/latest/download/h5jive-macos-aarch64.tar.gz) |
 | macOS Intel | [DMG](https://github.com/vrtulka23/h5jive/releases/latest/download/h5jive-macos-x86_64.dmg) | [tar.gz](https://github.com/vrtulka23/h5jive/releases/latest/download/h5jive-macos-x86_64.tar.gz) |
 
-For manual downloads, use
-[SHA256SUMS](https://github.com/vrtulka23/h5jive/releases/latest/download/SHA256SUMS)
-to check the file.
+Use [SHA256SUMS](https://github.com/vrtulka23/h5jive/releases/latest/download/SHA256SUMS)
+to check a manual download. On macOS, drag `H5Jive.app` from the DMG into
+`~/Applications`. On Linux, mark the AppImage executable before running it;
+if FUSE is unavailable, use `--appimage-extract-and-run`.
 
-To uninstall on macOS or Linux, run:
+### First launch and signing
+
+The Windows installer and executable and the Linux AppImage are currently
+unsigned. The macOS builds have ad hoc signatures but are not Developer ID
+signed or notarized. Windows may show SmartScreen or "Unknown publisher";
+macOS may require **Open Anyway** in Privacy & Security on first launch.
+Download only from the official release linked above.
+
+### Uninstall
+
+On macOS or Linux:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/vrtulka23/h5jive/main/install.sh | sh -s -- --uninstall
 ```
 
-On Windows, run:
+In Windows PowerShell:
 
 ```powershell
 curl.exe -fsSL https://raw.githubusercontent.com/vrtulka23/h5jive/main/install.ps1 -o "$env:TEMP\h5jive-install.ps1"
 powershell -NoProfile -ExecutionPolicy Bypass -File "$env:TEMP\h5jive-install.ps1" -Uninstall
 ```
 
-Uninstall removes the executable and its bundled libraries; it retains
-`settings/` so local dataset paths are available on reinstall.
-
-Each release archive also contains the executable and a `settings/` directory
-for manual installation. DIPL reads those settings at runtime. Edit
-`settings/overrides.dip` to point registered datasets at directories on your
-machine; the installer preserves this file during upgrades. For example:
-
-```text
-dataset_sources[gome].root = "/data/GOME"
-dataset_sources[gome2].root = "/data/GOME2"
-```
-
-Use forward slashes in Windows paths, such as `D:/satellite/GOME`. Dataset
-sources with missing roots remain visible and are marked unavailable.
-See [settings and data formats](docs/src/settings-and-formats.md) for adding
-sources, formats, tags, and product discovery rules.
+Uninstall removes the executable and bundled libraries. It keeps `settings/`
+so your dataset paths are available if you reinstall.
 
 ## Run
 
@@ -120,6 +114,22 @@ The first Plugin Lab tool compares two files by path, object kind, dataset
 shape and datatype, and group or dataset attributes. The
 [exploring data guide](docs/src/exploring-data.md) explains the available views
 and controls.
+
+## Configure data sources
+
+DIPL reads the installed `settings/` directory at runtime. Edit
+`settings/overrides.dip` to point registered datasets at directories on your
+machine; the installer preserves this file during upgrades. For example:
+
+```text
+dataset_sources[gome].root = "/data/GOME"
+dataset_sources[gome2].root = "/data/GOME2"
+```
+
+Use forward slashes in Windows paths, such as `D:/satellite/GOME`. Dataset
+sources with missing roots remain visible and are marked unavailable. See
+[settings and data formats](docs/src/settings-and-formats.md) for adding
+sources, formats, tags, and product discovery rules.
 
 ## Build from source
 
