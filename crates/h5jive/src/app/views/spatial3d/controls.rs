@@ -73,14 +73,14 @@ impl App {
                 self.volume_pan = [0.0, 0.0];
             }
             ui.table_next_column();
-            let pending = self.draft_volume != self.applied_volume
+            let pending = DraftPair::new(&self.draft_volume, &mut self.applied_volume).pending()
                 || self.draft_volume_opacity != self.volume_opacity
                 || self.draft_volume_log_scale != self.volume_log_scale;
             let special_height = 2.0 * 26.0 + 24.0 + 2.0 * ui.clone_style().item_spacing()[1];
             let update_height = self.settings.update_button_height.max(special_height + 4.0);
             if draw_update_button_with_height(ui, &self.settings, pending, update_height) {
-                let slice_changed = self.applied_volume != self.draft_volume;
-                self.applied_volume = self.draft_volume.clone();
+                let slice_changed =
+                    DraftPair::new(&self.draft_volume, &mut self.applied_volume).apply();
                 self.volume_opacity = self.draft_volume_opacity;
                 self.volume_log_scale = self.draft_volume_log_scale;
                 if slice_changed {
@@ -109,6 +109,12 @@ impl App {
             ) {
                 slice.set_hidden(hidden_enabled, self.settings.pinned_default, shape);
             }
+            item_tip(
+                ui,
+                self.settings.tutorial_tips,
+                "",
+                "Pin one dimension to inspect a 3D slice of the volume.",
+            );
         }
         let visible_count = slice.visible_count();
         let labels = axis_option_labels(&self.axis_names, shape);
@@ -140,6 +146,12 @@ impl App {
                 if ui.combo_simple_string(format!("##volume_axis_{slot}"), &mut selected, &labels) {
                     assign_volume_axis(&mut slice, slot, selected);
                 }
+                item_tip(
+                    ui,
+                    self.settings.tutorial_tips,
+                    "",
+                    "Choose which dataset dimension maps to this view axis.",
+                );
                 ui.table_next_column();
                 if hidden_slot {
                     let hidden = slice.hidden.unwrap();
@@ -147,6 +159,12 @@ impl App {
                     let mut index = slice.pinned.min(max as usize) as i32;
                     ui.set_next_item_width(ui.content_region_avail()[0].max(80.0));
                     ui.slider("##volume_pin", 0, max, &mut index);
+                    item_tip(
+                        ui,
+                        self.settings.tutorial_tips,
+                        "",
+                        "Choose the fixed index of the hidden dimension.",
+                    );
                     slice.pinned = index as usize;
                 } else {
                     let axis = slice.axes[slot].unwrap();
@@ -164,19 +182,30 @@ impl App {
         self.draft_volume = Some(slice);
         let mut opacity_position = self.draft_volume_opacity.sqrt();
         let available = ui.content_region_avail()[0];
-        let label_width = ui.calc_text_size("Opacity 0.000")[0];
+        let label_width = ui.calc_text_size("Normal opacity 0.000")[0];
         let log_width = ui.calc_text_size("Log scale")[0] + 24.0;
         ui.set_next_item_width((available - label_width - log_width - 24.0).max(80.0));
         ui.slider_config("##volume_opacity", 0.0, 1.0)
             .try_display_format(" ")
             .expect("valid opacity format")
             .build(&mut opacity_position);
+        item_tip(
+            ui,
+            self.settings.tutorial_tips,
+            "",
+            "Fade ordinary voxels; fill and other special values stay visible.",
+        );
         self.draft_volume_opacity = opacity_from_slider(opacity_position);
         ui.same_line();
-        ui.text(format!("Opacity {:.3}", self.draft_volume_opacity));
+        ui.text(format!("Normal opacity {:.3}", self.draft_volume_opacity));
         ui.same_line();
         ui.checkbox("Log scale", &mut self.draft_volume_log_scale);
-        ui.set_item_tooltip("Signed logarithmic scaling keeps zero and negative values visible.");
+        item_tip(
+            ui,
+            self.settings.tutorial_tips,
+            "Signed logarithmic scaling keeps zero and negative values visible.",
+            "Use this when small values are hard to see beside large ones.",
+        );
     }
 
     fn draw_volume_projection_buttons(&mut self, ui: &Ui, width: f32) {
@@ -199,6 +228,12 @@ impl App {
                     self.volume_axis_corner = projection.axis_corner();
                     self.volume_projection = Some(projection);
                 }
+                item_tip(
+                    ui,
+                    self.settings.tutorial_tips,
+                    "",
+                    "Choose a preset view direction; drag the volume to rotate freely.",
+                );
                 if self.volume_projection == Some(projection) {
                     ui.get_window_draw_list()
                         .add_rect(
@@ -270,7 +305,12 @@ impl App {
             ui.set_mouse_cursor(Some(MouseCursor::ResizeEW));
         }
         if hovered {
-            ui.set_item_tooltip(format!("Visible indexes: {start} through {end}"));
+            item_tip(
+                ui,
+                self.settings.tutorial_tips,
+                &format!("Visible indexes: {start} through {end}"),
+                "Drag either handle to crop the displayed range.",
+            );
         }
         let control_bg = ui.style_color(StyleColor::FrameBg);
         let grab = ui.style_color(StyleColor::SliderGrab);

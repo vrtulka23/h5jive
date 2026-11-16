@@ -128,7 +128,8 @@ pub(crate) fn load_heatmap_overview(
     slice: &TableSlice,
     grid: [usize; 2],
 ) -> Result<HeatmapImage, String> {
-    load_heatmap_overview_with_cancel(file, path, shape, slice, grid, &|| false)
+    let bounds = [0, slice.rows(shape), 0, slice.columns(shape)];
+    load_heatmap_overview_with_cancel(file, path, shape, slice, bounds, grid, &|| false)
 }
 
 pub(crate) fn load_heatmap_overview_with_cancel(
@@ -136,16 +137,21 @@ pub(crate) fn load_heatmap_overview_with_cancel(
     path: &str,
     shape: &[usize],
     slice: &TableSlice,
+    bounds: [usize; 4],
     grid: [usize; 2],
     cancelled: &dyn Fn() -> bool,
 ) -> Result<HeatmapImage, String> {
     let rows = slice.rows(shape);
     let columns = slice.columns(shape);
+    let [r0, r1, c0, c1] = bounds;
+    if r0 >= r1 || c0 >= c1 || r1 > rows || c1 > columns || grid.contains(&0) {
+        return Err("Invalid 2D overview bounds".into());
+    }
     let sample_rows = (0..grid[0])
-        .map(|bin| overview_sample_index(bin, rows, grid[0]))
+        .map(|bin| r0 + overview_sample_index(bin, r1 - r0, grid[0]))
         .collect::<Vec<_>>();
     let sample_columns = (0..grid[1])
-        .map(|bin| overview_sample_index(bin, columns, grid[1]))
+        .map(|bin| c0 + overview_sample_index(bin, c1 - c0, grid[1]))
         .collect::<Vec<_>>();
     let mut values = vec![0.0; grid[0] * grid[1]];
     let mut plotted = vec![0.0; values.len()];
@@ -153,7 +159,7 @@ pub(crate) fn load_heatmap_overview_with_cancel(
     // Read only the rows represented in the overview. Large compressed datasets
     // may store one whole scanline per chunk, so reading skipped rows still
     // decompresses their chunks even when none of their values are used.
-    let tile_columns = columns.min(65_536);
+    let tile_columns = (c1 - c0).min(65_536);
     let max_tile_rows = (65_536 / tile_columns).max(1);
     let mut first_row = 0;
     while first_row < sample_rows.len() {
@@ -167,11 +173,11 @@ pub(crate) fn load_heatmap_overview_with_cancel(
         {
             last_row += 1;
         }
-        for column_start in (0..columns).step_by(tile_columns) {
+        for column_start in (c0..c1).step_by(tile_columns) {
             if cancelled() {
                 return Err("2D loading cancelled".into());
             }
-            let column_end = (column_start + tile_columns).min(columns);
+            let column_end = (column_start + tile_columns).min(c1);
             let first_column = sample_columns.partition_point(|&column| column < column_start);
             let last_column = sample_columns.partition_point(|&column| column < column_end);
             if first_column == last_column {
@@ -210,7 +216,7 @@ pub(crate) fn load_heatmap_overview_with_cancel(
     let mut range = None;
     extend_finite_range(&mut range, &values, fill_value);
     Ok(HeatmapImage {
-        bounds: [0, rows, 0, columns],
+        bounds,
         grid,
         values,
         plotted,

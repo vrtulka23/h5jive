@@ -31,11 +31,11 @@ pub(super) fn parse_graphics_backend(key: &str) -> Option<wgpu::Backends> {
 pub(super) fn default_wgpu_backends(forwarded_x11: wgpu::Backends) -> wgpu::Backends {
     #[cfg(target_os = "linux")]
     {
-        // SSH forwards X11 windows, but Vulkan often cannot present to them.
+        // SSH forwards X11 windows. Allow the configured backends to try an
+        // adapter that the remote host can actually use for that display.
         let is_forwarded_x11 = env::var_os("WAYLAND_DISPLAY").is_none()
             && env::var("DISPLAY").is_ok_and(|display| {
-                env::var_os("SSH_CONNECTION").is_some()
-                    || display.starts_with("localhost:")
+                display.starts_with("localhost:")
                     || display.starts_with("127.0.0.1:")
                     || display.starts_with("[::1]:")
             });
@@ -453,6 +453,8 @@ impl ViewerValues<'_> {
 }
 
 pub(super) struct Settings {
+    pub(super) tutorial_tips: bool,
+    tutorial_override_path: PathBuf,
     pub(super) path_comparison_enabled: bool,
     pub(super) path_comparison_show_groups: bool,
     pub(super) value_comparison_enabled: bool,
@@ -614,6 +616,8 @@ impl Settings {
             .ok_or_else(|| format!("Appearance profile {profile_name} is not loaded"))?;
         let palette = profiles[active_profile].palette.clone();
         let settings = Self {
+            tutorial_tips: values.boolean("application.tutorial_tips")?,
+            tutorial_override_path: project.parent().unwrap().join("overrides.dip"),
             path_comparison_enabled: values.boolean("plugins.path_comparison_enabled")?,
             path_comparison_show_groups: values.boolean("plugins.path_comparison.show_groups")?,
             value_comparison_enabled: values.boolean("plugins.value_comparison_enabled")?,
@@ -713,6 +717,27 @@ impl Settings {
         };
         Ok(settings)
     }
+
+    pub(super) fn set_tutorial_tips(&mut self, enabled: bool) -> std::io::Result<()> {
+        write_tutorial_tip_override(&self.tutorial_override_path, enabled)?;
+        self.tutorial_tips = enabled;
+        Ok(())
+    }
+}
+
+fn write_tutorial_tip_override(path: &std::path::Path, enabled: bool) -> std::io::Result<()> {
+    const KEY: &str = "viewer.application.tutorial_tips";
+    let existing = std::fs::read_to_string(path)?;
+    let mut lines = existing
+        .lines()
+        .filter(|line| {
+            line.split_once('=')
+                .is_none_or(|(name, _)| name.trim() != KEY)
+        })
+        .map(str::to_owned)
+        .collect::<Vec<_>>();
+    lines.push(format!("{KEY} = {enabled}"));
+    std::fs::write(path, format!("{}\n", lines.join("\n")))
 }
 
 fn packaged_settings_project(
@@ -799,7 +824,32 @@ mod limit_tests {
 
 #[cfg(test)]
 mod package_tests {
-    use super::copy_packaged_settings;
+    use super::{copy_packaged_settings, write_tutorial_tip_override};
+
+    #[test]
+    fn tutorial_tip_choice_preserves_other_dipl_overrides() {
+        let path = std::env::temp_dir().join(format!(
+            "h5jive-tutorial-overrides-{}-{}.dip",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::write(&path, "# keep this\nviewer.appearance.profile = \"light\"\nviewer.application.tutorial_tips = true\n").unwrap();
+        write_tutorial_tip_override(&path, false).unwrap();
+        write_tutorial_tip_override(&path, true).unwrap();
+        let result = std::fs::read_to_string(&path).unwrap();
+        assert!(result.contains("# keep this"));
+        assert!(result.contains("viewer.appearance.profile = \"light\""));
+        assert_eq!(
+            result
+                .matches("viewer.application.tutorial_tips = true")
+                .count(),
+            1
+        );
+        std::fs::remove_file(path).unwrap();
+    }
 
     #[test]
     fn packaged_defaults_update_without_replacing_user_overrides_or_cache() {

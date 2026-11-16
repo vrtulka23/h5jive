@@ -33,12 +33,24 @@ the special-value colors.
 - **Data table:** inspect values by row and column, reorder axes, and pin the
   remaining dimensions to selected indexes. When the first dimension is time,
   the table initially shows the next two dimensions and pins the time index.
-  If only one dimension remains, it appears as a single column.
+  If only one dimension remains, it appears as a single column. Click a
+  numeric HDF5 or NetCDF-4 cell, type a new value, and press Enter to stage it.
+  Type `Fill` or `fill` to use that dataset's `_FillValue`; type `NaN`, `+Inf`,
+  or `-Inf` for floating-point datasets. These names are case-insensitive.
+  Staged cells have an orange highlight. The bar between the table and
+  slice controls shows the pending count and offers **Apply
+  changes** and **Discard**. Pending edits stay attached to their dataset
+  coordinates when you change the viewed slice. Switching datasets prompts
+  you to apply, discard, or keep editing. They are held in memory until
+  applied; apply or discard them before closing H5Jive. Replacing a file with
+  pending edits is blocked. Classic NetCDF files cannot be edited in the table.
 - **Profiles:** plot a single line from the selected dataset against an index
   axis while every other dimension is pinned. Choose a comparison axis and
   indexes to plot multiple lines from that same dataset. When the first
   dimension is time, the initial plot axis is the second dimension and time
-  starts pinned.
+  starts pinned. Long profiles first show sampled source positions while the
+  full line loads. The plot badge shows the sample count per line and changes
+  from **Overview** to **Settled** when the full read finishes.
 - **2D slice:** choose the displayed axes and pinned dimensions; adjust the
   colormap and value range. Large arrays first show a sampled overview; visible
   zoom tiles load in the background. Automatic colors use the overview range
@@ -57,10 +69,10 @@ the special-value colors.
   the central 5–95% of ordinary voxel values so rare extremes do not flatten
   the colors; the colorbar shows that same display range. Fill values start
   hidden in this view; NaN and infinite values start visible. Use the value
-  buttons to change their visibility. Special values occupy their native voxels and are composited
-  along the ray with the same opacity as ordinary values. Near voxels keep their
-  full color, while distant voxels are dimmed for depth. Lower opacity to see
-  structures behind the front layer.
+  buttons to change their visibility. Special values occupy their native voxels
+  and keep their own alpha when ordinary values are made transparent. Near
+  voxels keep their full color, while distant voxels are dimmed for depth.
+  Lower opacity to see special values behind ordinary data.
 - **Flat world map:** view geolocated samples as point locations, pixel edges,
   or filled pixel footprints. Footprint modes require latitude and longitude
   bounds. Filled footprints and 50% opacity are the initial settings when bounds

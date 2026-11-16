@@ -1,7 +1,7 @@
 # 2D slice rendering and color-scale settings.
 colormap str = "viridis"
 range_mode str = "auto"
-cell_size int = 4
+cell_size int = 2
 value_min float = -1.0
 value_max float = 1.0
 max_cells int = 65536

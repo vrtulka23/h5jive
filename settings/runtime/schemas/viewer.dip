@@ -12,6 +12,9 @@ application
     !condition ({.} == "spatial_3d" || {.} == "slice_2d" || {.} == "profiles_1d" || {.} == "world_map" || {.} == "globe" || {.} == "data")
     ?rationale "Selects the viewer panel opened when the application starts."
     !setup
+  tutorial_tips bool = true
+    ?descr "Show extra guidance in control tooltips; turn off from Help or local overrides"
+    !setup
 
 graphics
   backend str = "auto"
@@ -20,8 +23,8 @@ graphics
     !labels ["Automatic", "Metal", "Vulkan", "OpenGL", "Vulkan + OpenGL"]
     !condition ({.} == "auto" || {.} == "metal" || {.} == "vulkan" || {.} == "gl" || {.} == "vulkan,gl")
     !setup
-  forwarded_x11_backend str = "gl"
-    ?descr "WGPU backend for SSH X11 forwarding on Linux when backend is auto"
+  forwarded_x11_backend str = "vulkan,gl"
+    ?descr "WGPU backends for SSH X11 forwarding on Linux when backend is auto"
     !options ["gl", "vulkan", "vulkan,gl"]
     !labels ["OpenGL", "Vulkan", "Vulkan + OpenGL"]
     !condition ({.} == "gl" || {.} == "vulkan" || {.} == "vulkan,gl")

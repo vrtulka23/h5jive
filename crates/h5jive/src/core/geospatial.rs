@@ -908,6 +908,7 @@ fn load_map_data_inner(
         points,
         range,
         aggregated: aggregate_footprints,
+        sampled: rows.len() < ny || columns.len() < nx,
         preview,
     })
 }

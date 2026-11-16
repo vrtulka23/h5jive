@@ -12,6 +12,28 @@ impl SpecialValue {
 }
 
 impl App {
+    pub(super) fn cached_coordinate_label(&self, axis: usize, index: usize) -> String {
+        self.coordinate_value_cache
+            .get(&(axis, index))
+            .and_then(Option::as_ref)
+            .map_or_else(|| index.to_string(), |value| format!("{index} ({value})"))
+    }
+
+    pub(super) fn cached_pinned_coordinate_labels(&self, pinned: &[usize]) -> Vec<String> {
+        pinned
+            .iter()
+            .enumerate()
+            .map(|(axis, &index)| {
+                let label = self.cached_coordinate_label(axis, index);
+                if label == index.to_string() {
+                    "index".into()
+                } else {
+                    label
+                }
+            })
+            .collect()
+    }
+
     pub(super) fn pinned_coordinate_labels(&mut self, pinned: &[usize]) -> Vec<String> {
         let selection = self.selection.clone();
         pinned

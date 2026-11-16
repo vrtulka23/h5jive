@@ -7,6 +7,7 @@ pub(super) struct VolumeRasterKey {
     pub(super) volume: VolumeKey,
     pub(super) layer_keys: Vec<VolumeKey>,
     pub(super) size: [u32; 2],
+    pub(super) render_size: [u32; 2],
     pub(super) center: [f32; 2],
     pub(super) scale: [f32; 3],
     pub(super) rotation: [f32; 4],
@@ -32,6 +33,22 @@ pub(super) struct VolumeRasterRequest {
     pub(super) key: VolumeRasterKey,
     pub(super) layers: Vec<Arc<ExactVolumeData>>,
     pub(super) colors: [[f32; 4]; 256],
+}
+
+pub(super) struct VolumeRasterJob {
+    pub(super) key: VolumeRasterKey,
+    pub(super) receiver: mpsc::Receiver<Vec<u8>>,
+    pub(super) started_at: Instant,
+}
+
+const STALE_RASTER_AFTER: Duration = Duration::from_millis(120);
+
+pub(super) fn interactive_raster_size(size: [u32; 2], moving: bool) -> [u32; 2] {
+    if moving {
+        size.map(|dimension| dimension.div_ceil(4).max(1))
+    } else {
+        size
+    }
 }
 
 fn raster_has_full_overview(
@@ -75,9 +92,9 @@ impl App {
         let ready = self
             .volume_raster_job
             .as_ref()
-            .and_then(|(_, receiver)| receiver.try_recv().ok());
+            .and_then(|job| job.receiver.try_recv().ok());
         if let Some(rgba) = ready {
-            if let Some((key, _)) = self.volume_raster_job.take() {
+            if let Some(VolumeRasterJob { key, .. }) = self.volume_raster_job.take() {
                 if let Some(raster) = upload_volume_raster(gpu, &key, &rgba) {
                     if let Some(old) = self.volume_raster.take() {
                         let has_full_overview = self
@@ -95,13 +112,12 @@ impl App {
                     self.volume_raster = Some((key, raster));
                 }
             }
-        } else if self
-            .volume_raster_job
-            .as_ref()
-            .is_some_and(|(_, receiver)| {
-                matches!(receiver.try_recv(), Err(mpsc::TryRecvError::Disconnected))
-            })
-        {
+        } else if self.volume_raster_job.as_ref().is_some_and(|job| {
+            matches!(
+                job.receiver.try_recv(),
+                Err(mpsc::TryRecvError::Disconnected)
+            )
+        }) {
             self.volume_raster_job = None;
         }
     }
@@ -111,9 +127,23 @@ impl App {
             .volume_raster
             .as_ref()
             .is_some_and(|(key, _)| *key == request.key)
-            || self.volume_raster_job.is_some()
         {
             return;
+        }
+        if let Some(job) = &self.volume_raster_job {
+            // Finish one low-resolution frame before replacing it, so continuous
+            // dragging cannot starve the preview. A full render yields to motion.
+            let preview_in_progress = job.key.render_size != job.key.size;
+            let requesting_preview = request.key.render_size != request.key.size;
+            if job.key == request.key
+                || preview_in_progress
+                || !requesting_preview && job.started_at.elapsed() < STALE_RASTER_AFTER
+            {
+                return;
+            }
+            self.volume_raster_generation
+                .fetch_add(1, Ordering::Relaxed);
+            self.volume_raster_job = None;
         }
         let key = request.key.clone();
         let generation = Arc::clone(&self.view_load_generation);
@@ -128,14 +158,23 @@ impl App {
             });
             let _ = sender.send(image);
         });
-        self.volume_raster_job = Some((key, receiver));
+        self.volume_raster_job = Some(VolumeRasterJob {
+            key,
+            receiver,
+            started_at: Instant::now(),
+        });
     }
 
     pub(super) fn volume_raster_preview(
         &self,
         key: &VolumeRasterKey,
         desired: &VolumeKey,
-    ) -> Option<(dear_app::imgui::TextureId, [f32; 2], [f32; 2])> {
+    ) -> Option<(
+        VolumeRasterKey,
+        dear_app::imgui::TextureId,
+        [f32; 2],
+        [f32; 2],
+    )> {
         let compatible = |cached: &VolumeRasterKey| {
             let compatible = cached.volume.file == key.volume.file
                 && cached.volume.path == key.volume.path
@@ -170,7 +209,7 @@ impl App {
             .or(overview)
             .or(current)?;
         let (min, max) = volume_preview_rect(cached, key);
-        Some((raster.id, min, max))
+        Some((cached.clone(), raster.id, min, max))
     }
 }
 
@@ -195,7 +234,7 @@ fn upload_volume_raster(
     key: &VolumeRasterKey,
     rgba: &[u8],
 ) -> Option<RegisteredVolumeRaster> {
-    let [width, height] = key.size;
+    let [width, height] = key.render_size;
     if rgba.len() != width as usize * height as usize * 4 {
         return None;
     }
@@ -306,7 +345,7 @@ fn render_exact_volume_with_cancel(
     request: &VolumeRasterRequest,
     cancelled: &(dyn Fn() -> bool + Sync),
 ) -> Vec<u8> {
-    let [width, height] = request.key.size;
+    let [width, height] = request.key.render_size;
     let mut image = vec![0; width as usize * height as usize * 4];
     let workers = thread::available_parallelism()
         .map_or(1, |n| n.get())
@@ -324,8 +363,8 @@ fn render_exact_volume_with_cancel(
                     for (x, pixel) in pixels.chunks_mut(4).enumerate() {
                         pixel.copy_from_slice(&raycast_pixel(
                             request,
-                            x as f32 + 0.5,
-                            y as f32 + 0.5,
+                            (x as f32 + 0.5) * request.key.size[0] as f32 / width as f32,
+                            (y as f32 + 0.5) * request.key.size[1] as f32 / height as f32,
                         ));
                     }
                 }
@@ -465,7 +504,8 @@ fn raycast_pixel(request: &VolumeRasterRequest, x: f32, y: f32) -> [u8; 4] {
             };
             // The ray's camera-space z decreases by one unit per step.
             let color = depth_shading.shade(color, camera_distance - distance);
-            let contribution = (1.0 - accumulated[3]) * color[3] * key.opacity;
+            let opacity = if special.is_some() { 1.0 } else { key.opacity };
+            let contribution = (1.0 - accumulated[3]) * color[3] * opacity;
             for channel in 0..3 {
                 accumulated[channel] += color[channel] * contribution;
             }
@@ -557,6 +597,7 @@ mod tests {
                 },
                 layer_keys: Vec::new(),
                 size: [2, 2],
+                render_size: [2, 2],
                 center: [1.0, 1.0],
                 scale: [4.0; 3],
                 rotation: VolumeRotation::identity().0,
@@ -587,6 +628,13 @@ mod tests {
             mixed[0] > 0 && mixed[2] > 0,
             "coarse voxels behind the fine crop must remain visible"
         );
+        assert_eq!(interactive_raster_size([400, 300], true), [100, 75]);
+        assert_eq!(interactive_raster_size([400, 300], false), [400, 300]);
+        request.key.render_size = [1, 1];
+        assert_eq!(
+            render_exact_volume(&request),
+            raycast_pixel(&request, 1.0, 1.0)
+        );
     }
 
     #[test]
@@ -599,6 +647,7 @@ mod tests {
             },
             layer_keys: Vec::new(),
             size: [400, 300],
+            render_size: [400, 300],
             center: [200.0, 150.0],
             scale: [100.0; 3],
             rotation: VolumeRotation::identity().0,
@@ -644,6 +693,7 @@ mod tests {
                 slice: full_slice.clone(),
             }],
             size: [400, 300],
+            render_size: [400, 300],
             center: [200.0, 150.0],
             scale: [100.0; 3],
             rotation: VolumeRotation::identity().0,
@@ -688,6 +738,7 @@ mod tests {
                 },
                 layer_keys: Vec::new(),
                 size: [2, 2],
+                render_size: [2, 2],
                 center: [1.0, 1.0],
                 scale: [4.0; 3],
                 rotation: VolumeRotation::identity().0,
@@ -717,16 +768,20 @@ mod tests {
         request.key.visibility.positive = true;
         assert_eq!(raycast_pixel(&request, 0.5, 0.5), [255, 255, 0, 255]);
 
-        // The front and rear special voxels contribute at their own depths.
+        // Special voxels keep their alpha when ordinary values are translucent.
         request.key.opacity = 0.5;
-        assert_eq!(raycast_pixel(&request, 0.5, 0.5), [170, 170, 85, 191]);
+        assert_eq!(raycast_pixel(&request, 0.5, 0.5), [255, 255, 0, 255]);
         Arc::get_mut(&mut request.layers[0]).unwrap().specials[5] = 2;
         request.key.special_colors[1] = [1.0, 0.0, 1.0, 1.0];
-        assert_eq!(raycast_pixel(&request, 0.5, 0.5), [255, 170, 85, 191]);
+        assert_eq!(raycast_pixel(&request, 0.5, 0.5), [255, 255, 0, 255]);
         Arc::get_mut(&mut request.layers[0]).unwrap().specials[4] = 0;
-        assert_eq!(raycast_pixel(&request, 0.5, 0.5), [255, 0, 85, 191]);
+        assert_eq!(raycast_pixel(&request, 0.5, 0.5), [255, 0, 128, 255]);
         request.key.visibility.nan = false;
         assert_eq!(raycast_pixel(&request, 0.5, 0.5), [255, 0, 0, 128]);
+        request.key.opacity = 0.0;
+        assert_eq!(raycast_pixel(&request, 0.5, 0.5), [0, 0, 0, 0]);
+        request.key.visibility.nan = true;
+        assert_eq!(raycast_pixel(&request, 0.5, 0.5), [255, 0, 255, 255]);
 
         // Distant ordinary and special voxels dim by the same amount, with
         // alpha unchanged. The near voxel keeps its full color.
@@ -802,6 +857,7 @@ mod tests {
             },
             layer_keys: Vec::new(),
             size: [480, 360],
+            render_size: [480, 360],
             center: [240.0, 180.0],
             scale,
             rotation: rotation.0,

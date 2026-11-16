@@ -27,6 +27,11 @@ before changing a cross-cutting flow.
    Put general explanations for the active section in the top Help menu's
    "Help for current section" popup, not among controls or inside the viewer.
    Add a topic in `layout.rs` when adding an inspector view or workspace section.
+   Give new interactive controls a short Tutorial tip through `item_tip` in
+   `tutorial_tips.rs`. Preserve the normal tooltip when Tutorial tips are off; use an
+   empty normal text if the control has no existing tooltip. Keep tips focused
+   on the action the user can take. Use `item_plain_tip` or `show_plain_tip`
+   for other tooltips so their text has the same padding.
    Keep short loading, error, and actionable empty-state messages in place.
 6. Run `cargo fmt --all`, `cargo check -p h5jive`, and relevant tests. Run the
    full suite with `cargo test -p h5jive -- --test-threads=1` because DIPL and

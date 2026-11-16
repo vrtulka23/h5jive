@@ -2,6 +2,13 @@
 
 ## DIPL settings
 
+**Tutorial tips** are on by default for new installations. They add short
+instructions to tooltips on interactive controls. Use **Help → Tutorial tips**
+to turn them off or on; the choice is saved in `settings/runtime/overrides.dip`
+(or the installed settings directory). Normal tooltips remain when tutorial
+tips are off. You can also set `viewer.application.tutorial_tips = false` in
+that override file.
+
 The editable project is `settings/runtime/DIPfile`. It loads the viewer
 configuration, appearance profiles, PICS catalog, and their schemas. Values
 such as map zoom, point limits, color ranges, and view defaults live in DIPL.

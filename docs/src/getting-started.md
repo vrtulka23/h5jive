@@ -72,6 +72,29 @@ sudo apt-get install -y build-essential ca-certificates clang cmake curl git \
 Prebuilt Linux releases bundle HDF5 and its compression helpers. They still
 need a compatible Linux graphics stack on the host.
 
+### Linux graphics on SUSE
+
+The Linux archive is built on Ubuntu and smoke-tested on openSUSE Leap. Its
+bundled HDF5 is built without the unused S3 driver, so it does not require
+Ubuntu's versioned libcurl symbols from the host. This applies to releases
+built with the updated workflow; an already installed release is unchanged
+until it is upgraded.
+
+If startup reports `AdapterUnavailable`, the executable has started but no
+usable graphics adapter was found for the current display. In a local desktop
+session, install or enable your distribution's Vulkan or OpenGL driver. You can
+try Vulkan with an existing installation using `WGPU_BACKEND=vulkan h5jive`.
+For a forwarded X11 display, you can try both
+backends by adding this line to
+`~/.local/share/h5jive/settings/overrides.dip`:
+
+```text
+viewer.graphics.forwarded_x11_backend = "vulkan,gl"
+```
+
+If the display exposes neither backend, the window cannot render through that
+session; a graphical login or a remote desktop with graphics support is needed.
+
 ### Run over SSH with X11 forwarding
 
 The Linux app can display its window through SSH X11 forwarding. Connect from a
@@ -83,10 +106,14 @@ echo "$DISPLAY"
 h5jive
 ```
 
-The remote `DISPLAY` must be set, and the X server must support OpenGL for the
-window to render. With the default `viewer.graphics.backend = "auto"`, H5Jive
-detects a forwarded X11 session and selects the OpenGL backend. This default is
-set by `viewer.graphics.forwarded_x11_backend = "gl"` in DIPL. You can also run
+The remote `DISPLAY` must be set, and the X server must expose a usable
+graphics adapter for the window to render. With the default
+`viewer.graphics.backend = "auto"`, H5Jive detects a forwarded X11 display
+and tries Vulkan and OpenGL. This is set by
+`viewer.graphics.forwarded_x11_backend = "vulkan,gl"` in DIPL. If neither
+backend can create an adapter for the forwarded display, run H5Jive in a local
+desktop session on the Linux machine or use a remote desktop with graphics
+support. You can also run
 `./h5jive.sh --run` from a source checkout after building it. Building alone
 does not require an X11 session.
 

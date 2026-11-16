@@ -283,6 +283,7 @@ impl DatasetBrowser {
         pending_b: Option<&Path>,
         palette: &Palette,
         height: f32,
+        tutorial_tips: bool,
     ) -> Option<(usize, PathBuf)> {
         self.poll(sources);
         if sources.is_empty() {
@@ -302,10 +303,22 @@ impl DatasetBrowser {
             .build(ui, || {
                 ui.set_next_item_width(-1.0);
                 ui.combo_simple_string("##dataset_tag_group", &mut self.tag_choice, &self.tags);
+                item_tip(
+                    ui,
+                    tutorial_tips,
+                    "",
+                    "Choose a tag to narrow the source list.",
+                );
                 ui.set_next_item_width(-1.0);
                 ui.input_text("##dataset_tag_search", &mut self.tag_search)
                     .hint("Search tags")
                     .build();
+                item_tip(
+                    ui,
+                    tutorial_tips,
+                    "",
+                    "Type part of a tag to find matching sources.",
+                );
                 ui.separator();
                 let selected_tag = self
                     .tags
@@ -378,10 +391,12 @@ impl DatasetBrowser {
                         },
                     );
                     if hovered {
-                        ui.set_item_tooltip(format!(
-                            "{} | {count} products | {tooltip}",
-                            source.name
-                        ));
+                        item_tip(
+                            ui,
+                            tutorial_tips,
+                            &format!("{} | {count} products | {tooltip}", source.name),
+                            "Click to browse this source's products.",
+                        );
                     }
                     if clicked {
                         self.selected_source = number;
@@ -443,12 +458,27 @@ impl DatasetBrowser {
                             cancel.store(true, Ordering::Relaxed);
                         }
                     }
-                } else if ui.button(if index.products.is_empty() {
-                    "Scan products"
+                    item_tip(
+                        ui,
+                        tutorial_tips,
+                        "",
+                        "Stop indexing this source; earlier results remain available.",
+                    );
                 } else {
-                    "Refresh index"
-                }) {
-                    self.refresh(source_number, source);
+                    let refresh = ui.button(if index.products.is_empty() {
+                        "Scan products"
+                    } else {
+                        "Refresh index"
+                    });
+                    item_tip(
+                        ui,
+                        tutorial_tips,
+                        "",
+                        "Scan this source again after files change on disk.",
+                    );
+                    if refresh {
+                        self.refresh(source_number, source);
+                    }
                 }
                 if let Some(error) = &self.sources[source_number].error {
                     ui.text_wrapped(format!("Index: {error}"));
@@ -464,6 +494,12 @@ impl DatasetBrowser {
                     self.dirty = true;
                     self.selected_product = None;
                 }
+                item_tip(
+                    ui,
+                    tutorial_tips,
+                    "",
+                    "Filter products by filename or relative path.",
+                );
                 if let Some(_filters) = ui.begin_table("##product_search_filters", 2) {
                     ui.table_next_row();
                     ui.table_next_column();
@@ -476,6 +512,12 @@ impl DatasetBrowser {
                         self.dirty = true;
                         self.selected_product = None;
                     }
+                    item_tip(
+                        ui,
+                        tutorial_tips,
+                        "",
+                        "Filter by product date, such as 2026-01-30.",
+                    );
                     ui.table_next_column();
                     ui.set_next_item_width(-1.0);
                     if ui
@@ -486,6 +528,12 @@ impl DatasetBrowser {
                         self.dirty = true;
                         self.selected_product = None;
                     }
+                    item_tip(
+                        ui,
+                        tutorial_tips,
+                        "",
+                        "Filter by orbit number when available.",
+                    );
                 }
                 if date_query(&self.date_search).is_none() {
                     ui.text_disabled("Date accepts digits, hyphens, or slashes.");
@@ -569,6 +617,12 @@ impl DatasetBrowser {
                             {
                                 self.selected_product = Some(product.relative_path.clone());
                             }
+                            item_tip(
+                                ui,
+                                tutorial_tips,
+                                "",
+                                "Select a product, then open it as File A or B below.",
+                            );
                             ui.table_next_column();
                             ui.text(&product.relative_path);
                             ui.table_next_column();
@@ -592,10 +646,22 @@ impl DatasetBrowser {
                     if ui.button("Open as A") {
                         open = Some((0, path.clone()));
                     }
+                    item_tip(
+                        ui,
+                        tutorial_tips,
+                        "",
+                        "Open this product in the primary file slot.",
+                    );
                     ui.same_line();
                     if ui.button("Open as B") {
                         open = Some((1, path));
                     }
+                    item_tip(
+                        ui,
+                        tutorial_tips,
+                        "",
+                        "Open this product for comparison with File A.",
+                    );
                     let selected = self.sources[source_number]
                         .products
                         .iter()
@@ -612,6 +678,14 @@ impl DatasetBrowser {
                             ui.text("Reading metadata...");
                         } else if ui.button("Read product metadata") {
                             self.read_selected_metadata(source_number, source, relative.clone());
+                        }
+                        if !pending {
+                            item_tip(
+                                ui,
+                                tutorial_tips,
+                                "",
+                                "Read missing date or orbit fields from the product file.",
+                            );
                         }
                     }
                     if let Some(status) = &self.sources[source_number].metadata_status {
@@ -808,7 +882,14 @@ mod tests {
         ui.window("Dataset browser smoke")
             .size([1100.0, 700.0], Condition::Always)
             .build(|| {
-                browser.draw(ui, &sources, None, &settings.palette, 640.0);
+                browser.draw(
+                    ui,
+                    &sources,
+                    None,
+                    &settings.palette,
+                    640.0,
+                    settings.tutorial_tips,
+                );
             });
     }
 

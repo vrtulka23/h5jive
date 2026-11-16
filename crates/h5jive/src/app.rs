@@ -6,11 +6,14 @@ mod file_drop;
 mod geo_texture;
 mod jobs;
 mod layout;
+mod lifecycle;
 mod model;
 mod monitor;
 #[path = "plugins/mod.rs"]
 mod plugins;
 mod settings;
+mod state;
+mod tutorial_tips;
 mod ui;
 mod value_visibility;
 mod views;
@@ -24,6 +27,8 @@ use geo_texture::*;
 use model::*;
 use monitor::*;
 use settings::*;
+use state::*;
+use tutorial_tips::*;
 use ui::*;
 use views::*;
 use volume_raycast::*;
@@ -32,7 +37,8 @@ use dear_app::{
     imgui::{
         ChildFlags, ColorEditFlags, ColorStackToken, Condition, DrawListMut, FontConfig,
         FontSource, ListClipper, MouseCursor, StyleColor, StyleVar, TabItemFlags, TableColumnFlags,
-        TableColumnStateFlags, TableFlags, TableOptions, TableSizingPolicy, Ui, WindowFlags,
+        TableColumnStateFlags, TableFlags, TableOptions, TableRowFlags, TableSizingPolicy, Ui,
+        WindowFlags,
     },
     run as run_app, wgpu, AppConfig, Application, EventContext, FrameContext, InitContext,
     PrepareFrameContext, RunError, Theme,
@@ -43,7 +49,7 @@ use dear_implot::{
 };
 use h5jive_data::{
     AttributeValue, CoordinateAxis, DatasetDistribution, DatasetStatistics, Entry, File,
-    Geolocation, GeolocationRule, Kind, OpenOptions, Region, ScanFilter,
+    Geolocation, GeolocationRule, Kind, NumericEdit, OpenOptions, Region, ScanFilter,
 };
 use scinumtools3::Project;
 use std::{
@@ -89,6 +95,18 @@ enum MapJobUpdate {
     Complete(Result<(MapData, Option<Arc<Region>>), String>),
 }
 
+enum ProfileJobUpdate {
+    Overview(ProfileData),
+    Complete(Result<ProfileData, String>),
+}
+
+#[derive(Clone, PartialEq, Eq)]
+struct ProfileKey {
+    selection: Selection,
+    slice: ProfileSlice,
+    visibility: ValueVisibility,
+}
+
 struct App {
     files: Vec<File>,
     file_paths: Vec<PathBuf>,
@@ -105,7 +123,7 @@ struct App {
     selection: Option<Selection>,
     sync_restore_selection: Option<Selection>,
     startup_tab: Option<usize>,
-    details_key: Option<(usize, String)>,
+    details_key: Option<Selection>,
     details_default_pending: bool,
     statistics_cache: Option<Result<DatasetStatistics, String>>,
     statistics_job: Option<mpsc::Receiver<Result<DatasetStatistics, String>>>,
@@ -115,9 +133,14 @@ struct App {
     coordinates_cache: Option<Result<Vec<CoordinateAxis>, String>>,
     coordinate_value_cache: HashMap<(usize, usize), Option<String>>,
     tree_geolocation_cache: HashMap<(usize, String), Option<Geolocation>>,
-    selection_key: Option<(usize, String)>,
+    selection_key: Option<Selection>,
     axis_names: Vec<String>,
-    region_cache: Vec<(RegionKey, Result<Region, String>)>,
+    region_cache: Vec<(RegionKey, Arc<Result<Region, String>>)>,
+    pending_cell_edits: HashMap<CellKey, PendingCellEdit>,
+    cell_editor: Option<CellEditor>,
+    cell_edit_job: Option<CellEditJob>,
+    cell_edit_message: Option<String>,
+    queued_selection: Option<Selection>,
     heatmap_cache: Option<(HeatmapKey, Result<Arc<HeatmapImage>, String>)>,
     heatmap_tiles: Vec<(HeatmapKey, Arc<HeatmapImage>)>,
     heatmap_tile_job: Option<(HeatmapKey, mpsc::Receiver<Result<HeatmapImage, String>>)>,
@@ -128,6 +151,11 @@ struct App {
         HeatmapOverviewKey,
         mpsc::Receiver<Result<HeatmapImage, String>>,
     )>,
+    heatmap_view_overview_cache: Option<(HeatmapOverviewKey, Result<HeatmapImage, String>)>,
+    heatmap_view_overview_job: Option<(
+        HeatmapOverviewKey,
+        mpsc::Receiver<Result<HeatmapImage, String>>,
+    )>,
     heatmap_range_cache: Option<(HeatmapRangeKey, Result<Option<(f64, f64)>, String>)>,
     heatmap_tick_view: Option<(HeatmapRangeKey, [f64; 4])>,
     heatmap_range_job: Option<(
@@ -135,7 +163,9 @@ struct App {
         mpsc::Receiver<Result<Option<(f64, f64)>, String>>,
     )>,
     heatmap_colormap: Option<([[f32; 4]; 3], String)>,
-    profile_cache: Option<Result<ProfileData, String>>,
+    profile_cache: Option<(ProfileKey, Result<ProfileData, String>)>,
+    profile_job: Option<(ProfileKey, mpsc::Receiver<ProfileJobUpdate>)>,
+    profile_load_generation: Arc<AtomicU64>,
     volume_cache: Option<(VolumeKey, Result<Arc<ExactVolumeData>, String>)>,
     volume_overview_cache: Option<(VolumeKey, Result<Arc<ExactVolumeData>, String>)>,
     volume_refined_cache: Vec<(VolumeKey, Arc<ExactVolumeData>)>,
@@ -148,7 +178,7 @@ struct App {
     volume_navigation_at: Option<Instant>,
     volume_raster: Option<(VolumeRasterKey, RegisteredVolumeRaster)>,
     volume_overview_raster: Option<(VolumeRasterKey, RegisteredVolumeRaster)>,
-    volume_raster_job: Option<(VolumeRasterKey, mpsc::Receiver<Vec<u8>>)>,
+    volume_raster_job: Option<VolumeRasterJob>,
     draft_volume: Option<VolumeSlice>,
     applied_volume: Option<VolumeSlice>,
     draft_volume_opacity: f32,
@@ -202,6 +232,7 @@ struct App {
     details_panel_fraction: f32,
     show_about: bool,
     show_section_help: bool,
+    tutorial_tips_error: Option<String>,
     settings: Settings,
     resource_monitor: ResourceMonitor,
 }
@@ -265,7 +296,13 @@ impl Application for App {
                 std::time::Instant::now() + std::time::Duration::from_millis(80),
             );
         }
-        if self.plugins.is_busy() {
+        if self.plugins.is_busy()
+            || self.cell_edit_job.is_some()
+            || self.heatmap_overview_job.is_some()
+            || self.heatmap_view_overview_job.is_some()
+            || self.profile_job.is_some()
+            || self.volume_raster_job.is_some()
+        {
             let _ = frame.wake_handle().request_redraw_at(
                 std::time::Instant::now() + std::time::Duration::from_millis(80),
             );
@@ -382,6 +419,11 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
         selection_key: None,
         axis_names: Vec::new(),
         region_cache: Vec::new(),
+        pending_cell_edits: HashMap::new(),
+        cell_editor: None,
+        cell_edit_job: None,
+        cell_edit_message: None,
+        queued_selection: None,
         heatmap_cache: None,
         heatmap_tiles: Vec::new(),
         heatmap_tile_job: None,
@@ -389,11 +431,15 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
         heatmap_navigation_at: None,
         heatmap_overview_cache: None,
         heatmap_overview_job: None,
+        heatmap_view_overview_cache: None,
+        heatmap_view_overview_job: None,
         heatmap_range_cache: None,
         heatmap_tick_view: None,
         heatmap_range_job: None,
         heatmap_colormap: None,
         profile_cache: None,
+        profile_job: None,
+        profile_load_generation: Arc::new(AtomicU64::new(0)),
         volume_cache: None,
         volume_overview_cache: None,
         volume_refined_cache: Vec::new(),
@@ -441,7 +487,7 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
         draft_profile: None,
         applied_profile: None,
         table_column_page: 0,
-        table_footer_height: 110.0,
+        table_footer_height: 150.0,
         slice_footer_height: 150.0,
         profile_footer_height: 170.0,
         profile_zoom: 1.0,
@@ -463,6 +509,7 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
         resource_monitor: ResourceMonitor::new(),
         show_about: false,
         show_section_help: false,
+        tutorial_tips_error: None,
         settings,
     };
     run_app(config, app)?;

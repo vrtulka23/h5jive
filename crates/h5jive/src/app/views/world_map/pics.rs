@@ -99,7 +99,7 @@ pub(super) fn draw_pics_overlay(
             description.push_str(&format!("\n{}", site.notes));
         }
         description.push_str(&format!("\nSource: {}", site.source_url));
-        ui.tooltip_text(description);
+        show_plain_tip(ui, &description);
         true
     } else {
         false

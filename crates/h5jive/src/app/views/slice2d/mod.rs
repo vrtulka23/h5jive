@@ -6,6 +6,37 @@ mod legend;
 pub(crate) use layout::*;
 pub(crate) use legend::*;
 
+fn overview_for_visible<'a>(
+    view: &'a Option<(HeatmapOverviewKey, Result<HeatmapImage, String>)>,
+    full: &'a Option<(HeatmapOverviewKey, Result<HeatmapImage, String>)>,
+    selection: &Selection,
+    slice: &TableSlice,
+    visible: [usize; 4],
+) -> Option<&'a HeatmapImage> {
+    let matches = |key: &HeatmapOverviewKey| {
+        key.file == selection.file
+            && key.path == selection.path
+            && key.slice == *slice
+            && key.bounds[0] <= visible[0]
+            && key.bounds[1] >= visible[1]
+            && key.bounds[2] <= visible[2]
+            && key.bounds[3] >= visible[3]
+    };
+    view.as_ref()
+        .filter(|(key, _)| matches(key))
+        .and_then(|(_, result)| result.as_ref().ok())
+        .or_else(|| {
+            full.as_ref()
+                .filter(|(key, _)| matches(key))
+                .and_then(|(_, result)| result.as_ref().ok())
+        })
+}
+
+fn overview_plot_bounds(image: &HeatmapImage) -> [f64; 4] {
+    let [r0, r1, c0, c1] = image.bounds;
+    [c0 as f64, r0 as f64, c1 as f64, r1 as f64]
+}
+
 fn draw_native_heatmap_tile(
     ui: &Ui,
     plot_ui: &PlotUi<'_>,
@@ -135,13 +166,16 @@ impl App {
                     let value = image.values[(row - r0) * (c1 - c0) + column - c0];
                     let special = SpecialValue::from_value(value, image.fill_value);
                     if self.value_visibility.allows_class(value, special) {
-                        ui.set_tooltip(format!(
-                            "Row {row}, column {column}: {}",
-                            special.map_or_else(
-                                || format_value(value, self.settings.display_decimals),
-                                |special| special.label().to_owned()
-                            )
-                        ));
+                        show_plain_tip(
+                            ui,
+                            &format!(
+                                "Row {row}, column {column}: {}",
+                                special.map_or_else(
+                                    || format_value(value, self.settings.display_decimals),
+                                    |special| special.label().to_owned()
+                                )
+                            ),
+                        );
                     }
                 }
             }
@@ -334,6 +368,27 @@ impl App {
             [limits.X.Min, limits.X.Max, limits.Y.Min, limits.Y.Max],
         );
         let visible_count = (visible[1] - visible[0]).saturating_mul(visible[3] - visible[2]);
+        if large_plane
+            && visible_count > max_cells
+            && visible != [0, rows, 0, columns]
+            && self.heatmap_overview_cache.is_some()
+        {
+            let (_, grid) = heatmap_layout(
+                visible[1] - visible[0],
+                visible[3] - visible[2],
+                [plot_width - 75.0, available[1] - 55.0],
+                self.settings.heatmap_cell_size,
+                max_cells,
+            );
+            self.poll_heatmap_view_overview(
+                selection,
+                shape,
+                &slice,
+                visible,
+                [grid[1], grid[0]],
+                Self::refinement_settled(self.heatmap_navigation_at),
+            );
+        }
         if display_range.is_none() && range_provisional {
             display_range = self.heatmap_tiles.iter().rev().find_map(|(cached, image)| {
                 let [r0, r1, c0, c1] = cached.bounds;
@@ -398,28 +453,28 @@ impl App {
                                 let row_label = self.coordinate_label(selection, row_axis, row);
                                 let column_label =
                                     self.coordinate_label(selection, slice.column_axis, column);
-                                ui.set_tooltip(format!(
-                                    "Row {row_label}, column {column_label}: {}",
-                                    special.map_or_else(
-                                        || format_value(value, self.settings.display_decimals),
-                                        |special| special.label().to_owned()
-                                    )
-                                ));
+                                show_plain_tip(
+                                    ui,
+                                    &format!(
+                                        "Row {row_label}, column {column_label}: {}",
+                                        special.map_or_else(
+                                            || format_value(value, self.settings.display_decimals),
+                                            |special| special.label().to_owned()
+                                        )
+                                    ),
+                                );
                             }
                         }
                     }
                 }
             } else {
-                if let Some(Ok(image)) = self
-                    .heatmap_overview_cache
-                    .as_ref()
-                    .filter(|(cached, _)| {
-                        cached.file == selection.file
-                            && cached.path == selection.path
-                            && cached.slice == slice
-                    })
-                    .map(|(_, result)| result)
-                {
+                if let Some(image) = overview_for_visible(
+                    &self.heatmap_view_overview_cache,
+                    &self.heatmap_overview_cache,
+                    selection,
+                    &slice,
+                    visible,
+                ) {
                     let (min, max) = display_range.unwrap_or((0.0, 1.0));
                     let scale_max = if max == min {
                         max + f64::EPSILON.max(max.abs() * 1e-12)
@@ -432,7 +487,7 @@ impl App {
                         &image.plotted,
                         image.grid,
                         (min, scale_max),
-                        [0.0, 0.0, columns as f64, rows as f64],
+                        overview_plot_bounds(image),
                     );
                 }
                 self.draw_cached_heatmap_tiles(
@@ -471,11 +526,19 @@ impl App {
                 XAxis::X1,
                 YAxis::Y1,
             );
-            match self
-                .heatmap_overview_cache
-                .as_ref()
-                .map(|(_, result)| result)
-            {
+            match overview_for_visible(
+                &self.heatmap_view_overview_cache,
+                &self.heatmap_overview_cache,
+                selection,
+                &slice,
+                visible,
+            )
+            .map(Ok)
+            .or_else(|| {
+                self.heatmap_overview_cache
+                    .as_ref()
+                    .map(|(_, result)| result.as_ref())
+            }) {
                 Some(Ok(image)) => {
                     if display_range.is_none() && range_provisional {
                         display_range = image.range;
@@ -487,8 +550,9 @@ impl App {
                         &image.plotted,
                         image.grid,
                         (min, max),
-                        [0.0, 0.0, columns as f64, rows as f64],
+                        overview_plot_bounds(image),
                     );
+                    let [r0, r1, c0, c1] = image.bounds;
                     let draw = ui.get_window_draw_list();
                     let lower_right = plot_ui.plot_to_pixels_axes(
                         ImPlotPoint {
@@ -508,11 +572,14 @@ impl App {
                             {
                                 continue;
                             }
-                            let x0 = column_bin as f64 * columns as f64 / image.grid[1] as f64;
-                            let x1 =
-                                (column_bin + 1) as f64 * columns as f64 / image.grid[1] as f64;
-                            let y0 = (row_bin + 1) as f64 * rows as f64 / image.grid[0] as f64;
-                            let y1 = row_bin as f64 * rows as f64 / image.grid[0] as f64;
+                            let x0 = c0 as f64
+                                + column_bin as f64 * (c1 - c0) as f64 / image.grid[1] as f64;
+                            let x1 = c0 as f64
+                                + (column_bin + 1) as f64 * (c1 - c0) as f64 / image.grid[1] as f64;
+                            let y0 = r0 as f64
+                                + (row_bin + 1) as f64 * (r1 - r0) as f64 / image.grid[0] as f64;
+                            let y1 = r0 as f64
+                                + row_bin as f64 * (r1 - r0) as f64 / image.grid[0] as f64;
                             let first = plot_ui.plot_to_pixels_axes(
                                 ImPlotPoint { x: x0, y: y0 },
                                 XAxis::X1,
@@ -535,32 +602,38 @@ impl App {
                     drop(draw);
                     if plot_ui.is_plot_hovered() {
                         let mouse = plot_ui.plot_mouse_position_axes(XAxis::X1, YAxis::Y1);
-                        if mouse.x >= 0.0
-                            && mouse.x < columns as f64
-                            && mouse.y >= 0.0
-                            && mouse.y < rows as f64
+                        if mouse.x >= c0 as f64
+                            && mouse.x < c1 as f64
+                            && mouse.y >= r0 as f64
+                            && mouse.y < r1 as f64
                         {
-                            let column_bin = ((mouse.x / columns as f64 * image.grid[1] as f64)
+                            let column_bin = (((mouse.x - c0 as f64) / (c1 - c0) as f64
+                                * image.grid[1] as f64)
                                 .floor() as usize)
                                 .min(image.grid[1] - 1);
-                            let row_bin = ((mouse.y / rows as f64 * image.grid[0] as f64).floor()
-                                as usize)
+                            let row_bin = (((mouse.y - r0 as f64) / (r1 - r0) as f64
+                                * image.grid[0] as f64)
+                                .floor() as usize)
                                 .min(image.grid[0] - 1);
-                            let row = overview_sample_index(row_bin, rows, image.grid[0]);
-                            let column = overview_sample_index(column_bin, columns, image.grid[1]);
+                            let row = r0 + overview_sample_index(row_bin, r1 - r0, image.grid[0]);
+                            let column =
+                                c0 + overview_sample_index(column_bin, c1 - c0, image.grid[1]);
                             let value = image.values[row_bin * image.grid[1] + column_bin];
                             let special = SpecialValue::from_value(value, image.fill_value);
                             if self.value_visibility.allows_class(value, special) {
                                 let row_label = self.coordinate_label(selection, row_axis, row);
                                 let column_label =
                                     self.coordinate_label(selection, slice.column_axis, column);
-                                ui.set_tooltip(format!(
-                                    "Sampled row {row_label}, column {column_label}: {}",
-                                    special.map_or_else(
-                                        || format_value(value, self.settings.display_decimals),
-                                        |special| special.label().to_owned()
-                                    )
-                                ));
+                                show_plain_tip(
+                                    ui,
+                                    &format!(
+                                        "Sampled row {row_label}, column {column_label}: {}",
+                                        special.map_or_else(
+                                            || format_value(value, self.settings.display_decimals),
+                                            |special| special.label().to_owned()
+                                        )
+                                    ),
+                                );
                             }
                         }
                     }
@@ -589,6 +662,74 @@ impl App {
                 visible,
                 [limits.X.Min, limits.X.Max, limits.Y.Min, limits.Y.Max],
                 display_range.unwrap_or((0.0, 1.0)),
+            );
+        }
+        if visible_count > 0 {
+            let overview = overview_for_visible(
+                &self.heatmap_view_overview_cache,
+                &self.heatmap_overview_cache,
+                selection,
+                &slice,
+                visible,
+            );
+            let (status, detail) = if visible_count > max_cells {
+                overview.map_or(("Loading", "2D overview".to_owned()), |image| {
+                    (
+                        "Overview",
+                        format!("{} × {} samples", image.grid[1], image.grid[0]),
+                    )
+                })
+            } else {
+                let bounds = heatmap_tile_bounds(rows, columns, visible, max_cells);
+                let native_ready = self.heatmap_cache.as_ref().is_some_and(|(cached, result)| {
+                    cached.file == selection.file
+                        && cached.path == selection.path
+                        && cached.slice == slice
+                        && cached.bounds == bounds
+                        && result.is_ok()
+                });
+                if native_ready {
+                    (
+                        "Native",
+                        format!(
+                            "{} × {} cells",
+                            visible[3] - visible[2],
+                            visible[1] - visible[0]
+                        ),
+                    )
+                } else if let Some(image) = overview {
+                    (
+                        "Refining",
+                        format!("{} × {} samples", image.grid[1], image.grid[0]),
+                    )
+                } else {
+                    ("Loading", "native detail".to_owned())
+                }
+            };
+            let figure_min = plot_ui.plot_to_pixels_axes(
+                ImPlotPoint {
+                    x: limits.X.Min,
+                    y: limits.Y.Max,
+                },
+                XAxis::X1,
+                YAxis::Y1,
+            );
+            let figure_max = plot_ui.plot_to_pixels_axes(
+                ImPlotPoint {
+                    x: limits.X.Max,
+                    y: limits.Y.Min,
+                },
+                XAxis::X1,
+                YAxis::Y1,
+            );
+            draw_render_badge(
+                ui,
+                &ui.get_window_draw_list(),
+                figure_min,
+                figure_max,
+                status,
+                &detail,
+                &self.settings.palette,
             );
         }
         drop(_plot);
@@ -620,6 +761,7 @@ impl App {
             zoom,
             &mut self.value_visibility,
             &self.settings.palette,
+            self.settings.tutorial_tips,
         );
         if visibility_changed {
             self.profile_cache = None;

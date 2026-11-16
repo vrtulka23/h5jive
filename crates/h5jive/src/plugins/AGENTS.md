@@ -34,6 +34,9 @@ state. Share stateless data and drawing helpers when behavior overlaps.
    switch. Add its help text to the plugin registry so the top Help menu can
    explain the active plugin in a popup. Keep general instructions out of the
    plugin controls and viewer; retain loading, error, and empty-state feedback.
+   Give new interactive plugin controls a short Tutorial tip and keep any
+   existing normal tooltip visible when Tutorial tips are off. Follow the
+   shared `app/tutorial_tips.rs` helpers for tutorial and plain tooltips.
    Keep claims about value comparison or visualization precise.
 
 Plugins are compiled from source with H5Jive. This directory is not a loader

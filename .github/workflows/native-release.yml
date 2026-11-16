@@ -78,9 +78,42 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y build-essential clang cmake libclang-dev patchelf pkg-config \
-            libhdf5-dev libxcb1-dev libxrandr-dev libdbus-1-dev libx11-dev \
+            libaec-dev zlib1g-dev libxcb1-dev libxrandr-dev libdbus-1-dev libx11-dev \
             libwayland-dev libegl-dev libxkbcommon-dev libxkbcommon-x11-dev \
             libgl1-mesa-dev libvulkan-dev
+
+      - name: Build Linux HDF5 without a libcurl dependency
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          hdf5_version=1.10.11
+          hdf5_sha256=341684c5c0976b8c7e6951735a400275a90693604464cac73e9f323c696fc79c
+          hdf5_archive="$RUNNER_TEMP/hdf5-$hdf5_version.tar.gz"
+          hdf5_prefix="$RUNNER_TEMP/hdf5-no-curl"
+          curl -fsSLo "$hdf5_archive" \
+            "https://support.hdfgroup.org/ftp/HDF5/releases/hdf5-1.10/hdf5-$hdf5_version/src/hdf5-$hdf5_version.tar.gz"
+          printf '%s  %s\n' "$hdf5_sha256" "$hdf5_archive" | sha256sum --check
+          tar -xzf "$hdf5_archive" -C "$RUNNER_TEMP"
+          cmake -S "$RUNNER_TEMP/hdf5-$hdf5_version" -B "$RUNNER_TEMP/hdf5-build" \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_PREFIX="$hdf5_prefix" \
+            -DHDF5_INSTALL_LIB_DIR=lib \
+            -DBUILD_SHARED_LIBS=ON -DBUILD_STATIC_LIBS=OFF \
+            -DBUILD_TESTING=OFF -DHDF5_BUILD_TOOLS=OFF \
+            -DHDF5_BUILD_CPP_LIB=OFF -DHDF5_BUILD_HL_LIB=OFF \
+            -DHDF5_ENABLE_THREADSAFE=ON \
+            -DHDF5_ENABLE_Z_LIB_SUPPORT=ON -DHDF5_ENABLE_SZIP_SUPPORT=ON \
+            -DHDF5_ENABLE_ROS3_VFD=OFF
+          cmake --build "$RUNNER_TEMP/hdf5-build" --parallel 4
+          cmake --install "$RUNNER_TEMP/hdf5-build"
+          if readelf -d "$hdf5_prefix/lib/libhdf5.so" | grep -F 'libcurl'; then
+            echo 'Bundled HDF5 must not depend on libcurl' >&2
+            exit 1
+          fi
+          echo "HDF5_DIR=$hdf5_prefix" >> "$GITHUB_ENV"
+          echo "HDF5_ROOT=$hdf5_prefix" >> "$GITHUB_ENV"
+          echo "SNT3_HDF5_LIB_DIR=$hdf5_prefix/lib" >> "$GITHUB_ENV"
+          echo "PKG_CONFIG_PATH=$hdf5_prefix/lib/pkgconfig" >> "$GITHUB_ENV"
 
       - name: Install macOS build dependencies
         if: runner.os == 'macOS'
@@ -145,6 +178,7 @@ jobs:
           cp -R settings/runtime bundle/settings
           printf '# Local settings overrides\n' > bundle/settings/overrides.dip
           cp README.md LICENSE bundle/
+          cp "$RUNNER_TEMP/hdf5-1.10.11/COPYING" bundle/lib/HDF5-LICENSE
           # Keep HDF5 and its compression helpers beside the program.
           ldd bundle/h5jive | awk '/=> \/.*lib(hdf5[^.]*|sz|aec|z)\.so/ {print $3}' | while read -r library; do
             cp -L "$library" bundle/lib/
@@ -154,9 +188,21 @@ jobs:
             [ -e "$library" ] && patchelf --set-rpath '$ORIGIN' "$library"
           done
           ldd bundle/h5jive | awk '/libhdf5/ && !/bundle\/lib/ {print "HDF5 library is not bundled: " $0 > "/dev/stderr"; exit 1}'
+          if readelf -d bundle/lib/libhdf5.so* | grep -F 'libcurl.so'; then
+            echo 'Linux release must not require a host libcurl for HDF5' >&2
+            exit 1
+          fi
           bundle_exe="$PWD/bundle/h5jive"
           (cd "$(mktemp -d)" && "$bundle_exe" --inspect)
           tar -C bundle -czf dist/${{ matrix.archive }} .
+
+      - name: Smoke test Linux archive on openSUSE Leap
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          docker run --rm -v "$PWD/bundle:/opt/h5jive:ro" \
+            registry.opensuse.org/opensuse/leap:16.0 \
+            sh -euc 'cd /tmp; /opt/h5jive/h5jive --inspect'
 
       - name: Package macOS executable and libraries
         if: runner.os == 'macOS'

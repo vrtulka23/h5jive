@@ -1,10 +1,13 @@
 //! Read-only HDF5/NetCDF-4 access through `hdf5-metno`, plus classic NetCDF through `netcdf-reader`.
 use hdf5_metno::{
-    types::{FixedAscii, FixedUnicode, TypeDescriptor, VarLenArray, VarLenAscii, VarLenUnicode},
+    types::{
+        FixedAscii, FixedUnicode, FloatSize, IntSize, TypeDescriptor, VarLenArray, VarLenAscii,
+        VarLenUnicode,
+    },
     Attribute as H5Attribute, Dataset as H5Dataset, File as H5File, Group, Hyperslab, LocationType,
     ObjectReference1, ReferencedObject, SliceOrIndex,
 };
-use ndarray::IxDyn;
+use ndarray::{ArrayD, IxDyn};
 use netcdf_reader::{NcAttrValue, NcAttribute, NcFile, NcSliceInfo, NcSliceInfoElem, NcType};
 use std::{cell::RefCell, error::Error, fmt, path::Path};
 mod geolocation;
@@ -52,6 +55,17 @@ pub struct Region {
     pub fill_value: Option<f64>,
 }
 #[derive(Debug, Clone)]
+pub struct NumericEdit {
+    pub coordinates: Vec<usize>,
+    pub original: String,
+    pub replacement: String,
+}
+#[derive(Debug)]
+pub struct NumericApplyOutcome {
+    pub applied: usize,
+    pub error: Option<String>,
+}
+#[derive(Debug, Clone)]
 pub struct DatasetInfo {
     pub shape: Vec<usize>,
     pub elements: u128,
@@ -78,6 +92,7 @@ pub struct CoordinateAxis {
 enum Backend {
     Hdf5(H5File),
     ClassicNetcdf(NcFile),
+    Unavailable,
 }
 pub struct File {
     inner: Backend,
@@ -100,6 +115,107 @@ impl Default for OpenOptions {
     }
 }
 impl File {
+    pub fn numeric_cell(&self, path: &str, coordinates: &[usize]) -> Result<String> {
+        let Backend::Hdf5(file) = &self.inner else {
+            return Err(error("Editing requires an HDF5 or NetCDF-4 file"));
+        };
+        let dataset = self.region_h5_dataset(file, path)?;
+        read_numeric_cell(&dataset, coordinates)
+    }
+
+    pub fn validate_numeric_edit(&self, path: &str, value: &str) -> Result<String> {
+        let Backend::Hdf5(file) = &self.inner else {
+            return Err(error("Editing requires an HDF5 or NetCDF-4 file"));
+        };
+        let dataset = self.region_h5_dataset(file, path)?;
+        let descriptor = dataset
+            .dtype()
+            .map_err(error)?
+            .to_descriptor()
+            .map_err(error)?;
+        normalize_dataset_numeric_value(&dataset, &descriptor, value)
+    }
+
+    pub fn release_for_edit(&mut self) -> Result<()> {
+        if !matches!(self.inner, Backend::Hdf5(_)) {
+            return Err(error("Editing requires an HDF5 or NetCDF-4 file"));
+        }
+        self.region_datasets.borrow_mut().clear();
+        drop(std::mem::replace(&mut self.inner, Backend::Unavailable));
+        Ok(())
+    }
+
+    pub fn apply_numeric_edits(
+        path: &Path,
+        dataset_path: &str,
+        edits: &[NumericEdit],
+    ) -> NumericApplyOutcome {
+        let fail = |message: String| NumericApplyOutcome {
+            applied: 0,
+            error: Some(message),
+        };
+        let mut attempts = 0;
+        let file = loop {
+            match H5File::open_rw(path) {
+                Ok(file) => break file,
+                Err(err)
+                    if attempts < 30 && err.to_string().contains("already open for read-only") =>
+                {
+                    attempts += 1;
+                    std::thread::sleep(std::time::Duration::from_millis(100));
+                }
+                Err(err) => return fail(err.to_string()),
+            }
+        };
+        let dataset = match file.dataset(dataset_path) {
+            Ok(dataset) => dataset,
+            Err(err) => return fail(err.to_string()),
+        };
+        let descriptor = match dataset.dtype().and_then(|dtype| dtype.to_descriptor()) {
+            Ok(descriptor) => descriptor,
+            Err(err) => return fail(err.to_string()),
+        };
+        let mut replacements = Vec::with_capacity(edits.len());
+        for edit in edits {
+            match normalize_dataset_numeric_value(&dataset, &descriptor, &edit.replacement) {
+                Ok(replacement) => replacements.push(replacement),
+                Err(err) => return fail(err.to_string()),
+            }
+            match read_numeric_cell(&dataset, &edit.coordinates) {
+                Ok(current) if current == edit.original => {}
+                Ok(current) => {
+                    return fail(format!(
+                        "Cell {:?} changed on disk (expected {}, found {}). No edits were written.",
+                        edit.coordinates, edit.original, current
+                    ))
+                }
+                Err(err) => return fail(err.to_string()),
+            }
+        }
+        let mut applied = 0;
+        for (edit, replacement) in edits.iter().zip(&replacements) {
+            if let Err(err) =
+                write_numeric_cell(&dataset, &edit.coordinates, &descriptor, replacement)
+            {
+                return NumericApplyOutcome {
+                    applied,
+                    error: Some(err.to_string()),
+                };
+            }
+            applied += 1;
+        }
+        if let Err(err) = file.flush() {
+            return NumericApplyOutcome {
+                applied,
+                error: Some(err.to_string()),
+            };
+        }
+        NumericApplyOutcome {
+            applied,
+            error: None,
+        }
+    }
+
     fn region_h5_dataset(&self, file: &H5File, path: &str) -> Result<H5Dataset> {
         let mut cached = self.region_datasets.borrow_mut();
         if let Some(index) = cached.iter().position(|(name, _)| name == path) {
@@ -152,6 +268,7 @@ impl File {
                     netcdf_type_is_numeric(datatype),
                 )
             }
+            Backend::Unavailable => return Err(error("file is being updated")),
         };
         let elements = shape
             .iter()
@@ -215,6 +332,7 @@ impl File {
                 let variable = file.variable(path.trim_start_matches('/')).map_err(error)?;
                 Ok(convert(variable.attributes()))
             }
+            Backend::Unavailable => Err(error("file is being updated")),
         }
     }
     pub fn axis_names(&self, path: &str) -> Result<Vec<String>> {
@@ -286,6 +404,7 @@ impl File {
                 .iter()
                 .map(|dimension| dimension.name.clone())
                 .collect()),
+            Backend::Unavailable => Err(error("file is being updated")),
         }
     }
     pub fn coordinate_axes(&self, path: &str) -> Result<Vec<CoordinateAxis>> {
@@ -382,6 +501,7 @@ impl File {
                 .iter()
                 .map(|&n| n as usize)
                 .collect(),
+            Backend::Unavailable => return Err(error("file is being updated")),
         };
         if shape.len() != count.len()
             || start
@@ -440,6 +560,7 @@ impl File {
                     .0;
                 (data, fill_value)
             }
+            Backend::Unavailable => return Err(error("file is being updated")),
         };
         Ok(Region {
             data,
@@ -555,9 +676,199 @@ impl File {
                     fill_value: None,
                 })
             }
+            Backend::Unavailable => Err(error("file is being updated")),
         }
     }
 }
+fn numeric_cell_selection(dataset: &H5Dataset, coordinates: &[usize]) -> Result<Hyperslab> {
+    let shape = dataset.shape();
+    if coordinates.len() != shape.len()
+        || coordinates.is_empty()
+        || coordinates
+            .iter()
+            .zip(&shape)
+            .any(|(&index, &length)| index >= length)
+    {
+        return Err(error("Cell coordinates are outside the dataset"));
+    }
+    Ok(Hyperslab::from(
+        coordinates
+            .iter()
+            .map(|&index| SliceOrIndex::from(index..index + 1))
+            .collect::<Vec<_>>(),
+    ))
+}
+
+fn normalize_numeric_value(descriptor: &TypeDescriptor, text: &str) -> Result<String> {
+    macro_rules! parse_as {
+        ($ty:ty) => {
+            text.trim()
+                .parse::<$ty>()
+                .map(|value| value.to_string())
+                .map_err(|_| error(format!("Invalid {descriptor} value: {text}")))
+        };
+    }
+    match descriptor {
+        TypeDescriptor::Integer(IntSize::U1) => parse_as!(i8),
+        TypeDescriptor::Integer(IntSize::U2) => parse_as!(i16),
+        TypeDescriptor::Integer(IntSize::U4) => parse_as!(i32),
+        TypeDescriptor::Integer(IntSize::U8) => parse_as!(i64),
+        TypeDescriptor::Unsigned(IntSize::U1) => parse_as!(u8),
+        TypeDescriptor::Unsigned(IntSize::U2) => parse_as!(u16),
+        TypeDescriptor::Unsigned(IntSize::U4) => parse_as!(u32),
+        TypeDescriptor::Unsigned(IntSize::U8) => parse_as!(u64),
+        TypeDescriptor::Float(FloatSize::U4) => parse_as!(f32),
+        TypeDescriptor::Float(FloatSize::U8) => parse_as!(f64),
+        _ => Err(error(format!(
+            "Editing {descriptor} values is not supported"
+        ))),
+    }
+}
+
+fn normalize_dataset_numeric_value(
+    dataset: &H5Dataset,
+    descriptor: &TypeDescriptor,
+    text: &str,
+) -> Result<String> {
+    let text = text.trim();
+    if text.eq_ignore_ascii_case("fill") {
+        return read_dataset_fill_value(dataset, descriptor);
+    }
+    let special = if text.eq_ignore_ascii_case("nan") {
+        Some(f64::NAN)
+    } else if text.eq_ignore_ascii_case("+inf")
+        || text.eq_ignore_ascii_case("inf")
+        || text.eq_ignore_ascii_case("+infinity")
+        || text.eq_ignore_ascii_case("infinity")
+    {
+        Some(f64::INFINITY)
+    } else if text.eq_ignore_ascii_case("-inf") || text.eq_ignore_ascii_case("-infinity") {
+        Some(f64::NEG_INFINITY)
+    } else {
+        None
+    };
+    if let Some(value) = special {
+        return match descriptor {
+            TypeDescriptor::Float(FloatSize::U4) => Ok((value as f32).to_string()),
+            TypeDescriptor::Float(FloatSize::U8) => Ok(value.to_string()),
+            _ => Err(error("NaN and infinities require a floating-point dataset")),
+        };
+    }
+    normalize_numeric_value(descriptor, text)
+}
+
+fn read_dataset_fill_value(dataset: &H5Dataset, descriptor: &TypeDescriptor) -> Result<String> {
+    let attribute = dataset
+        .attr("_FillValue")
+        .map_err(|_| error("This dataset has no _FillValue attribute"))?;
+    if attribute.size() != 1 {
+        return Err(error("The _FillValue attribute must contain one value"));
+    }
+    let fill_type = attribute
+        .dtype()
+        .map_err(error)?
+        .to_descriptor()
+        .map_err(error)?;
+    if &fill_type != descriptor {
+        return Err(error("The _FillValue type does not match the dataset type"));
+    }
+    macro_rules! read_as {
+        ($ty:ty) => {
+            attribute
+                .read_raw::<$ty>()
+                .map_err(error)?
+                .into_iter()
+                .next()
+                .map(|value| value.to_string())
+                .ok_or_else(|| error("The _FillValue attribute is empty"))
+        };
+    }
+    match descriptor {
+        TypeDescriptor::Integer(IntSize::U1) => read_as!(i8),
+        TypeDescriptor::Integer(IntSize::U2) => read_as!(i16),
+        TypeDescriptor::Integer(IntSize::U4) => read_as!(i32),
+        TypeDescriptor::Integer(IntSize::U8) => read_as!(i64),
+        TypeDescriptor::Unsigned(IntSize::U1) => read_as!(u8),
+        TypeDescriptor::Unsigned(IntSize::U2) => read_as!(u16),
+        TypeDescriptor::Unsigned(IntSize::U4) => read_as!(u32),
+        TypeDescriptor::Unsigned(IntSize::U8) => read_as!(u64),
+        TypeDescriptor::Float(FloatSize::U4) => read_as!(f32),
+        TypeDescriptor::Float(FloatSize::U8) => read_as!(f64),
+        _ => Err(error(format!(
+            "Editing {descriptor} values is not supported"
+        ))),
+    }
+}
+
+fn read_numeric_cell(dataset: &H5Dataset, coordinates: &[usize]) -> Result<String> {
+    let descriptor = dataset
+        .dtype()
+        .map_err(error)?
+        .to_descriptor()
+        .map_err(error)?;
+    macro_rules! read_as {
+        ($ty:ty) => {{
+            dataset
+                .read_slice::<$ty, _, IxDyn>(numeric_cell_selection(dataset, coordinates)?)
+                .map_err(error)?
+                .into_raw_vec_and_offset()
+                .0
+                .into_iter()
+                .next()
+                .ok_or_else(|| error("Cell read returned no value"))
+                .map(|value| value.to_string())
+        }};
+    }
+    match descriptor {
+        TypeDescriptor::Integer(IntSize::U1) => read_as!(i8),
+        TypeDescriptor::Integer(IntSize::U2) => read_as!(i16),
+        TypeDescriptor::Integer(IntSize::U4) => read_as!(i32),
+        TypeDescriptor::Integer(IntSize::U8) => read_as!(i64),
+        TypeDescriptor::Unsigned(IntSize::U1) => read_as!(u8),
+        TypeDescriptor::Unsigned(IntSize::U2) => read_as!(u16),
+        TypeDescriptor::Unsigned(IntSize::U4) => read_as!(u32),
+        TypeDescriptor::Unsigned(IntSize::U8) => read_as!(u64),
+        TypeDescriptor::Float(FloatSize::U4) => read_as!(f32),
+        TypeDescriptor::Float(FloatSize::U8) => read_as!(f64),
+        _ => Err(error(format!(
+            "Editing {descriptor} values is not supported"
+        ))),
+    }
+}
+
+fn write_numeric_cell(
+    dataset: &H5Dataset,
+    coordinates: &[usize],
+    descriptor: &TypeDescriptor,
+    text: &str,
+) -> Result<()> {
+    let shape = vec![1; coordinates.len()];
+    macro_rules! write_as {
+        ($ty:ty) => {{
+            let value = text.parse::<$ty>().map_err(error)?;
+            let values = ArrayD::from_elem(IxDyn(&shape), value);
+            dataset
+                .write_slice(values.view(), numeric_cell_selection(dataset, coordinates)?)
+                .map_err(error)
+        }};
+    }
+    match descriptor {
+        TypeDescriptor::Integer(IntSize::U1) => write_as!(i8),
+        TypeDescriptor::Integer(IntSize::U2) => write_as!(i16),
+        TypeDescriptor::Integer(IntSize::U4) => write_as!(i32),
+        TypeDescriptor::Integer(IntSize::U8) => write_as!(i64),
+        TypeDescriptor::Unsigned(IntSize::U1) => write_as!(u8),
+        TypeDescriptor::Unsigned(IntSize::U2) => write_as!(u16),
+        TypeDescriptor::Unsigned(IntSize::U4) => write_as!(u32),
+        TypeDescriptor::Unsigned(IntSize::U8) => write_as!(u64),
+        TypeDescriptor::Float(FloatSize::U4) => write_as!(f32),
+        TypeDescriptor::Float(FloatSize::U8) => write_as!(f64),
+        _ => Err(error(format!(
+            "Editing {descriptor} values is not supported"
+        ))),
+    }
+}
+
 fn find_entry<'a>(root: &'a Entry, path: &str) -> Option<&'a Entry> {
     if root.path == path {
         return Some(root);

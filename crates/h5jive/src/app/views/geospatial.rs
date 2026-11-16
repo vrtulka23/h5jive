@@ -50,6 +50,7 @@ pub(crate) fn draw_scan_filter_controls(
     filter: &mut ScanFilter,
     palette: &Palette,
     width: f32,
+    tutorial_tips: bool,
 ) {
     let buttons = [
         (ScanFilter::Both, "both", "Show both scan directions"),
@@ -112,7 +113,12 @@ pub(crate) fn draw_scan_filter_controls(
         if clicked {
             *filter = choice;
         }
-        ui.set_item_tooltip(tooltip);
+        item_tip(
+            ui,
+            tutorial_tips,
+            tooltip,
+            "Choose which scan direction appears on the map.",
+        );
     }
 }
 
@@ -124,6 +130,7 @@ fn pixel_style_button(
     enabled: bool,
     palette: &Palette,
     width: f32,
+    tutorial_tips: bool,
 ) -> bool {
     let clicked = ui.invisible_button(format!("{id}_{style}"), [width, GEO_SPECIAL_BUTTON_HEIGHT]);
     let min = ui.item_rect_min();
@@ -179,15 +186,20 @@ fn pixel_style_button(
     }
     drop(draw);
     if hovered {
-        ui.set_item_tooltip(if enabled {
-            [
-                "Show ground pixel centers",
-                "Show ground pixel edges",
-                "Show filled ground pixel footprints",
-            ][style]
-        } else {
-            "Pixel edges and fills require latitude/longitude bounds."
-        });
+        item_tip(
+            ui,
+            tutorial_tips,
+            if enabled {
+                [
+                    "Show ground pixel centers",
+                    "Show ground pixel edges",
+                    "Show filled ground pixel footprints",
+                ][style]
+            } else {
+                "Pixel edges and fills require latitude/longitude bounds."
+            },
+            "Switch between point, outline, and filled pixel views.",
+        );
     }
     clicked && enabled
 }
@@ -200,6 +212,7 @@ pub(crate) fn draw_layer_controls(
     dummy_rgb: &mut [f32; 3],
     data_opacity: &mut f32,
     palette: &Palette,
+    tutorial_tips: bool,
 ) {
     let _dummy_button_color = (*dummy_color).then(|| {
         ui.push_style_color(
@@ -210,13 +223,22 @@ pub(crate) fn draw_layer_controls(
     if ui.button(format!("Dummy color##{id}")) {
         *dummy_color = !*dummy_color;
     }
+    item_tip(
+        ui,
+        tutorial_tips,
+        "",
+        "Use one color for ordinary satellite pixels.",
+    );
     drop(_dummy_button_color);
     ui.same_line_with_spacing(0.0, CONTROL_INLINE_GAP);
     ui.color_edit3_config(format!("##dummy_picker_{id}"), dummy_rgb)
         .flags(ColorEditFlags::NO_INPUTS | ColorEditFlags::NO_LABEL)
         .build();
-    ui.set_item_tooltip(
+    item_tip(
+        ui,
+        tutorial_tips,
         "Choose the color used for ordinary satellite pixels when Dummy color is on.",
+        "Pick a color that stands out against the map background.",
     );
     ui.same_line_with_spacing(0.0, CONTROL_INLINE_GAP);
     ui.text("Data opacity");
@@ -226,7 +248,12 @@ pub(crate) fn draw_layer_controls(
     if ui.slider(format!("##data_opacity_{id}"), 0, 100, &mut opacity_percent) {
         *data_opacity = opacity_percent as f32 / 100.0;
     }
-    ui.set_item_tooltip("Data opacity (%)");
+    item_tip(
+        ui,
+        tutorial_tips,
+        "Data opacity (%)",
+        "Lower opacity to see the map beneath the data.",
+    );
 }
 
 pub(crate) fn draw_pixel_style_controls(
@@ -236,6 +263,7 @@ pub(crate) fn draw_pixel_style_controls(
     has_bounds: bool,
     palette: &Palette,
     width: f32,
+    tutorial_tips: bool,
 ) {
     if !has_bounds {
         *pixel_style = 0;
@@ -249,6 +277,7 @@ pub(crate) fn draw_pixel_style_controls(
             style == 0 || has_bounds,
             palette,
             width,
+            tutorial_tips,
         ) {
             *pixel_style = style;
         }
@@ -305,6 +334,7 @@ pub(crate) fn draw_geo_view_controls(
     shape: Option<&[usize]>,
     pinned_axis_name: &str,
     palette: &Palette,
+    tutorial_tips: bool,
 ) {
     draw_layer_controls(
         ui,
@@ -313,6 +343,7 @@ pub(crate) fn draw_geo_view_controls(
         &mut options.dummy_rgb,
         &mut options.opacity,
         palette,
+        tutorial_tips,
     );
     if let Some(shape) = shape.filter(|shape| shape.len() >= 3) {
         let mut time_index = options.time.map_or(0, |index| index + 1) as i32;
@@ -322,6 +353,12 @@ pub(crate) fn draw_geo_view_controls(
         {
             options.time = (time_index > 0).then_some((time_index - 1) as usize);
         }
+        item_tip(
+            ui,
+            tutorial_tips,
+            "",
+            "Choose one time index, or 0 to include all times.",
+        );
     }
     if let Some(shape) = shape.filter(|shape| shape.len() == 4) {
         let mut pinned = options.pinned.min(shape[3] - 1) as i32;
@@ -335,6 +372,12 @@ pub(crate) fn draw_geo_view_controls(
         {
             options.pinned = pinned as usize;
         }
+        item_tip(
+            ui,
+            tutorial_tips,
+            "",
+            "Pick a single index of the remaining dimension.",
+        );
     }
 }
 
@@ -374,6 +417,7 @@ pub(crate) fn draw_geo_controls(
             shape,
             pinned_axis_name,
             &settings.palette,
+            settings.tutorial_tips,
         );
         changes.site_changed = draw_pics_controls(
             ui,
@@ -382,6 +426,7 @@ pub(crate) fn draw_geo_controls(
             selected_pics,
             selected_site_group,
             &settings.pics_sites,
+            settings.tutorial_tips,
         );
         ui.table_next_column();
         let available = ui.content_region_avail()[0].max(1.0);
@@ -398,6 +443,7 @@ pub(crate) fn draw_geo_controls(
                     has_bounds,
                     &settings.palette,
                     button_width,
+                    settings.tutorial_tips,
                 );
             });
             let pixel_right = ui.item_rect_max()[0];
@@ -409,6 +455,7 @@ pub(crate) fn draw_geo_controls(
                     &mut controls.draft.scan_filter,
                     &settings.palette,
                     button_width,
+                    settings.tutorial_tips,
                 );
             });
             debug_assert!(ui.item_rect_min()[0] >= pixel_right + PANEL_GAP - 1.0);
@@ -421,6 +468,7 @@ pub(crate) fn draw_geo_controls(
                 has_bounds,
                 &settings.palette,
                 available.min(GEO_SPECIAL_BUTTON_WIDTH),
+                settings.tutorial_tips,
             );
         }
         controls.applied.pixel_style = controls.draft.pixel_style;
@@ -428,9 +476,9 @@ pub(crate) fn draw_geo_controls(
             controls.applied.scan_filter = controls.draft.scan_filter;
         }
         ui.table_next_column();
-        let pending = controls.draft != controls.applied;
+        let pending = DraftPair::new(&controls.draft, &mut controls.applied).pending();
         if draw_update_button_with_height(ui, settings, pending, geo_update_height(ui, settings)) {
-            controls.applied = controls.draft;
+            DraftPair::new(&controls.draft, &mut controls.applied).apply();
             changes.refresh_data = true;
         }
     }
@@ -444,9 +492,16 @@ pub(crate) fn draw_pics_controls(
     selected_pics: &mut usize,
     selected_group: &mut Option<String>,
     sites: &[PicsSite],
+    tutorial_tips: bool,
 ) -> bool {
     let available = ui.content_region_avail()[0];
     ui.checkbox(format!("Cal/val sites##{id}"), show_pics);
+    item_tip(
+        ui,
+        tutorial_tips,
+        "",
+        "Show or hide calibration and validation site markers.",
+    );
     if !*show_pics {
         return false;
     }
@@ -473,6 +528,7 @@ pub(crate) fn draw_pics_controls(
             .map(|index| groups[index].to_owned());
         *selected_pics = 0;
     }
+    item_tip(ui, tutorial_tips, "", "Narrow the site list by category.");
     let site_indices: Vec<usize> = sites
         .iter()
         .enumerate()
@@ -500,7 +556,12 @@ pub(crate) fn draw_pics_controls(
             .checked_sub(1)
             .map_or(0, |index| site_indices[index] + 1);
     }
-    ui.set_item_tooltip("Select a site to center the view on its region.");
+    item_tip(
+        ui,
+        tutorial_tips,
+        "Select a site to center the view on its region.",
+        "Choose a named site to zoom the map there.",
+    );
     changed
 }
 

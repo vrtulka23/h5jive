@@ -218,7 +218,7 @@ impl App {
         } else if previous_camera.1 != self.volume_pan
             || previous_camera.2 != self.volume_rotation.0
         {
-            self.volume_navigation_at = None;
+            self.volume_navigation_at = Some(Instant::now());
         }
         let draw = ui.get_window_draw_list();
         draw.add_rect(
@@ -277,6 +277,7 @@ impl App {
             self.settings.volume_back_brightness,
         );
         let mut displayed_range = None;
+        let mut render_status = None;
         let mut layers = self
             .volume_refined_cache
             .iter()
@@ -313,13 +314,18 @@ impl App {
                 };
                 displayed_range = range;
                 let palette = &self.settings.palette;
+                let canvas_size = [
+                    size[0].ceil().max(1.0) as u32,
+                    size[1].ceil().max(1.0) as u32,
+                ];
                 let raster_key = VolumeRasterKey {
                     volume: key.clone(),
                     layer_keys: layers.iter().map(|(cached, _)| cached.clone()).collect(),
-                    size: [
-                        size[0].ceil().max(1.0) as u32,
-                        size[1].ceil().max(1.0) as u32,
-                    ],
+                    size: canvas_size,
+                    render_size: interactive_raster_size(
+                        canvas_size,
+                        !Self::refinement_settled(self.volume_navigation_at),
+                    ),
                     center: [center[0] - origin[0], center[1] - origin[1]],
                     scale,
                     rotation: self.volume_rotation.0,
@@ -346,7 +352,7 @@ impl App {
                     .as_ref()
                     .is_some_and(|(cached, _)| cached == &raster_key);
                 let preview = self.volume_raster_preview(&raster_key, &key);
-                if !raster_is_current && Self::refinement_settled(self.volume_navigation_at) {
+                if !raster_is_current {
                     let colors = std::array::from_fn(|index| {
                         continuous_color(
                             plot_ctx,
@@ -361,7 +367,7 @@ impl App {
                         colors,
                     });
                 }
-                if let Some((texture, preview_min, preview_max)) = preview {
+                if let Some((displayed, texture, preview_min, preview_max)) = preview {
                     draw.add_image(
                         texture,
                         [origin[0] + preview_min[0], origin[1] + preview_min[1]],
@@ -370,6 +376,14 @@ impl App {
                         [1.0, 1.0],
                         [1.0; 4],
                     );
+                    let status = if displayed.render_size != displayed.size {
+                        "Preview"
+                    } else if raster_is_current {
+                        "Settled"
+                    } else {
+                        "Updating"
+                    };
+                    render_status = Some((status, displayed.render_size, data.sampled));
                 } else {
                     draw.add_text(
                         [origin[0] + 8.0, origin[1] + 28.0],
@@ -377,24 +391,6 @@ impl App {
                         "Rendering voxel data...",
                     );
                 }
-                draw.add_text(
-                    [origin[0] + 8.0, origin[1] + 8.0],
-                    self.settings.palette.text,
-                    format!(
-                        "{} voxels{}{} | left drag: rotate | right drag: move | wheel: zoom",
-                        data.values.len(),
-                        if data.sampled {
-                            " (sampled preview)"
-                        } else {
-                            ""
-                        },
-                        if self.volume_job.is_some() {
-                            " (refining)"
-                        } else {
-                            ""
-                        }
-                    ),
-                );
             }
             None if self
                 .volume_cache
@@ -431,6 +427,51 @@ impl App {
                 self.settings.palette.text,
             );
         }
+        if let Some((status, render_size, source_sampled)) = render_status {
+            let detail = format!("{} × {} px", render_size[0], render_size[1]);
+            let source = if source_sampled {
+                "Sampled voxel detail"
+            } else {
+                "Native voxel detail"
+            };
+            let status_size = ui.calc_text_size(status);
+            let detail_size = ui.calc_text_size(&detail);
+            let source_size = ui.calc_text_size(source);
+            let badge_width = (status_size[0] + detail_size[0] + 29.0).max(source_size[0] + 20.0);
+            let badge_height = status_size[1] + source_size[1] + 17.0;
+            if badge_width + 24.0 <= size[0] && badge_height + 24.0 <= size[1] {
+                let badge_min = [origin[0] + size[0] - badge_width - 12.0, origin[1] + 12.0];
+                let badge_max = [badge_min[0] + badge_width, badge_min[1] + badge_height];
+                let mut background = self.settings.palette.panel;
+                background[3] = 1.0;
+                draw_control_surface(
+                    &draw,
+                    badge_min,
+                    badge_max,
+                    background,
+                    self.settings.palette.border,
+                    4.0,
+                );
+                let text_y = badge_min[1] + 5.0;
+                draw.add_text(
+                    [badge_min[0] + 10.0, text_y],
+                    self.settings.palette.accent,
+                    status,
+                );
+                draw.add_text(
+                    [badge_min[0] + 19.0 + status_size[0], text_y],
+                    self.settings.palette.text,
+                    detail,
+                );
+                let mut source_color = self.settings.palette.text;
+                source_color[3] *= 0.7;
+                draw.add_text(
+                    [badge_min[0] + 10.0, text_y + status_size[1] + 3.0],
+                    source_color,
+                    source,
+                );
+            }
+        }
         drop(clip);
         draw_volume_legend(
             &draw,
@@ -452,6 +493,7 @@ impl App {
             self.volume_zoom,
             &mut self.volume_visibility,
             &self.settings.palette,
+            self.settings.tutorial_tips,
         );
         if visibility_changed {
             self.profile_cache = None;
@@ -479,7 +521,7 @@ impl App {
         } else if previous_camera.1 != self.volume_pan
             || previous_camera.2 != self.volume_rotation.0
         {
-            self.volume_navigation_at = None;
+            self.volume_navigation_at = Some(Instant::now());
         }
     }
 

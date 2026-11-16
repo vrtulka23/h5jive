@@ -176,7 +176,12 @@ impl PluginLab {
                             ui.clone_style().frame_rounding(),
                         );
                         (plugin.icon)(&draw, min, max, palette.view_stroke);
-                        ui.set_item_tooltip(format!("{} - {}", plugin.title, plugin.description));
+                        item_tip(
+                            ui,
+                            settings.tutorial_tips,
+                            &format!("{} - {}", plugin.title, plugin.description),
+                            "Click to open this tool.",
+                        );
                     }
                 });
         }

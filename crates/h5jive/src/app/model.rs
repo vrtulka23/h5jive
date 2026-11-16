@@ -1,6 +1,34 @@
 //! Draft widget state and view-specific controls kept on the GUI side.
 use super::*;
 
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub(crate) struct CellKey {
+    pub(crate) file: usize,
+    pub(crate) path: String,
+    pub(crate) coordinates: Vec<usize>,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct PendingCellEdit {
+    pub(crate) original: String,
+    pub(crate) replacement: String,
+}
+
+pub(crate) struct CellEditor {
+    pub(crate) key: CellKey,
+    pub(crate) original: String,
+    pub(crate) text: String,
+    pub(crate) focus: bool,
+}
+
+pub(crate) struct CellEditJob {
+    pub(crate) file: usize,
+    pub(crate) path: String,
+    pub(crate) restore_selection: Option<Selection>,
+    pub(crate) keys: Vec<CellKey>,
+    pub(crate) receiver: mpsc::Receiver<(h5jive_data::NumericApplyOutcome, Result<File, String>)>,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct GeoViewOptions {
     pub(crate) time: Option<usize>,

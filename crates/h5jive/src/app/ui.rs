@@ -76,25 +76,91 @@ pub(super) fn draw_control_surface(
     draw.add_rect(min, max, border).rounding(rounding).build();
 }
 
+/// A passive status badge anchored inside the figure, clear of its right rail.
+pub(super) fn draw_render_badge(
+    ui: &Ui,
+    draw: &DrawListMut<'_>,
+    min: [f32; 2],
+    max: [f32; 2],
+    status: &str,
+    detail: &str,
+    palette: &Palette,
+) {
+    let status_size = ui.calc_text_size(status);
+    let detail_size = ui.calc_text_size(detail);
+    let width = status_size[0].max(detail_size[0]) + 22.0;
+    let height = status_size[1] + detail_size[1] + 19.0;
+    if max[0] - min[0] < width + 24.0 || max[1] - min[1] < height + 24.0 {
+        return;
+    }
+    let left = max[0] - width - 12.0;
+    let top = min[1] + 12.0;
+    let mut background = palette.panel;
+    background[3] = 0.90;
+    draw_control_surface(
+        draw,
+        [left, top],
+        [left + width, top + height],
+        background,
+        palette.border,
+        4.0,
+    );
+    draw.add_text([left + 11.0, top + 7.0], palette.accent, status);
+    draw.add_text(
+        [left + 11.0, top + 10.0 + status_size[1]],
+        palette.text,
+        detail,
+    );
+}
+
+pub(super) fn geo_render_badge(data: &MapData, current: bool) -> (&'static str, String) {
+    let status = if !current {
+        "Updating"
+    } else if data.preview {
+        "Preview"
+    } else if data.aggregated {
+        "Aggregated"
+    } else if data.sampled {
+        "Sampled"
+    } else {
+        "Native"
+    };
+    let unit = if data.aggregated { "cells" } else { "points" };
+    (status, format!("{} {unit}", data.points.len()))
+}
+
 pub(super) fn draw_plot_navigation(
     ui: &Ui,
     id: &str,
     origin: [f32; 2],
     width: f32,
     zoom: f32,
+    tutorial_tips: bool,
 ) -> PlotNavAction {
     ui.set_cursor_screen_pos(origin);
     let reset = ui.button_with_size(format!("Reset##plot_nav_{id}"), [width.max(1.0), 22.0]);
-    ui.set_item_tooltip("Restore the initial view");
+    item_tip(
+        ui,
+        tutorial_tips,
+        "Restore the initial view",
+        "Return to the initial zoom and position.",
+    );
     ui.set_cursor_screen_pos([origin[0], origin[1] + 22.0 + CONTROL_INLINE_GAP]);
     let label = format!("{zoom:.1}×");
     let button_width =
         ((width - ui.calc_text_size(&label)[0] - 2.0 * CONTROL_INLINE_GAP) * 0.5).max(1.0);
     let out = ui.button_with_size(format!("<##plot_nav_out_{id}"), [button_width, 0.0]);
+    item_tip(
+        ui,
+        tutorial_tips,
+        "",
+        "Zoom out to see more of the dataset.",
+    );
     ui.same_line_with_spacing(0.0, CONTROL_INLINE_GAP);
     ui.text(label);
     ui.same_line_with_spacing(0.0, CONTROL_INLINE_GAP);
     let inside = ui.button_with_size(format!(">##plot_nav_in_{id}"), [button_width, 0.0]);
+    item_tip(ui, tutorial_tips, "", "Zoom in for more detail.");
     if reset {
         PlotNavAction::Reset
     } else if out {
@@ -114,15 +180,17 @@ pub(super) fn draw_visibility_navigation(
     zoom: f32,
     visibility: &mut ValueVisibility,
     palette: &Palette,
+    tutorial_tips: bool,
 ) -> (PlotNavAction, bool) {
     ui.set_cursor_screen_pos(origin);
-    let changed = visibility.draw_panel(ui, palette, width);
+    let changed = visibility.draw_panel(ui, palette, width, tutorial_tips);
     let nav = draw_plot_navigation(
         ui,
         id,
         [origin[0], origin[1] + VALUE_GRID_HEIGHT + PANEL_GAP],
         width,
         zoom,
+        tutorial_tips,
     );
     (nav, changed)
 }
@@ -131,6 +199,54 @@ pub(super) fn draw_visibility_navigation(
 mod navigation_tests {
     use super::*;
     use dear_app::imgui::{Condition, Context};
+
+    #[test]
+    fn value_table_row_height_is_stable_while_editing() {
+        let mut context = Context::create();
+        context.set_ini_filename(None::<String>).unwrap();
+        context.io_mut().set_display_size([500.0, 300.0]);
+        context.io_mut().set_delta_time(1.0 / 60.0);
+        context
+            .font_atlas()
+            .try_claim_legacy_renderer()
+            .unwrap()
+            .build();
+        let mut next_row_positions = Vec::new();
+        let mut cell_bounds = Vec::new();
+        for editing in [false, true] {
+            let ui = context.frame();
+            ui.window("Stable value rows")
+                .size([400.0, 200.0], Condition::Always)
+                .build(|| {
+                    let _padding = ui.push_style_var(StyleVar::CellPadding(TABLE_CELL_PADDING));
+                    if let Some(_table) = ui.begin_table("values", 1) {
+                        let row_height = ui.frame_height() + 2.0 * TABLE_CELL_PADDING[1];
+                        ui.table_next_row_with_flags(TableRowFlags::NONE, row_height);
+                        ui.table_next_column();
+                        if editing {
+                            let mut value = "42".to_owned();
+                            ui.set_next_item_width(120.0);
+                            ui.input_text("##cell", &mut value).build();
+                        } else {
+                            let _align = ui.push_style_var(StyleVar::ButtonTextAlign([0.0, 0.5]));
+                            ui.button_with_size("42##cell", [120.0, ui.frame_height()]);
+                        }
+                        cell_bounds.push((ui.item_rect_min(), ui.item_rect_max()));
+                        ui.table_next_row_with_flags(TableRowFlags::NONE, row_height);
+                        ui.table_next_column();
+                        ui.text("next row");
+                        next_row_positions.push(ui.item_rect_min()[1]);
+                    }
+                });
+            context.end_frame();
+        }
+        assert_eq!(next_row_positions.len(), 2);
+        assert!((next_row_positions[0] - next_row_positions[1]).abs() < 0.5);
+        for axis in 0..2 {
+            assert!((cell_bounds[0].0[axis] - cell_bounds[1].0[axis]).abs() < 0.5);
+            assert!((cell_bounds[0].1[axis] - cell_bounds[1].1[axis]).abs() < 0.5);
+        }
+    }
 
     #[test]
     fn loading_indicator_stays_centered_as_label_width_changes() {
@@ -177,6 +293,7 @@ mod navigation_tests {
                         &mut geolocation_cache,
                         &settings.dataset_rules,
                         true,
+                        settings.tutorial_tips,
                         &settings.palette,
                     );
                 }
@@ -279,6 +396,7 @@ mod navigation_tests {
                                 1.0,
                                 &mut visibility,
                                 &settings.palette,
+                                settings.tutorial_tips,
                             );
                             if frame == 1 {
                                 assert_eq!(ui.scroll_max_y(), 0.0);
@@ -311,7 +429,19 @@ pub(super) fn draw_update_button_with_height(
         .rounding(ui.clone_style().frame_rounding())
         .thickness(3.0)
         .build();
-        ui.set_item_tooltip("Changes pending - click Update");
+        item_tip(
+            ui,
+            settings.tutorial_tips,
+            "Changes pending - click Update",
+            "Apply the view controls to refresh what is shown.",
+        );
+    } else {
+        item_tip(
+            ui,
+            settings.tutorial_tips,
+            "",
+            "Change a view control, then click Update to redraw.",
+        );
     }
     clicked
 }
@@ -574,6 +704,7 @@ pub(super) fn draw_file_root(
     source: &File,
     file: usize,
     selected: &mut Option<Selection>,
+    tutorial_tips: bool,
     palette: &Palette,
 ) {
     let row_x = ui.cursor_screen_pos()[0];
@@ -591,6 +722,12 @@ pub(super) fn draw_file_root(
         draw_selected_tree_row(ui, palette);
     }
     draw_tree_entry_icons(ui, row_x, false, false, false, palette);
+    item_tip(
+        ui,
+        tutorial_tips,
+        "",
+        "Select the file itself to inspect its root attributes.",
+    );
 }
 
 pub(crate) fn draw_entry(
@@ -603,6 +740,7 @@ pub(crate) fn draw_entry(
     geolocation_cache: &mut HashMap<(usize, String), Option<Geolocation>>,
     dataset_rules: &[GeolocationRule],
     show_shape: bool,
+    tutorial_tips: bool,
     palette: &Palette,
 ) {
     let geolocation = match &entry.kind {
@@ -650,11 +788,18 @@ pub(crate) fn draw_entry(
             }
             node.push()
         };
+        let clicked = ui.is_item_clicked();
         if is_selected {
             draw_selected_tree_row(ui, palette);
         }
         draw_tree_entry_icons(ui, row_x, true, false, has_parent, palette);
-        if ui.is_item_clicked() {
+        item_tip(
+            ui,
+            tutorial_tips,
+            "",
+            "Click to inspect this group; use its arrow to expand children.",
+        );
+        if clicked {
             *selected = Some(Selection {
                 file,
                 path: entry.path.clone(),
@@ -672,6 +817,7 @@ pub(crate) fn draw_entry(
                     geolocation_cache,
                     dataset_rules,
                     show_shape,
+                    tutorial_tips,
                     palette,
                 );
             }
@@ -682,6 +828,15 @@ pub(crate) fn draw_entry(
             .as_ref()
             .is_some_and(|s| s.file == file && s.path == entry.path);
         let clicked = ui.selectable_config(&label).selected(is_selected).build();
+        let normal_tip = geolocation
+            .as_ref()
+            .map(|geo| {
+                format!(
+                    "Geolocated dataset\nLatitude: {}\nLongitude: {}",
+                    geo.latitude, geo.longitude
+                )
+            })
+            .unwrap_or_default();
         if clicked {
             *selected = Some(Selection {
                 file,
@@ -692,12 +847,12 @@ pub(crate) fn draw_entry(
             draw_selected_tree_row(ui, palette);
         }
         draw_tree_entry_icons(ui, row_x, false, geolocation.is_some(), has_parent, palette);
-        if let Some(geolocation) = geolocation {
-            ui.set_item_tooltip(format!(
-                "Geolocated dataset\nLatitude: {}\nLongitude: {}",
-                geolocation.latitude, geolocation.longitude
-            ));
-        }
+        item_tip(
+            ui,
+            tutorial_tips,
+            &normal_tip,
+            "Select this dataset to inspect values, plots, and attributes.",
+        );
     }
 }
 
@@ -869,11 +1024,26 @@ pub(super) fn table_extent(
     rows: usize,
     padding: f32,
 ) -> ([f32; 2], bool) {
+    let vertical_padding = ui.clone_style().cell_padding()[1];
+    table_extent_with_row_height(
+        ui,
+        content_width,
+        rows,
+        padding,
+        ui.text_line_height() + 2.0 * vertical_padding,
+    )
+}
+
+pub(super) fn table_extent_with_row_height(
+    ui: &Ui,
+    content_width: f32,
+    rows: usize,
+    padding: f32,
+    row_height: f32,
+) -> ([f32; 2], bool) {
     let available = ui.content_region_avail();
     let vertical_padding = ui.clone_style().cell_padding()[1];
-    let content_height = ui.frame_height()
-        + rows as f32 * (ui.text_line_height() + 2.0 * vertical_padding)
-        + 2.0 * vertical_padding;
+    let content_height = ui.frame_height() + rows as f32 * row_height + 2.0 * vertical_padding;
     let scroll = content_width + 8.0 > available[0] || content_height + 8.0 > available[1];
     if scroll {
         let scrollbar_space = padding;

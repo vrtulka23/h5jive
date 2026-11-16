@@ -540,14 +540,17 @@ fn draw_entry_header(
         });
     }
     if ui.is_item_hovered() {
-        ui.set_item_tooltip(if is_dataset {
-            format!(
-                "{}\nClick to expand or collapse both sides; double-click to inspect",
-                row.path
-            )
-        } else {
-            format!("{}\nClick to expand or collapse both sides", row.path)
-        });
+        item_plain_tip(
+            ui,
+            &if is_dataset {
+                format!(
+                    "{}\nClick to expand or collapse both sides; double-click to inspect",
+                    row.path
+                )
+            } else {
+                format!("{}\nClick to expand or collapse both sides", row.path)
+            },
+        );
     }
     (toggled, selected)
 }
@@ -571,7 +574,7 @@ fn draw_entry_detail(ui: &Ui, summary: Option<&EntrySummary>, attributes: bool, 
     );
     ui.text_colored(palette.muted, &detail);
     if ui.is_item_hovered() {
-        ui.set_item_tooltip(&detail);
+        item_plain_tip(ui, &detail);
     }
 }
 
@@ -976,6 +979,12 @@ pub(super) fn draw(lab: &mut PluginLab, ui: &Ui, context: PluginContext<'_>) -> 
         if ui.button(label) {
             lab.comparison.filter = if active { None } else { target };
         }
+        item_tip(
+            ui,
+            context.settings.tutorial_tips,
+            "",
+            "Filter the path table by this comparison status.",
+        );
     }
     if !same_file && lab.comparison.sync_job.is_none() {
         for (index, direction) in [SyncDirection::AToB, SyncDirection::BToA]
@@ -998,6 +1007,12 @@ pub(super) fn draw(lab: &mut PluginLab, ui: &Ui, context: PluginContext<'_>) -> 
                 lab.comparison.pending_sync = Some((direction, plans[index].clone()));
                 lab.comparison.show_sync_prompt = true;
             }
+            item_tip(
+                ui,
+                context.settings.tutorial_tips,
+                "",
+                "Review missing paths before copying them to the other file.",
+            );
         }
     }
     ui.spacing();
@@ -1031,7 +1046,7 @@ pub(super) fn draw(lab: &mut PluginLab, ui: &Ui, context: PluginContext<'_>) -> 
         ui.table_next_column();
         ui.text(format!("A  ·  {}", a.name));
         if ui.is_item_hovered() {
-            ui.set_item_tooltip(&a.name);
+            item_plain_tip(ui, &a.name);
         }
         ui.table_next_column();
         center_status_cell(ui, ui.calc_text_size("A/B")[0]);
@@ -1039,7 +1054,7 @@ pub(super) fn draw(lab: &mut PluginLab, ui: &Ui, context: PluginContext<'_>) -> 
         ui.table_next_column();
         ui.text(format!("B  ·  {}", b.name));
         if ui.is_item_hovered() {
-            ui.set_item_tooltip(&b.name);
+            item_plain_tip(ui, &b.name);
         }
         let mut clipper = ListClipper::new(items.len()).begin(ui);
         while clipper.step() {
@@ -1137,7 +1152,7 @@ pub(super) fn draw(lab: &mut PluginLab, ui: &Ui, context: PluginContext<'_>) -> 
                                     _ => row.status.label().into(),
                                 }
                             };
-                            ui.set_item_tooltip(detail);
+                            item_plain_tip(ui, &detail);
                         }
                         ui.table_next_column();
                         let (toggled, next) = draw_entry_header(

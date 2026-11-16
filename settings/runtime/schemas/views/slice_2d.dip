@@ -13,7 +13,7 @@ range_mode str = "auto"
   !labels ["Automatic data range", "Fixed numeric range"]
   !condition ({.} == "auto" || {.} == "fixed")
   !setup
-cell_size int = 4
+cell_size int = 2
   ?descr "Approximate displayed cell size in pixels."
   !condition ({.} >= 1 && {.} <= 64)
 value_min float = -1.0

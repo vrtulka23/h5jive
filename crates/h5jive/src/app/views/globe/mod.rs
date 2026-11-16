@@ -429,13 +429,22 @@ impl App {
                     }
                 }
             }
-            if data.preview {
-                draw.add_text(
-                    [cursor[0] + 12.0, cursor[1] + 12.0],
-                    palette.text,
-                    "Sampled preview · refining",
-                );
-            }
+        }
+        if let Some(Ok(data)) = map_data {
+            let current = self
+                .map_cache
+                .as_ref()
+                .is_some_and(|(cached, _)| key.as_ref() == Some(cached));
+            let (status, detail) = geo_render_badge(data, current);
+            draw_render_badge(
+                ui,
+                &draw,
+                cursor,
+                [cursor[0] + area[0], cursor[1] + area[1]],
+                status,
+                &detail,
+                palette,
+            );
         }
         let mut hovered_pics = false;
         if options.show_pics {
@@ -495,10 +504,13 @@ impl App {
                 let d = (p.point[0] - mouse[0]).powi(2) + (p.point[1] - mouse[1]).powi(2);
                 if ui.is_item_hovered() && d < 100.0 {
                     hovered_pics = true;
-                    ui.tooltip_text(format!(
-                        "{} ({})\n{:.3}°, {:.3}°",
-                        site.name, site.country, site.center[1], site.center[0]
-                    ));
+                    show_plain_tip(
+                        ui,
+                        &format!(
+                            "{} ({})\n{:.3}°, {:.3}°",
+                            site.name, site.country, site.center[1], site.center[0]
+                        ),
+                    );
                 }
             }
         }
@@ -520,20 +532,23 @@ impl App {
                 self.settings.display_decimals,
             );
             if let Some((p, _)) = nearest.filter(|_| !hovered_pics) {
-                ui.tooltip_text(format!(
-                    "Lat {:.3}°, Lon {:.3}°\n{}: {}",
-                    p.latitude,
-                    p.longitude,
-                    if data.aggregated {
-                        "Mean value"
-                    } else {
-                        "Value"
-                    },
-                    p.special.map_or_else(
-                        || format_value(p.value, self.settings.display_decimals),
-                        |v| v.label().into()
-                    )
-                ));
+                show_plain_tip(
+                    ui,
+                    &format!(
+                        "Lat {:.3}°, Lon {:.3}°\n{}: {}",
+                        p.latitude,
+                        p.longitude,
+                        if data.aggregated {
+                            "Mean value"
+                        } else {
+                            "Value"
+                        },
+                        p.special.map_or_else(
+                            || format_value(p.value, self.settings.display_decimals),
+                            |v| v.label().into()
+                        )
+                    ),
+                );
             }
         } else if let Some(Err(error)) = map_data {
             ui.text(format!("Globe data unavailable: {error}"));
@@ -554,6 +569,7 @@ impl App {
             self.globe_zoom,
             &mut self.value_visibility,
             palette,
+            self.settings.tutorial_tips,
         );
         if visibility_changed {
             self.profile_cache = None;

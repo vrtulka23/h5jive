@@ -48,6 +48,60 @@ fn project(origin: [f32; 2], size: [f32; 2], view: MapViewport, lon: f32, lat: f
     view.project(origin, size, lon, lat)
 }
 
+fn visible_map_rect(
+    origin: [f32; 2],
+    size: [f32; 2],
+    canvas: [f32; 2],
+    canvas_size: [f32; 2],
+    view: MapViewport,
+) -> ([f32; 2], [f32; 2]) {
+    let top_left = project(origin, size, view, -180.0, 90.0);
+    let bottom_right = project(origin, size, view, 180.0, -90.0);
+    (
+        [top_left[0].max(canvas[0]), top_left[1].max(canvas[1])],
+        [
+            bottom_right[0].min(canvas[0] + canvas_size[0]),
+            bottom_right[1].min(canvas[1] + canvas_size[1]),
+        ],
+    )
+}
+
+#[cfg(test)]
+mod badge_position_tests {
+    use super::*;
+
+    #[test]
+    fn badge_follows_visible_map_edges_and_returns_on_reset() {
+        let origin = [100.0, 200.0];
+        let size = [400.0, 200.0];
+        let canvas = [80.0, 100.0];
+        let canvas_size = [440.0, 400.0];
+        let initial = visible_map_rect(origin, size, canvas, canvas_size, MapViewport::default());
+        assert_eq!(initial, ([100.0, 200.0], [500.0, 400.0]));
+
+        let zoomed = MapViewport {
+            center: [0.0, 0.0],
+            zoom: 2.0,
+        };
+        assert_eq!(
+            visible_map_rect(origin, size, canvas, canvas_size, zoomed),
+            ([80.0, 100.0], [520.0, 500.0])
+        );
+        let panned = MapViewport {
+            center: [90.0, 0.0],
+            zoom: 2.0,
+        };
+        assert_eq!(
+            visible_map_rect(origin, size, canvas, canvas_size, panned),
+            ([80.0, 100.0], [500.0, 500.0])
+        );
+        assert_eq!(
+            visible_map_rect(origin, size, canvas, canvas_size, MapViewport::default()),
+            initial
+        );
+    }
+}
+
 fn longitude_near(longitude: f32, reference: f32) -> f32 {
     reference + (longitude - reference + 180.0).rem_euclid(360.0) - 180.0
 }
@@ -551,13 +605,15 @@ impl App {
                     }
                 }
             }
-            if data.preview {
-                draw.add_text(
-                    [cursor[0] + 12.0, cursor[1] + 12.0],
-                    palette.text,
-                    "Sampled preview · refining",
-                );
-            }
+        }
+        if let Some(Ok(data)) = map_data {
+            let current = self
+                .map_cache
+                .as_ref()
+                .is_some_and(|(cached, _)| key.as_ref() == Some(cached));
+            let (status, detail) = geo_render_badge(data, current);
+            let (badge_min, badge_max) = visible_map_rect(origin, map_size, cursor, map_area, view);
+            draw_render_badge(ui, &draw, badge_min, badge_max, status, &detail, palette);
         }
         drop(_clip);
         drop(draw);
@@ -601,20 +657,23 @@ impl App {
                 self.settings.display_decimals,
             );
             if let Some((point, _)) = nearest.filter(|_| !hovered_pics) {
-                ui.tooltip_text(format!(
-                    "Lat {:.3}°, Lon {:.3}°\n{}: {}",
-                    point.latitude,
-                    point.longitude,
-                    if data.aggregated {
-                        "Mean value"
-                    } else {
-                        "Value"
-                    },
-                    point.special.map_or_else(
-                        || format_value(point.value, self.settings.display_decimals),
-                        |kind| kind.label().into()
-                    )
-                ));
+                show_plain_tip(
+                    ui,
+                    &format!(
+                        "Lat {:.3}°, Lon {:.3}°\n{}: {}",
+                        point.latitude,
+                        point.longitude,
+                        if data.aggregated {
+                            "Mean value"
+                        } else {
+                            "Value"
+                        },
+                        point.special.map_or_else(
+                            || format_value(point.value, self.settings.display_decimals),
+                            |kind| kind.label().into()
+                        )
+                    ),
+                );
             }
         }
         match map_data {
@@ -639,6 +698,7 @@ impl App {
             self.map_viewport.zoom,
             &mut self.value_visibility,
             palette,
+            self.settings.tutorial_tips,
         );
         if visibility_changed {
             self.profile_cache = None;

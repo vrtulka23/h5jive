@@ -2,11 +2,13 @@ use super::{
     axis_ticks, draw_profile_plot, draw_workspace_mode_icon, extend_finite_range,
     format_attribute_value, format_value, heatmap_axis_ticks, heatmap_tile_bounds,
     heatmap_visible_bounds, heatmap_zoom_limits, human_bytes, load_heatmap_overview,
-    load_heatmap_tile, load_map_data, load_profile, overview_sample_index, parse_input_spec,
-    parse_profile_indexes, parse_startup_args, resolve_startup_selection, scan_heatmap_range,
-    settings_help, AttributeValue, ColormapPreset, File, GeoViewControls, MapViewport,
-    PinnedDefault, ProfileBin, ProfileData, ProfileLine, ProfileSlice, ScanFilter, Selection,
-    Settings, SpecialValue, TableSlice, ThemeColors, ValueVisibility, ViewMode, WorkspaceMode,
+    load_heatmap_overview_with_cancel, load_heatmap_tile, load_map_data, load_profile,
+    load_profile_preview_with_cancel, overview_sample_index, parse_input_spec,
+    parse_profile_indexes, parse_startup_args, profile_needs_preview, resolve_startup_selection,
+    scan_heatmap_range, settings_help, AttributeValue, ColormapPreset, File, GeoViewControls,
+    MapViewport, PinnedDefault, ProfileBin, ProfileData, ProfileLine, ProfileSlice, ScanFilter,
+    Selection, Settings, SpecialValue, TableSlice, ThemeColors, ValueVisibility, ViewMode,
+    WorkspaceMode,
 };
 use h5jive_data::ScanDirectionClass;
 use scinumtools3::Project;
@@ -531,6 +533,7 @@ fn theme_colors_pop_in_reverse_scope_order() {
     drop(colors);
     let data = ProfileData {
         x_len: 2,
+        sample_positions: None,
         min: -1.0,
         max: 1.0,
         lines: vec![ProfileLine {
@@ -569,6 +572,7 @@ fn theme_colors_pop_in_reverse_scope_order() {
                 test_settings().display_decimals,
                 1.0,
                 &mut visibility,
+                test_settings().tutorial_tips,
             )
         });
 }
@@ -620,10 +624,15 @@ fn table_region_tracks_axis_order_and_pins() {
     assert_eq!(count, [2, 1, 3, 1]);
     assert_eq!(slice.region_offset(&count, 5, 2, &start), 0);
     assert_eq!(slice.region_offset(&count, 7, 3, &start), 5);
+    assert_eq!(slice.cell_coordinates(5, 2), [2, 7, 5, 3]);
+    let mut next_slice = slice.clone();
+    next_slice.pinned[3] = 4;
+    assert_eq!(next_slice.cell_coordinates(5, 2), [2, 7, 5, 4]);
     let one_dimensional = TableSlice::new(&[8], PinnedDefault::Start);
     assert_eq!(one_dimensional.rows(&[8]), 8);
     assert_eq!(one_dimensional.columns(&[8]), 1);
     assert_eq!(one_dimensional.region(&[8], 2, 5, 0, 1), (vec![2], vec![3]));
+    assert_eq!(one_dimensional.cell_coordinates(3, 0), [3]);
 }
 
 #[test]
@@ -817,6 +826,64 @@ fn one_dimensional_profile_plots_source_values_at_indexes() {
 }
 
 #[test]
+fn profile_overview_samples_real_positions_for_each_line() {
+    let s5p_shape = [1, 3736, 450, 497];
+    let mut s5p_slice = ProfileSlice::new(&s5p_shape, true, PinnedDefault::Middle);
+    assert!(profile_needs_preview(&s5p_shape, &s5p_slice));
+    s5p_slice.x_axis = 3;
+    assert!(!profile_needs_preview(&s5p_shape, &s5p_slice));
+    assert!(profile_needs_preview(
+        &[3000],
+        &ProfileSlice::new(&[3000], false, PinnedDefault::Start)
+    ));
+    let mut trailing = ProfileSlice::new(&[4, 3000], false, PinnedDefault::Start);
+    trailing.x_axis = 1;
+    assert!(profile_needs_preview(&[4, 3000], &trailing));
+
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/arrays/space_demo.hdf5");
+    let file = File::open(&path).unwrap();
+    let shape = [8, 32, 48, 16];
+    let slice = ProfileSlice {
+        x_axis: 2,
+        y_axis: Some(3),
+        pinned: vec![2, 7, 0, 0],
+        y_indexes: "1, 4".into(),
+    };
+    let preview = load_profile_preview_with_cancel(
+        &file,
+        "/observations/time_spectral_cube_4d",
+        &shape,
+        &slice,
+        &ValueVisibility::default(),
+        16,
+        &|| false,
+    )
+    .unwrap();
+    let positions = preview.sample_positions.as_ref().unwrap();
+    assert_eq!(positions.len(), 8);
+    assert_eq!(positions.first(), Some(&0));
+    assert_eq!(positions.last(), Some(&47));
+    for line in &preview.lines {
+        for (bin, &x) in line.bins.iter().zip(positions) {
+            let region = file
+                .region(
+                    "/observations/time_spectral_cube_4d",
+                    &[2, 7, x, line.index],
+                    &[1, 1, 1, 1],
+                )
+                .unwrap();
+            let value = region.data[0];
+            if SpecialValue::from_value(value, region.fill_value).is_some() {
+                assert_eq!(bin.count, 0);
+            } else {
+                assert_eq!(bin.count, 1);
+                assert_eq!(bin.first, value);
+            }
+        }
+    }
+}
+
+#[test]
 fn dipl_theme_collection_provides_distinct_profiles() {
     let settings = test_settings();
     assert_eq!(settings.volume_default_opacity, 1.0);
@@ -824,7 +891,10 @@ fn dipl_theme_collection_provides_distinct_profiles() {
     assert_eq!(settings.volume_back_brightness, 0.45);
     assert_eq!(settings.heatmap_colormap_preset, ColormapPreset::Viridis);
     assert_eq!(settings.graphics_backend, None);
-    assert_eq!(settings.forwarded_x11_backend, dear_app::wgpu::Backends::GL);
+    assert_eq!(
+        settings.forwarded_x11_backend,
+        dear_app::wgpu::Backends::VULKAN | dear_app::wgpu::Backends::GL
+    );
     let profile = |name| {
         settings
             .profiles
@@ -1040,6 +1110,27 @@ fn full_heatmap_overview_samples_source_cells_without_averaging() {
         load_heatmap_overview(&file, "/observations/swath_2d", &shape, &slice, shape).unwrap();
     for (actual, expected) in dense.values.iter().zip(&source.data) {
         assert!(actual == expected || actual.is_nan() && expected.is_nan());
+    }
+    let bounds = [5, 27, 7, 39];
+    let cropped = load_heatmap_overview_with_cancel(
+        &file,
+        "/observations/swath_2d",
+        &shape,
+        &slice,
+        bounds,
+        [8, 12],
+        &|| false,
+    )
+    .unwrap();
+    assert_eq!(cropped.bounds, bounds);
+    for row_bin in 0..8 {
+        for column_bin in 0..12 {
+            let row = bounds[0] + overview_sample_index(row_bin, bounds[1] - bounds[0], 8);
+            let column = bounds[2] + overview_sample_index(column_bin, bounds[3] - bounds[2], 12);
+            let actual = cropped.values[row_bin * 12 + column_bin];
+            let expected = source.data[row * 48 + column];
+            assert!(actual == expected || actual.is_nan() && expected.is_nan());
+        }
     }
 }
 

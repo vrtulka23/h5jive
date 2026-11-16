@@ -1,7 +1,13 @@
 use super::*;
 
 impl ValueVisibility {
-    pub(super) fn draw_panel(&mut self, ui: &Ui, palette: &Palette, width: f32) -> bool {
+    pub(super) fn draw_panel(
+        &mut self,
+        ui: &Ui,
+        palette: &Palette,
+        width: f32,
+        tutorial_tips: bool,
+    ) -> bool {
         let mut changed = false;
         let origin = ui.cursor_screen_pos();
         let spacing = ui.clone_style().item_spacing();
@@ -15,6 +21,7 @@ impl ValueVisibility {
             "Positive values",
             neutral,
             button_width,
+            tutorial_tips,
         );
         ui.same_line();
         changed |= toggle_button(
@@ -24,6 +31,7 @@ impl ValueVisibility {
             "Negative values",
             neutral,
             button_width,
+            tutorial_tips,
         );
         ui.set_cursor_screen_pos([origin[0], origin[1] + row_height]);
         changed |= toggle_button(
@@ -33,6 +41,7 @@ impl ValueVisibility {
             "Zero values",
             neutral,
             button_width,
+            tutorial_tips,
         );
         ui.same_line();
         let all_background = mix_color(ui.style_color(StyleColor::FrameBg), neutral, 0.38);
@@ -51,11 +60,16 @@ impl ValueVisibility {
             self.set_all(!all_enabled);
             changed = true;
         }
-        ui.set_item_tooltip(if all_enabled {
-            "Hide all value classes"
-        } else {
-            "Show all value classes"
-        });
+        item_tip(
+            ui,
+            tutorial_tips,
+            if all_enabled {
+                "Hide all value classes"
+            } else {
+                "Show all value classes"
+            },
+            "Use these buttons to control which value classes appear in plots.",
+        );
         drop(_all_active);
         drop(_all_hovered);
         drop(_all_button);
@@ -67,6 +81,7 @@ impl ValueVisibility {
             "Not-a-number values",
             palette.nan,
             button_width,
+            tutorial_tips,
         );
         ui.same_line();
         changed |= toggle_button(
@@ -76,6 +91,7 @@ impl ValueVisibility {
             "Fill values",
             palette.fill,
             button_width,
+            tutorial_tips,
         );
         ui.set_cursor_screen_pos([origin[0], origin[1] + 3.0 * row_height]);
         changed |= toggle_button(
@@ -85,6 +101,7 @@ impl ValueVisibility {
             "Positive infinity values",
             palette.positive_inf,
             button_width,
+            tutorial_tips,
         );
         ui.same_line();
         changed |= toggle_button(
@@ -94,6 +111,7 @@ impl ValueVisibility {
             "Negative infinity values",
             palette.negative_inf,
             button_width,
+            tutorial_tips,
         );
         changed
     }
@@ -106,6 +124,7 @@ fn toggle_button(
     tooltip: &str,
     color: [f32; 4],
     width: f32,
+    tutorial_tips: bool,
 ) -> bool {
     let background = if *enabled {
         mix_color(ui.style_color(StyleColor::FrameBg), color, 0.38)
@@ -119,10 +138,12 @@ fn toggle_button(
     );
     let _active = ui.push_style_color(StyleColor::ButtonActive, mix_color(background, color, 0.65));
     let changed = ui.button_with_size(label, [width, 26.0]);
-    ui.set_item_tooltip(format!(
-        "{tooltip}: {}",
-        if *enabled { "shown" } else { "hidden" }
-    ));
+    item_tip(
+        ui,
+        tutorial_tips,
+        &format!("{tooltip}: {}", if *enabled { "shown" } else { "hidden" }),
+        "Click to show or hide this value class in the plot.",
+    );
     if changed {
         *enabled = !*enabled;
     }
@@ -154,7 +175,7 @@ mod tests {
                 let origin = ui.cursor_screen_pos();
                 let rail_x = origin[0] + ui.content_region_avail()[0] - 126.0;
                 ui.set_cursor_screen_pos([rail_x, origin[1]]);
-                visibility.draw_panel(ui, &settings.palette, 126.0);
+                visibility.draw_panel(ui, &settings.palette, 126.0, settings.tutorial_tips);
                 let last_button = ui.item_rect_min();
                 assert!(last_button[0] > rail_x + 60.0);
                 assert!(last_button[0] < rail_x + 126.0);

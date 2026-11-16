@@ -7,7 +7,9 @@ impl App {
 
     pub(super) fn note_heatmap_navigation(&mut self) {
         self.heatmap_navigation_at = Some(Instant::now());
-        if self.heatmap_tile_job.take().is_some() {
+        let tile_cancelled = self.heatmap_tile_job.take().is_some();
+        let view_cancelled = self.heatmap_view_overview_job.take().is_some();
+        if tile_cancelled || view_cancelled {
             self.heatmap_refine_generation
                 .fetch_add(1, Ordering::Relaxed);
         }
@@ -40,7 +42,9 @@ impl App {
         self.view_load_generation.fetch_add(1, Ordering::Relaxed);
         self.heatmap_tile_job = None;
         self.heatmap_overview_job = None;
+        self.heatmap_view_overview_job = None;
         self.heatmap_range_job = None;
+        self.profile_job = None;
         self.volume_job = None;
         self.volume_raster_job = None;
         if !keep_map_job {
@@ -60,8 +64,8 @@ impl App {
         allow_start: bool,
     ) {
         if let Some((running, receiver)) = &self.heatmap_tile_job {
-            match receiver.try_recv() {
-                Ok(image) => {
+            match poll_job(receiver) {
+                JobPoll::Ready(image) => {
                     let running = running.clone();
                     let image = image.map(Arc::new);
                     if let Ok(data) = &image {
@@ -74,8 +78,8 @@ impl App {
                     self.heatmap_cache = Some((running, image));
                     self.heatmap_tile_job = None;
                 }
-                Err(mpsc::TryRecvError::Disconnected) => self.heatmap_tile_job = None,
-                Err(mpsc::TryRecvError::Empty) => {}
+                JobPoll::Disconnected => self.heatmap_tile_job = None,
+                JobPoll::Pending => {}
             }
         }
         if self
@@ -133,10 +137,12 @@ impl App {
         slice: &TableSlice,
         grid: [usize; 2],
     ) {
+        let bounds = [0, slice.rows(shape), 0, slice.columns(shape)];
         let key = HeatmapOverviewKey {
             file: selection.file,
             path: selection.path.clone(),
             slice: slice.clone(),
+            bounds,
             grid,
         };
         if self
@@ -152,18 +158,11 @@ impl App {
             .as_ref()
             .is_some_and(|(running, _)| running == &key)
         {
-            match self.heatmap_overview_job.as_ref().unwrap().1.try_recv() {
-                Ok(image) => {
-                    self.heatmap_overview_cache = Some((key, image));
-                    self.heatmap_overview_job = None;
-                }
-                Err(mpsc::TryRecvError::Disconnected) => {
-                    self.heatmap_overview_cache =
-                        Some((key, Err("Overview worker stopped".into())));
-                    self.heatmap_overview_job = None;
-                }
-                Err(mpsc::TryRecvError::Empty) => {}
-            }
+            finish_keyed_result_job(
+                &mut self.heatmap_overview_job,
+                &mut self.heatmap_overview_cache,
+                "Overview worker stopped",
+            );
             return;
         }
         self.heatmap_overview_job = None;
@@ -179,13 +178,89 @@ impl App {
                 return;
             }
             let result = open_dataset_reader(&file_path).and_then(|file| {
-                load_heatmap_overview_with_cancel(&file, &path, &shape, &slice, grid, &|| {
-                    generation.load(Ordering::Relaxed) != expected
-                })
+                load_heatmap_overview_with_cancel(
+                    &file,
+                    &path,
+                    &shape,
+                    &slice,
+                    bounds,
+                    grid,
+                    &|| generation.load(Ordering::Relaxed) != expected,
+                )
             });
             let _ = sender.send(result);
         });
         self.heatmap_overview_job = Some((key, receiver));
+    }
+
+    pub(super) fn poll_heatmap_view_overview(
+        &mut self,
+        selection: &Selection,
+        shape: &[usize],
+        slice: &TableSlice,
+        bounds: [usize; 4],
+        grid: [usize; 2],
+        allow_start: bool,
+    ) {
+        let key = HeatmapOverviewKey {
+            file: selection.file,
+            path: selection.path.clone(),
+            slice: slice.clone(),
+            bounds,
+            grid,
+        };
+        if self
+            .heatmap_view_overview_cache
+            .as_ref()
+            .is_some_and(|(cached, _)| cached == &key)
+        {
+            return;
+        }
+        self.heatmap_view_overview_cache = None;
+        if self
+            .heatmap_view_overview_job
+            .as_ref()
+            .is_some_and(|(running, _)| running == &key)
+        {
+            finish_keyed_result_job(
+                &mut self.heatmap_view_overview_job,
+                &mut self.heatmap_view_overview_cache,
+                "2D view worker stopped",
+            );
+            return;
+        }
+        if self.heatmap_view_overview_job.take().is_some() {
+            self.heatmap_refine_generation
+                .fetch_add(1, Ordering::Relaxed);
+        }
+        if !allow_start {
+            return;
+        }
+        let file_path = self.file_paths[selection.file].clone();
+        let path = selection.path.clone();
+        let shape = shape.to_vec();
+        let slice = slice.clone();
+        let generation = Arc::clone(&self.view_load_generation);
+        let expected = generation.load(Ordering::Relaxed);
+        let refinement = Arc::clone(&self.heatmap_refine_generation);
+        let expected_refinement = refinement.load(Ordering::Relaxed);
+        let (sender, receiver) = mpsc::channel();
+        thread::spawn(move || {
+            let cancelled = || {
+                generation.load(Ordering::Relaxed) != expected
+                    || refinement.load(Ordering::Relaxed) != expected_refinement
+            };
+            if cancelled() {
+                return;
+            }
+            let result = open_dataset_reader(&file_path).and_then(|file| {
+                load_heatmap_overview_with_cancel(
+                    &file, &path, &shape, &slice, bounds, grid, &cancelled,
+                )
+            });
+            let _ = sender.send(result);
+        });
+        self.heatmap_view_overview_job = Some((key, receiver));
     }
 
     pub(super) fn poll_heatmap_range(
@@ -215,18 +290,11 @@ impl App {
             .as_ref()
             .is_some_and(|(running, _)| running == &key)
         {
-            let result = self.heatmap_range_job.as_ref().unwrap().1.try_recv();
-            match result {
-                Ok(range) => {
-                    self.heatmap_range_cache = Some((key, range));
-                    self.heatmap_range_job = None;
-                }
-                Err(mpsc::TryRecvError::Disconnected) => {
-                    self.heatmap_range_cache = Some((key, Err("Range worker stopped".into())));
-                    self.heatmap_range_job = None;
-                }
-                Err(mpsc::TryRecvError::Empty) => {}
-            }
+            finish_keyed_result_job(
+                &mut self.heatmap_range_job,
+                &mut self.heatmap_range_cache,
+                "Range worker stopped",
+            );
             return;
         }
         self.heatmap_range_job = None;
@@ -251,20 +319,117 @@ impl App {
         self.heatmap_range_job = Some((key, receiver));
     }
 
-    pub(super) fn poll_statistics(&mut self, selection: &Selection) {
-        if let Some(job) = &self.statistics_job {
-            match job.try_recv() {
-                Ok(result) => {
-                    self.statistics_cache = Some(result);
-                    self.statistics_job = None;
+    pub(super) fn poll_profile(
+        &mut self,
+        selection: &Selection,
+        shape: &[usize],
+        slice: &ProfileSlice,
+    ) {
+        let key = ProfileKey {
+            selection: selection.clone(),
+            slice: slice.clone(),
+            visibility: self.value_visibility,
+        };
+        if self
+            .profile_job
+            .as_ref()
+            .is_some_and(|(running, _)| running == &key)
+        {
+            match poll_job(&self.profile_job.as_ref().unwrap().1) {
+                JobPoll::Ready(ProfileJobUpdate::Overview(data)) => {
+                    self.profile_cache = Some((key, Ok(data)));
                 }
-                Err(mpsc::TryRecvError::Disconnected) => {
-                    self.statistics_cache = Some(Err("Statistics worker stopped".into()));
-                    self.statistics_job = None;
+                JobPoll::Ready(ProfileJobUpdate::Complete(result)) => {
+                    self.profile_cache = Some((key, result));
+                    self.profile_job = None;
                 }
-                Err(mpsc::TryRecvError::Empty) => {}
+                JobPoll::Disconnected => {
+                    self.profile_cache = Some((key, Err("Profile worker stopped".into())));
+                    self.profile_job = None;
+                }
+                JobPoll::Pending => {}
             }
+            return;
         }
+        if self
+            .profile_cache
+            .as_ref()
+            .is_some_and(|(cached, _)| cached == &key)
+        {
+            return;
+        }
+        self.profile_cache = None;
+        if self.profile_job.take().is_some() {
+            self.profile_load_generation.fetch_add(1, Ordering::Relaxed);
+        }
+        let file_path = self.file_paths[selection.file].clone();
+        let dataset_path = selection.path.clone();
+        let shape = shape.to_vec();
+        let slice = slice.clone();
+        let visibility = self.value_visibility;
+        let generation = Arc::clone(&self.view_load_generation);
+        let expected = generation.load(Ordering::Relaxed);
+        let profile_generation = Arc::clone(&self.profile_load_generation);
+        let expected_profile = profile_generation.load(Ordering::Relaxed);
+        let (sender, receiver) = mpsc::channel();
+        thread::spawn(move || {
+            let cancelled = || {
+                generation.load(Ordering::Relaxed) != expected
+                    || profile_generation.load(Ordering::Relaxed) != expected_profile
+            };
+            if cancelled() {
+                return;
+            }
+            let file = match open_dataset_reader(&file_path) {
+                Ok(file) => file,
+                Err(error) => {
+                    let _ = sender.send(ProfileJobUpdate::Complete(Err(error)));
+                    return;
+                }
+            };
+            if profile_needs_preview(&shape, &slice) {
+                match load_profile_preview_with_cancel(
+                    &file,
+                    &dataset_path,
+                    &shape,
+                    &slice,
+                    &visibility,
+                    PROFILE_OVERVIEW_SAMPLE_BUDGET,
+                    &cancelled,
+                ) {
+                    Ok(data) => {
+                        if sender.send(ProfileJobUpdate::Overview(data)).is_err() {
+                            return;
+                        }
+                    }
+                    Err(error) => {
+                        let _ = sender.send(ProfileJobUpdate::Complete(Err(error)));
+                        return;
+                    }
+                }
+            }
+            if cancelled() {
+                return;
+            }
+            let result = load_profile_with_cancel(
+                &file,
+                &dataset_path,
+                &shape,
+                &slice,
+                &visibility,
+                &cancelled,
+            );
+            let _ = sender.send(ProfileJobUpdate::Complete(result));
+        });
+        self.profile_job = Some((key, receiver));
+    }
+
+    pub(super) fn poll_statistics(&mut self, selection: &Selection) {
+        finish_result_job(
+            &mut self.statistics_job,
+            &mut self.statistics_cache,
+            "Statistics worker stopped",
+        );
         if self.statistics_cache.is_none() && self.statistics_job.is_none() {
             let file_path = self.file_paths[selection.file].clone();
             let dataset_path = selection.path.clone();
@@ -286,19 +451,11 @@ impl App {
         selection: &Selection,
         statistics: &DatasetStatistics,
     ) {
-        if let Some(job) = &self.distribution_job {
-            match job.try_recv() {
-                Ok(result) => {
-                    self.distribution_cache = Some(result);
-                    self.distribution_job = None;
-                }
-                Err(mpsc::TryRecvError::Disconnected) => {
-                    self.distribution_cache = Some(Err("Distribution worker stopped".into()));
-                    self.distribution_job = None;
-                }
-                Err(mpsc::TryRecvError::Empty) => {}
-            }
-        }
+        finish_result_job(
+            &mut self.distribution_job,
+            &mut self.distribution_cache,
+            "Distribution worker stopped",
+        );
         if self.distribution_cache.is_none() && self.distribution_job.is_none() {
             let file_path = self.file_paths[selection.file].clone();
             let dataset_path = selection.path.clone();
@@ -317,10 +474,7 @@ impl App {
     }
 
     pub(super) fn refresh_selection(&mut self) {
-        let details_key = self
-            .selection
-            .as_ref()
-            .map(|selection| (selection.file, selection.path.clone()));
+        let details_key = self.selection.clone();
         let details_changed = details_key != self.details_key;
         if details_changed {
             self.details_key = details_key;
@@ -333,53 +487,30 @@ impl App {
             });
             self.resource_monitor
                 .set_selected_raw_bytes(selected_raw_bytes);
-            self.details_default_pending = true;
-            self.statistics_cache = None;
-            self.statistics_job = None;
-            self.distribution_cache = None;
-            self.distribution_job = None;
-            self.attributes_cache = None;
-            self.coordinates_cache = None;
-            self.coordinate_value_cache.clear();
+            self.clear_selection_details();
         }
         let key = self.selection.as_ref().and_then(|selection| {
             let entry = find_entry(&self.files[selection.file].tree, &selection.path)?;
             if matches!(entry.kind, Kind::Dataset { numeric: true, .. }) {
-                Some((selection.file, selection.path.clone()))
+                Some(selection.clone())
             } else {
                 None
             }
         });
         let selection_changed = key != self.selection_key;
         if selection_changed {
-            self.view_load_generation.fetch_add(1, Ordering::Relaxed);
             self.selection_key = key;
             self.volume_pan = [0.0, 0.0];
             self.profile_zoom = 1.0;
             self.heatmap_nav_override = None;
             self.heatmap_tick_view = None;
-            self.region_cache.clear();
-            self.heatmap_cache = None;
-            self.heatmap_tiles.clear();
-            self.heatmap_tile_job = None;
             self.heatmap_navigation_at = None;
-            self.profile_cache = None;
-            self.volume_cache = None;
-            self.volume_overview_cache = None;
-            self.volume_refined_cache.clear();
-            self.volume_job = None;
             self.volume_navigation_at = None;
-            self.volume_raster = None;
-            self.volume_overview_raster = None;
-            self.volume_raster_job = None;
-            self.map_cache = None;
-            self.map_job = None;
-            self.map_plane = None;
-            self.map_load_generation.fetch_add(1, Ordering::Relaxed);
+            self.clear_selected_dataset_views();
             self.axis_names = self
                 .selection_key
                 .as_ref()
-                .and_then(|(index, path)| self.files[*index].axis_names(path).ok())
+                .and_then(|selection| self.files[selection.file].axis_names(&selection.path).ok())
                 .unwrap_or_default();
         }
         let selected_shape = self.selection.as_ref().and_then(|selection| {

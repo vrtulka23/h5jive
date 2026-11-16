@@ -30,6 +30,7 @@ pub(crate) struct MapData {
     pub(crate) points: Vec<MapPoint>,
     pub(crate) range: Option<(f64, f64)>,
     pub(crate) aggregated: bool,
+    pub(crate) sampled: bool,
     pub(crate) preview: bool,
 }
 
@@ -86,7 +87,7 @@ impl MapViewport {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub(crate) struct Selection {
     pub(crate) file: usize,
     pub(crate) path: String,
@@ -167,11 +168,100 @@ pub(crate) struct ProfileLine {
 }
 pub(crate) struct ProfileData {
     pub(crate) x_len: usize,
+    pub(crate) sample_positions: Option<Vec<usize>>,
     pub(crate) min: f64,
     pub(crate) max: f64,
     pub(crate) lines: Vec<ProfileLine>,
 }
+
+pub(crate) const PROFILE_OVERVIEW_SAMPLE_BUDGET: usize = 256;
+
+pub(crate) fn profile_needs_preview(shape: &[usize], slice: &ProfileSlice) -> bool {
+    shape[slice.x_axis] > 2048
+}
+
+fn record_profile_value(
+    bin: &mut ProfileBin,
+    value: f64,
+    fill_value: Option<f64>,
+    visibility: &ValueVisibility,
+    minimum: &mut f64,
+    maximum: &mut f64,
+) {
+    if finite_value(value, fill_value).is_none() || !visibility.allows(value, fill_value) {
+        return;
+    }
+    if bin.count == 0 {
+        bin.first = value;
+    }
+    bin.last = value;
+    bin.min = bin.min.min(value);
+    bin.max = bin.max.max(value);
+    bin.count += 1;
+    *minimum = minimum.min(value);
+    *maximum = maximum.max(value);
+}
+
+pub(crate) fn load_profile_preview_with_cancel(
+    file: &File,
+    path: &str,
+    shape: &[usize],
+    slice: &ProfileSlice,
+    visibility: &ValueVisibility,
+    max_total_samples: usize,
+    cancelled: &dyn Fn() -> bool,
+) -> Result<ProfileData, String> {
+    if cancelled() {
+        return Err("Profile loading cancelled".into());
+    }
+    if shape.iter().any(|&length| length == 0) {
+        return Err("Empty dataset".into());
+    }
+    let x_len = shape[slice.x_axis];
+    let indexes = slice.y_axis.map_or_else(
+        || Ok(vec![0]),
+        |axis| parse_profile_indexes(&slice.y_indexes, shape[axis]),
+    )?;
+    let sample_positions = axis_ticks(x_len, (max_total_samples / indexes.len()).max(2));
+    let mut lines = Vec::with_capacity(indexes.len());
+    let mut minimum = f64::INFINITY;
+    let mut maximum = f64::NEG_INFINITY;
+    for index in indexes {
+        let mut bins = vec![ProfileBin::default(); sample_positions.len()];
+        for (bin_index, &x) in sample_positions.iter().enumerate() {
+            if cancelled() {
+                return Err("Profile loading cancelled".into());
+            }
+            let mut varying = vec![(slice.x_axis, x, 1)];
+            if let Some(axis) = slice.y_axis {
+                varying.push((axis, index, 1));
+            }
+            let (start, count) = region_from_pins(&slice.pinned, &varying);
+            let region = file
+                .region(path, &start, &count)
+                .map_err(|err| err.to_string())?;
+            record_profile_value(
+                &mut bins[bin_index],
+                region.data[0],
+                region.fill_value,
+                visibility,
+                &mut minimum,
+                &mut maximum,
+            );
+        }
+        lines.push(ProfileLine { index, bins });
+    }
+    Ok(ProfileData {
+        x_len,
+        sample_positions: Some(sample_positions),
+        min: minimum,
+        max: maximum,
+        lines,
+    })
+}
+
 /// Aggregate a profile into bins while preserving first, last, and extrema.
+#[cfg(test)]
 pub(crate) fn load_profile(
     file: &File,
     path: &str,
@@ -179,6 +269,20 @@ pub(crate) fn load_profile(
     slice: &ProfileSlice,
     visibility: &ValueVisibility,
 ) -> Result<ProfileData, String> {
+    load_profile_with_cancel(file, path, shape, slice, visibility, &|| false)
+}
+
+pub(crate) fn load_profile_with_cancel(
+    file: &File,
+    path: &str,
+    shape: &[usize],
+    slice: &ProfileSlice,
+    visibility: &ValueVisibility,
+    cancelled: &dyn Fn() -> bool,
+) -> Result<ProfileData, String> {
+    if cancelled() {
+        return Err("Profile loading cancelled".into());
+    }
     if shape.iter().any(|&length| length == 0) {
         return Err("Empty dataset".into());
     }
@@ -193,8 +297,11 @@ pub(crate) fn load_profile(
     let mut maximum = f64::NEG_INFINITY;
     for index in indexes {
         let mut bins = vec![ProfileBin::default(); bin_count];
-        for first_x in (0..x_len).step_by(65_536) {
-            let length = (x_len - first_x).min(65_536);
+        for first_x in (0..x_len).step_by(256) {
+            if cancelled() {
+                return Err("Profile loading cancelled".into());
+            }
+            let length = (x_len - first_x).min(256);
             let mut varying = vec![(slice.x_axis, first_x, length)];
             if let Some(axis) = slice.y_axis {
                 varying.push((axis, index, 1));
@@ -204,29 +311,23 @@ pub(crate) fn load_profile(
                 .region(path, &start, &count)
                 .map_err(|err| err.to_string())?;
             for (offset, &value) in region.data.iter().enumerate() {
-                if finite_value(value, region.fill_value).is_none()
-                    || !visibility.allows(value, region.fill_value)
-                {
-                    continue;
-                }
                 let x = first_x + offset;
                 let bin_index = (x as u128 * bin_count as u128 / x_len as u128) as usize;
-                let bin = &mut bins[bin_index];
-                if bin.count == 0 {
-                    bin.first = value;
-                }
-                bin.last = value;
-                bin.min = bin.min.min(value);
-                bin.max = bin.max.max(value);
-                bin.count += 1;
-                minimum = minimum.min(value);
-                maximum = maximum.max(value);
+                record_profile_value(
+                    &mut bins[bin_index],
+                    value,
+                    region.fill_value,
+                    visibility,
+                    &mut minimum,
+                    &mut maximum,
+                );
             }
         }
         lines.push(ProfileLine { index, bins });
     }
     Ok(ProfileData {
         x_len,
+        sample_positions: None,
         min: minimum,
         max: maximum,
         lines,
@@ -302,13 +403,7 @@ impl TableSlice {
         column: usize,
         start: &[usize],
     ) -> usize {
-        let mut coords = self.pinned.clone();
-        if let Some(axis) = self.row_axis {
-            coords[axis] = row;
-            coords[self.column_axis] = column;
-        } else {
-            coords[self.column_axis] = row;
-        }
+        let coords = self.cell_coordinates(row, column);
         coords
             .iter()
             .zip(start)
@@ -316,6 +411,17 @@ impl TableSlice {
             .fold(0, |offset, ((&index, &first), &length)| {
                 offset * length + index - first
             })
+    }
+
+    pub(crate) fn cell_coordinates(&self, row: usize, column: usize) -> Vec<usize> {
+        let mut coordinates = self.pinned.clone();
+        if let Some(axis) = self.row_axis {
+            coordinates[axis] = row;
+            coordinates[self.column_axis] = column;
+        } else {
+            coordinates[self.column_axis] = row;
+        }
+        coordinates
     }
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -351,6 +457,7 @@ pub(crate) struct HeatmapOverviewKey {
     pub(crate) file: usize,
     pub(crate) path: String,
     pub(crate) slice: TableSlice,
+    pub(crate) bounds: [usize; 4],
     pub(crate) grid: [usize; 2],
 }
 #[derive(Clone, Debug, PartialEq, Eq)]

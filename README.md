@@ -43,6 +43,11 @@ curl -fsSL https://raw.githubusercontent.com/vrtulka23/h5jive/main/install.sh | 
 
 This requires `curl` and `tar`. It places the launcher at
 `~/.local/bin/h5jive`; add `~/.local/bin` to your `PATH` if needed.
+The same Linux archive is intended for Ubuntu and openSUSE; the release
+workflow checks that it starts on openSUSE Leap. A desktop session still needs
+a usable Vulkan or OpenGL driver. See the
+[Linux graphics notes](docs/src/getting-started.md#linux-graphics-on-suse)
+if the window reports `AdapterUnavailable`.
 
 ### Windows PowerShell
 

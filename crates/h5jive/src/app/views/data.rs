@@ -3,7 +3,22 @@ use super::super::*;
 impl App {
     pub(crate) fn draw_data_view(&mut self, ui: &Ui, plot_ui: &PlotUi<'_>, plot_ctx: &PlotContext) {
         let Some(selection) = self.selection.clone() else {
-            ui.text("Select a dataset from the tree.");
+            if self.cell_edit_job.is_some() {
+                ui.text("Applying cell changes...");
+            } else {
+                ui.text("Select a dataset from the tree.");
+                if !self.pending_cell_edits.is_empty() {
+                    ui.text(format!(
+                        "{} staged changes remain in memory.",
+                        self.pending_cell_edits.len()
+                    ));
+                    if ui.button("Discard all staged changes") {
+                        self.pending_cell_edits.clear();
+                        self.cell_editor = None;
+                        self.cell_edit_message = None;
+                    }
+                }
+            }
             return;
         };
         let file = &self.files[selection.file];
@@ -67,21 +82,38 @@ impl App {
             });
         let footer_start = ui.cursor_pos_y();
         ui.separator();
+        if self.view == ViewMode::Data {
+            self.draw_cell_edit_bar(ui, &selection);
+            if !self.pending_cell_edits.is_empty() || self.cell_edit_message.is_some() {
+                ui.separator();
+            }
+        }
+        self.draw_region_controls(ui, &shape);
+        let measured = (ui.cursor_pos_y() - footer_start).max(1.0);
+        if self.view == ViewMode::Slice2d {
+            self.slice_footer_height = measured;
+        } else {
+            self.table_footer_height = measured;
+        }
+    }
+
+    fn draw_region_controls(&mut self, ui: &Ui, shape: &[usize]) {
         let button_width = control_action_width(ui, &self.settings);
         if let Some(_table) = begin_control_columns(ui, "view_controls", button_width) {
-            self.draw_dimension_controls(ui, &shape);
+            self.draw_dimension_controls(ui, shape);
             ui.table_next_column();
             {
                 let pending = if self.view == ViewMode::Slice2d {
-                    self.draft_slice != self.applied_slice
+                    DraftPair::new(&self.draft_slice, &mut self.applied_slice).pending()
                 } else {
-                    self.draft_table != self.applied_table
+                    DraftPair::new(&self.draft_table, &mut self.applied_table).pending()
                 };
                 if draw_update_button(ui, &self.settings, pending) {
                     if self.view == ViewMode::Slice2d {
-                        self.applied_slice = self.draft_slice.clone();
+                        DraftPair::new(&self.draft_slice, &mut self.applied_slice).apply();
                     } else {
-                        self.applied_table = self.draft_table.clone();
+                        DraftPair::new(&self.draft_table, &mut self.applied_table).apply();
+                        self.cell_editor = None;
                     }
                     self.region_cache.clear();
                     self.heatmap_cache = None;
@@ -91,14 +123,9 @@ impl App {
                 }
             }
         }
-        let measured = (ui.cursor_pos_y() - footer_start).max(1.0);
-        if self.view == ViewMode::Slice2d {
-            self.slice_footer_height = measured;
-        } else {
-            self.table_footer_height = measured;
-        }
     }
     pub(crate) fn draw_dimension_controls(&mut self, ui: &Ui, shape: &[usize]) {
+        let tutorial_tips = self.settings.tutorial_tips;
         let pinned = if self.view == ViewMode::Slice2d {
             self.draft_slice.as_ref()
         } else {
@@ -132,7 +159,14 @@ impl App {
             ui.text("Rows");
             ui.same_line();
             ui.set_next_item_width(combo_width);
-            if ui.combo_simple_string("##row_axis", &mut row, &labels) {
+            let changed = ui.combo_simple_string("##row_axis", &mut row, &labels);
+            item_tip(
+                ui,
+                tutorial_tips,
+                "",
+                "Choose which dataset dimension runs down the table.",
+            );
+            if changed {
                 slice.row_axis = Some(row);
                 if row == slice.column_axis {
                     slice.column_axis = (0..shape.len()).find(|&axis| axis != row).unwrap();
@@ -148,9 +182,14 @@ impl App {
         ui.text(column_label);
         ui.same_line();
         ui.set_next_item_width(combo_width);
-        if ui.combo_simple_string("##column_axis", &mut slice.column_axis, &labels)
-            && slice.row_axis == Some(slice.column_axis)
-        {
+        let changed = ui.combo_simple_string("##column_axis", &mut slice.column_axis, &labels);
+        item_tip(
+            ui,
+            tutorial_tips,
+            "",
+            "Choose which dimension runs across the table.",
+        );
+        if changed && slice.row_axis == Some(slice.column_axis) {
             slice.row_axis = (0..shape.len()).find(|&axis| axis != slice.column_axis);
         }
         for (axis, &size) in shape.iter().enumerate() {
@@ -171,10 +210,16 @@ impl App {
                 size.saturating_sub(1).min(i32::MAX as usize) as i32,
                 &mut index,
             );
+            item_tip(
+                ui,
+                tutorial_tips,
+                "",
+                "Pick the slice index for this other dimension, then click Update.",
+            );
             slice.pinned[axis] = index as usize;
         }
     }
-    pub(crate) fn cached_region(&mut self, key: &RegionKey) -> &Result<Region, String> {
+    pub(crate) fn cached_region(&mut self, key: &RegionKey) -> Arc<Result<Region, String>> {
         if !self.region_cache.iter().any(|(cached, _)| cached == key) {
             let result = self.files[key.file]
                 .region(&key.path, &key.start, &key.count)
@@ -182,14 +227,16 @@ impl App {
             if self.region_cache.len() >= self.settings.region_cache_entries {
                 let _ = self.region_cache.remove(0);
             }
-            self.region_cache.push((key.clone(), result));
+            self.region_cache.push((key.clone(), Arc::new(result)));
         }
-        &self
-            .region_cache
-            .iter()
-            .find(|(cached, _)| cached == key)
-            .unwrap()
-            .1
+        Arc::clone(
+            &self
+                .region_cache
+                .iter()
+                .find(|(cached, _)| cached == key)
+                .unwrap()
+                .1,
+        )
     }
     pub(crate) fn draw_value_table(&mut self, ui: &Ui, selection: &Selection, shape: &[usize]) {
         let Some(slice) = self.applied_table.clone() else {
@@ -213,6 +260,12 @@ impl App {
                 self.table_column_page = self.table_column_page.saturating_sub(1);
                 self.region_cache.clear();
             }
+            item_tip(
+                ui,
+                self.settings.tutorial_tips,
+                "",
+                "Show the previous group of table columns.",
+            );
             ui.same_line();
             ui.text(format!(
                 "Columns page {} / {}",
@@ -224,6 +277,12 @@ impl App {
                 self.table_column_page = (self.table_column_page + 1).min(pages - 1);
                 self.region_cache.clear();
             }
+            item_tip(
+                ui,
+                self.settings.tutorial_tips,
+                "",
+                "Show the next group of table columns.",
+            );
         }
         let column_start = self.table_column_page * page_columns_limit;
         let page_columns = (columns - column_start).min(page_columns_limit);
@@ -261,7 +320,8 @@ impl App {
                 }
             })
             .collect::<Vec<_>>();
-        let (outer_size, scroll) = table_extent(
+        let row_height = ui.frame_height() + 2.0 * TABLE_CELL_PADDING[1];
+        let (outer_size, scroll) = table_extent_with_row_height(
             ui,
             row_width
                 + 2.0 * TABLE_CELL_PADDING[0]
@@ -269,6 +329,7 @@ impl App {
                 + page_columns as f32 * 2.0 * TABLE_CELL_PADDING[0],
             rows,
             self.settings.table_scrollbar_padding,
+            row_height,
         );
         let mut flags = TableFlags::BORDERS | TableFlags::ROW_BG;
         if scroll {
@@ -289,7 +350,7 @@ impl App {
             0.0,
         ) {
             ui.table_setup_column_fixed_width("Row", TableColumnFlags::NONE, row_width);
-            for (label, width) in column_labels.into_iter().zip(column_widths) {
+            for (label, width) in column_labels.into_iter().zip(column_widths.iter().copied()) {
                 ui.table_setup_column_fixed_width(label, TableColumnFlags::NONE, width);
             }
             if scroll {
@@ -333,13 +394,14 @@ impl App {
                 let decimals = self.settings.display_decimals;
                 let region = self.cached_region(&key);
                 for (offset, row) in visible_rows.enumerate() {
-                    ui.table_next_row();
+                    ui.table_next_row_with_flags(TableRowFlags::NONE, row_height);
                     ui.table_next_column();
+                    ui.align_text_to_frame_padding();
                     ui.text(&row_labels[offset]);
                     for column in 0..page_columns {
                         if ui.table_set_column_index(column + 1) {
                             let actual_column = column_start + column;
-                            match region {
+                            match region.as_ref() {
                                 Ok(region) => {
                                     let index = slice.region_offset(
                                         &region.shape,
@@ -348,16 +410,21 @@ impl App {
                                         &key.start,
                                     );
                                     if let Some(value) = region.data.get(index) {
-                                        if let Some(special) =
-                                            SpecialValue::from_value(*value, region.fill_value)
-                                        {
-                                            ui.text_colored(
-                                                special.color(&palette),
-                                                special.label(),
-                                            );
-                                        } else {
-                                            ui.text(format_value(*value, decimals));
-                                        }
+                                        let coordinates =
+                                            slice.cell_coordinates(row, actual_column);
+                                        self.draw_editable_cell(
+                                            ui,
+                                            CellKey {
+                                                file: selection.file,
+                                                path: selection.path.clone(),
+                                                coordinates,
+                                            },
+                                            *value,
+                                            region.fill_value,
+                                            decimals,
+                                            &palette,
+                                            column_widths[column],
+                                        );
                                     }
                                 }
                                 Err(err) => ui.text(err),

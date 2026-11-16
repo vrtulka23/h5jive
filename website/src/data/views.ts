@@ -45,7 +45,7 @@ export const viewPages = [
       ['Inspect the curve', 'Zoom, reset, and use tooltips to connect plotted points to axis indexes and values.'],
     ],
     workflow: ['Select a numeric dataset and open 1D profiles.', 'Choose the plot axis and pin every other dimension for a single line.', 'To compare lines, choose a comparison axis and enter its indexes.'],
-    note: 'Changing a pinned index changes the source values shown by the corresponding profile.',
+    note: 'Long profiles first show a sampled Overview while the full line loads. The badge reports samples per line and changes to Settled when loading finishes. Changing a pinned index changes the source values shown.',
   },
   {
     slug: 'world',

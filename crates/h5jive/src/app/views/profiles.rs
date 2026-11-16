@@ -34,14 +34,14 @@ impl App {
         if let Some(_table) = begin_control_columns(ui, "profile_controls", button_width) {
             self.draw_profile_controls(ui, &shape);
             ui.table_next_column();
-            let pending = self.draft_profile != self.applied_profile;
+            let pending = DraftPair::new(&self.draft_profile, &mut self.applied_profile).pending();
             if draw_update_button(ui, &self.settings, pending) {
                 if let Some(draft) = self.draft_profile.as_ref() {
                     let valid = draft.y_axis.map_or(Ok(vec![0]), |axis| {
                         parse_profile_indexes(&draft.y_indexes, shape[axis])
                     });
                     if valid.is_ok() {
-                        self.applied_profile = Some(draft.clone());
+                        DraftPair::new(&self.draft_profile, &mut self.applied_profile).apply();
                         self.profile_cache = None;
                     }
                 }
@@ -54,9 +54,14 @@ impl App {
             .draft_profile
             .as_ref()
             .map(|draft| draft.pinned.clone());
-        let coordinate_labels = pinned
-            .as_ref()
-            .map(|pinned| self.pinned_coordinate_labels(pinned));
+        let coordinate_labels = pinned.as_ref().map(|pinned| {
+            if self.profile_job.is_some() {
+                self.cached_pinned_coordinate_labels(pinned)
+            } else {
+                self.pinned_coordinate_labels(pinned)
+            }
+        });
+        let tutorial_tips = self.settings.tutorial_tips;
         let Some(draft) = self.draft_profile.as_mut() else {
             return;
         };
@@ -77,6 +82,12 @@ impl App {
                 draft.y_indexes = draft.pinned[axis].to_string();
             }
         }
+        item_tip(
+            ui,
+            tutorial_tips,
+            "",
+            "Choose the dimension to plot along the horizontal axis.",
+        );
         if shape.len() > 1 {
             if side_by_side {
                 ui.same_line();
@@ -110,14 +121,17 @@ impl App {
                     draft.y_indexes = draft.pinned[axis].to_string();
                 }
             }
-            ui.set_item_tooltip("Single plots one line with every other axis pinned. Compare plots lines at the selected indexes of another axis.");
+            item_tip(ui, tutorial_tips, "Single plots one line with every other axis pinned. Compare plots lines at the selected indexes of another axis.", "Choose Single or compare several profiles along another dimension.");
         }
         if draft.y_axis.is_some() {
             ui.set_next_item_width((ui.content_region_avail()[0] * 0.65).max(60.0));
             ui.input_text("Profile indexes", &mut draft.y_indexes)
                 .build();
-            ui.set_item_tooltip(
+            item_tip(
+                ui,
+                tutorial_tips,
                 "Comma-separated indexes on the comparison axis, for example: 0, 3, 7",
+                "Enter the lines you want to compare, then click Update.",
             );
         }
         for (axis, &length) in shape.iter().enumerate() {
@@ -138,6 +152,12 @@ impl App {
                 length.saturating_sub(1).min(i32::MAX as usize) as i32,
                 &mut index,
             );
+            item_tip(
+                ui,
+                tutorial_tips,
+                "",
+                "Set the slice index for this dimension, then click Update.",
+            );
             draft.pinned[axis] = index as usize;
         }
     }
@@ -145,16 +165,12 @@ impl App {
         let Some(slice) = self.applied_profile.clone() else {
             return;
         };
-        if self.profile_cache.is_none() {
-            self.profile_cache = Some(load_profile(
-                &self.files[selection.file],
-                &selection.path,
-                shape,
-                &slice,
-                &self.value_visibility,
-            ));
-        }
-        let (x_len, line_indexes) = match self.profile_cache.as_ref().unwrap() {
+        self.poll_profile(selection, shape, &slice);
+        let Some((_, result)) = self.profile_cache.as_ref() else {
+            ui.text("Loading profile...");
+            return;
+        };
+        let (x_len, line_indexes) = match result {
             Ok(data) => (
                 data.x_len,
                 data.lines.iter().map(|line| line.index).collect::<Vec<_>>(),
@@ -165,11 +181,16 @@ impl App {
             }
         };
         let mut x_labels = HashMap::new();
+        let loading = self.profile_job.is_some();
         for tick_count in 1..=6 {
             for index in axis_ticks(x_len, tick_count) {
-                x_labels
-                    .entry(index)
-                    .or_insert_with(|| self.coordinate_label(selection, slice.x_axis, index));
+                x_labels.entry(index).or_insert_with(|| {
+                    if loading {
+                        self.cached_coordinate_label(slice.x_axis, index)
+                    } else {
+                        self.coordinate_label(selection, slice.x_axis, index)
+                    }
+                });
             }
         }
         let line_labels = line_indexes
@@ -177,11 +198,17 @@ impl App {
             .map(|index| {
                 slice.y_axis.map_or_else(
                     || "Value".into(),
-                    |axis| self.coordinate_label(selection, axis, index),
+                    |axis| {
+                        if loading {
+                            self.cached_coordinate_label(axis, index)
+                        } else {
+                            self.coordinate_label(selection, axis, index)
+                        }
+                    },
                 )
             })
             .collect::<Vec<_>>();
-        let data = self.profile_cache.as_ref().unwrap().as_ref().unwrap();
+        let data = self.profile_cache.as_ref().unwrap().1.as_ref().unwrap();
         let (nav, visibility_changed) = draw_profile_plot(
             ui,
             data,
@@ -193,6 +220,7 @@ impl App {
             self.settings.display_decimals,
             self.profile_zoom,
             &mut self.value_visibility,
+            self.settings.tutorial_tips,
         );
         if visibility_changed {
             self.profile_cache = None;
@@ -217,6 +245,7 @@ pub(crate) fn draw_profile_plot(
     decimals: usize,
     zoom: f32,
     visibility: &mut ValueVisibility,
+    tutorial_tips: bool,
 ) -> (PlotNavAction, bool) {
     let available = ui.content_region_avail();
     if available[0] < 210.0 || available[1] < 160.0 {
@@ -234,6 +263,8 @@ pub(crate) fn draw_profile_plot(
                 draw_profile_canvas(
                     ui, data, slice, axis_names, palette, x_labels, decimals, zoom,
                 );
+            } else if data.sample_positions.is_some() {
+                ui.text("No finite values in the overview; refining...");
             } else {
                 ui.text("No finite, non-fill values to plot.");
             }
@@ -256,6 +287,7 @@ pub(crate) fn draw_profile_plot(
                 zoom,
                 visibility,
                 palette,
+                tutorial_tips,
             );
             ui.set_cursor_screen_pos([origin[0], origin[1] + PLOT_NAV_HEIGHT]);
             if !data.min.is_finite() || !data.max.is_finite() {
@@ -343,7 +375,10 @@ pub(crate) fn draw_profile_canvas(
     let x_span = data.x_len as f32 / zoom;
     let x_min = (data.x_len as f32 - x_span) * 0.5;
     let x_position = |bin: usize, count: usize| {
-        let index = (bin as f32 + 0.5) / count as f32 * data.x_len as f32;
+        let index = data.sample_positions.as_ref().map_or_else(
+            || (bin as f32 + 0.5) / count as f32 * data.x_len as f32,
+            |positions| positions[bin] as f32 + 0.5,
+        );
         x0 + (index - x_min) / x_span * (x1 - x0)
     };
     let midpoint = minimum * 0.5 + maximum * 0.5;
@@ -442,4 +477,19 @@ pub(crate) fn draw_profile_canvas(
         }
     }
     drop(clip);
+    let sample_count = data.sample_positions.as_ref().map_or(data.x_len, Vec::len);
+    let status = if data.sample_positions.is_some() {
+        "Overview"
+    } else {
+        "Settled"
+    };
+    draw_render_badge(
+        ui,
+        &draw,
+        [x0, y0],
+        [x1, y1],
+        status,
+        &format!("{sample_count} / {} samples/line", data.x_len),
+        palette,
+    );
 }

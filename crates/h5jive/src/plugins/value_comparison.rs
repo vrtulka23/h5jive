@@ -270,11 +270,18 @@ fn load_preview(
     {
         return Err("The selected datasets must be numeric and have identical shapes".into());
     }
+    let bounds = [
+        0,
+        key.slice.rows(&left_info.shape),
+        0,
+        key.slice.columns(&left_info.shape),
+    ];
     let a = load_heatmap_overview_with_cancel(
         &left,
         &key.left.path,
         &left_info.shape,
         &key.slice,
+        bounds,
         key.grid,
         cancelled,
     )?;
@@ -283,6 +290,7 @@ fn load_preview(
         &key.right.path,
         &right_info.shape,
         &key.slice,
+        bounds,
         key.grid,
         cancelled,
     )?;
@@ -402,10 +410,10 @@ fn picker(
                             picked = Some(choice.clone());
                         }
                         if ui.is_item_hovered() {
-                            ui.set_item_tooltip(format!(
-                                "File {file}: {}\nShape {:?}",
-                                choice.path, choice.shape
-                            ));
+                            item_plain_tip(
+                                ui,
+                                &format!("File {file}: {}\nShape {:?}", choice.path, choice.shape),
+                            );
                         }
                     }
                 }
@@ -499,13 +507,16 @@ fn draw_preview(
                 let index = row_bin * key.grid[1] + col_bin;
                 let native_row = overview_sample_index(row_bin, rows, key.grid[0]);
                 let native_col = overview_sample_index(col_bin, columns, key.grid[1]);
-                ui.set_tooltip(format!(
-                    "Row {native_row}, column {native_col}\nLeft: {}\nRight: {}\n{}: {}",
-                    format_value(preview.left_values[index], decimals),
-                    format_value(preview.right_values[index], decimals),
-                    key.operation.label(),
-                    format_value(preview.values[index], decimals)
-                ));
+                show_plain_tip(
+                    ui,
+                    &format!(
+                        "Row {native_row}, column {native_col}\nLeft: {}\nRight: {}\n{}: {}",
+                        format_value(preview.left_values[index], decimals),
+                        format_value(preview.right_values[index], decimals),
+                        key.operation.label(),
+                        format_value(preview.values[index], decimals)
+                    ),
+                );
             }
         }
     }
@@ -612,6 +623,12 @@ pub(super) fn draw(
             state.operation = operation;
             state.invalidate_preview();
         }
+        item_tip(
+            ui,
+            context.settings.tutorial_tips,
+            "",
+            "Switch between subtraction and division of matching datasets.",
+        );
     }
     let slice = state.slice.as_mut().unwrap();
     let labels = axis_option_labels(&[], &left.shape);
@@ -624,6 +641,12 @@ pub(super) fn draw(
         }
         state.invalidate_preview();
     }
+    item_tip(
+        ui,
+        context.settings.tutorial_tips,
+        "",
+        "Choose the dimension shown down the comparison preview.",
+    );
     ui.same_line_with_spacing(0.0, 8.0);
     let slice = state.slice.as_mut().unwrap();
     ui.set_next_item_width(150.0);
@@ -633,6 +656,12 @@ pub(super) fn draw(
         }
         state.invalidate_preview();
     }
+    item_tip(
+        ui,
+        context.settings.tutorial_tips,
+        "",
+        "Choose the dimension shown across the comparison preview.",
+    );
     let slice = state.slice.as_mut().unwrap();
     let mut pins_changed = false;
     for (axis, &length) in left.shape.iter().enumerate() {
@@ -650,6 +679,12 @@ pub(super) fn draw(
             slice.pinned[axis] = pin as usize;
             pins_changed = true;
         }
+        item_tip(
+            ui,
+            context.settings.tutorial_tips,
+            "",
+            "Pick the fixed index for a dimension outside the preview plane.",
+        );
     }
     if pins_changed {
         state.invalidate_preview();
