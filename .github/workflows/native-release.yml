@@ -136,7 +136,10 @@ jobs:
 
       - name: Build on Linux
         if: runner.os == 'Linux'
-        run: cargo build --release --locked -p h5jive --target ${{ matrix.target }}
+        run: |
+          # Cargo executes build scripts before the release binary gets its bundled-library rpath.
+          export LD_LIBRARY_PATH="$SNT3_HDF5_LIB_DIR${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+          cargo build --release --locked -p h5jive --target ${{ matrix.target }}
 
       - name: Build on macOS
         if: runner.os == 'macOS'
