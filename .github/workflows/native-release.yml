@@ -150,7 +150,8 @@ jobs:
         if: runner.os == 'Windows'
         shell: msys2 {0}
         run: |
-          rustc -vV | grep -q 'host: x86_64-pc-windows-gnu'
+          # Consume all output; grep -q can close rustc's pipe early on Windows.
+          rustc -vV | grep -F 'host: x86_64-pc-windows-gnu'
           export HDF5_DIR=/ucrt64
           export HDF5_ROOT=/ucrt64
           export LIBCLANG_PATH=/ucrt64/bin
