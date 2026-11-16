@@ -1,5 +1,6 @@
 ---
 import { pluginPages } from '../../data/plugins';
+import TopNav from '../../components/TopNav.astro';
 ---
 
 <!doctype html>
@@ -19,14 +20,7 @@ import { pluginPages } from '../../data/plugins';
   <body>
     <header class="topbar wrap">
       <a class="brand" href="../" aria-label="H5Jive home"><img class="brand-icon" src="../h5jive.png" width="42" height="42" alt="" /> H5Jive</a>
-      <nav aria-label="Main navigation">
-        <a href="../#capabilities">Capabilities</a>
-        <a href="../features/">Features</a>
-        <a href="../#views">Views</a>
-        <a href="#catalog" aria-current="page">Plugins</a>
-        <a href="../guide/">Guide</a>
-        <a class="nav-cta" href="https://github.com/vrtulka23/h5jive">Source code <span aria-hidden="true">↗</span></a>
-      </nav>
+      <TopNav root="../" current="plugins" pluginsCatalog />
     </header>
 
     <main>

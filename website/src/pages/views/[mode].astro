@@ -1,5 +1,6 @@
 ---
 import { viewPages } from '../../data/views';
+import TopNav from '../../components/TopNav.astro';
 
 export function getStaticPaths() {
   return viewPages.map((view) => ({ params: { mode: view.slug }, props: { view } }));
@@ -28,14 +29,7 @@ const next = viewPages[(currentIndex + 1) % viewPages.length];
   <body>
     <header class="topbar wrap">
       <a class="brand" href="../../" aria-label="H5Jive home"><img class="brand-icon" src="../../h5jive.png" width="42" height="42" alt="" /> H5Jive</a>
-      <nav aria-label="Main navigation">
-        <a href="../../#capabilities">Capabilities</a>
-        <a href="../../features/">Features</a>
-        <a href="../../#views">Views</a>
-        <a href="../../plugins/">Plugins</a>
-        <a href="../../guide/">Guide</a>
-        <a class="nav-cta" href="https://github.com/vrtulka23/h5jive">Source code <span aria-hidden="true">↗</span></a>
-      </nav>
+      <TopNav root="../../" current="views" />
     </header>
 
     <main>
