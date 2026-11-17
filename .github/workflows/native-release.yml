@@ -183,8 +183,9 @@ jobs:
           printf '# Local settings overrides\n' > bundle/settings/overrides.dip
           cp README.md LICENSE bundle/
           cp "$RUNNER_TEMP/hdf5-1.10.11/COPYING" bundle/lib/HDF5-LICENSE
-          # Keep HDF5 and its compression helpers beside the program.
-          ldd bundle/h5jive | awk '/=> \/.*lib(hdf5[^.]*|sz|aec|z)\.so/ {print $3}' | while read -r library; do
+          # Resolve the custom HDF5 build before copying it and its compression helpers.
+          LD_LIBRARY_PATH="$SNT3_HDF5_LIB_DIR${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" ldd bundle/h5jive \
+            | awk '/=> \/.*lib(hdf5[^.]*|sz|aec|z)\.so/ {print $3}' | while read -r library; do
             cp -L "$library" bundle/lib/
           done
           patchelf --set-rpath '$ORIGIN/lib' bundle/h5jive
