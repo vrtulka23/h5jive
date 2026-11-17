@@ -235,10 +235,13 @@ struct App {
     tutorial_tips_error: Option<String>,
     settings: Settings,
     resource_monitor: ResourceMonitor,
+    wayland_session: bool,
+    display_backend: Option<&'static str>,
 }
 
 impl Application for App {
     fn configure_imgui(&mut self, context: &mut InitContext<'_>) -> Result<(), RunError> {
+        self.display_backend = display_backend_name(context.window(), self.wayland_session);
         context
             .imgui()
             .font_atlas()
@@ -352,6 +355,10 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
         return Ok(());
     }
     let (inspect, view_override, inputs) = parse_startup_args(&args)?;
+    let wayland_session = was_wayland_session();
+    if !inspect {
+        prefer_xwayland_for_file_drops();
+    }
     let settings = Settings::load()?;
     let files: Vec<File> = inputs
         .iter()
@@ -511,6 +518,8 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
         sidebar_width: settings.sidebar_width,
         details_panel_fraction: settings.details_panel_fraction,
         resource_monitor: ResourceMonitor::new(),
+        wayland_session,
+        display_backend: None,
         show_about: false,
         show_section_help: false,
         tutorial_tips_error: None,
@@ -519,6 +528,52 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
     run_app(config, app)?;
     Ok(())
 }
+
+#[cfg(target_os = "linux")]
+fn prefer_xwayland_for_file_drops() {
+    // dear-app constructs winit's event loop internally. Winit 0.30 chooses
+    // Wayland before X11 when both displays are advertised, but its Wayland
+    // backend does not deliver file-drop events.
+    if env::var("DISPLAY").is_ok_and(|display| !display.is_empty())
+        && env::var("H5JIVE_WINDOW_BACKEND").as_deref() != Ok("wayland")
+    {
+        env::remove_var("WAYLAND_DISPLAY");
+        env::remove_var("WAYLAND_SOCKET");
+    }
+}
+
+#[cfg(not(target_os = "linux"))]
+fn prefer_xwayland_for_file_drops() {}
+
+#[cfg(target_os = "linux")]
+fn was_wayland_session() -> bool {
+    ["WAYLAND_DISPLAY", "WAYLAND_SOCKET"]
+        .iter()
+        .any(|name| env::var(name).is_ok_and(|value| !value.is_empty()))
+        || env::var("XDG_SESSION_TYPE").as_deref() == Ok("wayland")
+}
+
+#[cfg(not(target_os = "linux"))]
+fn was_wayland_session() -> bool {
+    false
+}
+
+fn display_backend_name(
+    window: &winit::window::Window,
+    wayland_session: bool,
+) -> Option<&'static str> {
+    use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
+
+    match window.window_handle().ok()?.as_raw() {
+        RawWindowHandle::AppKit(_) => Some("WindowServer"),
+        RawWindowHandle::Win32(_) => Some("Windows"),
+        RawWindowHandle::Wayland(_) => Some("Wayland"),
+        RawWindowHandle::Xlib(_) | RawWindowHandle::Xcb(_) if wayland_session => Some("XWayland"),
+        RawWindowHandle::Xlib(_) | RawWindowHandle::Xcb(_) => Some("X11"),
+        _ => None,
+    }
+}
+
 fn parse_startup_args(
     args: &[String],
 ) -> Result<(bool, Option<ViewMode>, Vec<(PathBuf, Option<String>)>), String> {

@@ -187,18 +187,23 @@ impl App {
                     item_tip(ui, tutorial_tips, "", "See the installed version and maintainer.");
                 }
                 ui.same_line();
-                let mut label = self.resource_monitor.label(true);
+                let display_label = self
+                    .display_backend
+                    .map(|backend| format!("  ·  Display {backend}"))
+                    .unwrap_or_default();
+                let mut label = format!("{}{display_label}", self.resource_monitor.label(true));
                 let padding = ui.clone_style().window_padding()[0];
                 let mut x = ui.window_size()[0] - padding - ui.calc_text_size(&label)[0];
                 if x <= ui.cursor_pos_x() + 16.0 {
-                    label = self.resource_monitor.label(false);
+                    label = format!("{}{display_label}", self.resource_monitor.label(false));
                     x = ui.window_size()[0] - padding - ui.calc_text_size(&label)[0];
                 }
                 if x > ui.cursor_pos_x() + 16.0 {
                     ui.set_cursor_pos_x(x);
                     ui.text_colored(palette.muted, label);
                     item_plain_tip(ui,
-                        "RAM: resident memory used by the whole H5Jive process (CPU memory).\n\
+                        "Display: window system in use. On macOS, AppKit creates windows managed by WindowServer. XWayland is X11 inside a Wayland session.\n\
+                         RAM: resident memory used by the whole H5Jive process (CPU memory).\n\
                          UI: average time spent building a UI frame during the last second; excludes GPU rendering.\n\
                          Raw: uncompressed byte size of the selected dataset, not its measured memory use.\n\
                          Compare RAM before and after loading or processing a dataset to observe its impact.",

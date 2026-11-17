@@ -6,6 +6,8 @@ pub(super) struct FileDropState {
     pub hovering: bool,
     pub pointer_x: Option<f32>,
     consumed: bool,
+    #[cfg(target_os = "linux")]
+    x11_connection: Option<x11rb::rust_connection::RustConnection>,
 }
 
 pub(super) enum DropAction {
@@ -49,9 +51,40 @@ impl FileDropState {
     }
 
     pub fn refresh_pointer(&mut self, window: &Window) {
+        #[cfg(target_os = "linux")]
+        {
+            // An unavailable pointer must not leave the previous A/B target lit.
+            self.pointer_x = self.x11_pointer_x(window);
+        }
+        #[cfg(not(target_os = "linux"))]
         if let Some(x) = native_pointer_x(window) {
             self.pointer_x = Some(x);
         }
+    }
+
+    #[cfg(target_os = "linux")]
+    fn x11_pointer_x(&mut self, window: &Window) -> Option<f32> {
+        use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
+        use x11rb::protocol::xproto::ConnectionExt;
+
+        let window_id = match window.window_handle().ok()?.as_raw() {
+            RawWindowHandle::Xlib(handle) => u32::try_from(handle.window).ok()?,
+            RawWindowHandle::Xcb(handle) => handle.window.get(),
+            _ => return None,
+        };
+        if self.x11_connection.is_none() {
+            self.x11_connection = Some(x11rb::connect(None).ok()?.0);
+        }
+        let pointer = self
+            .x11_connection
+            .as_ref()?
+            .query_pointer(window_id)
+            .ok()?
+            .reply()
+            .ok()?;
+        pointer
+            .same_screen
+            .then_some(f32::from(pointer.win_x) / window.scale_factor() as f32)
     }
 }
 
@@ -60,6 +93,7 @@ pub(super) fn drop_slot(pointer_x: Option<f32>, width: f32) -> Option<usize> {
     (width > 0.0 && x.is_finite() && x >= 0.0 && x < width).then_some(usize::from(x >= width * 0.5))
 }
 
+#[cfg(not(target_os = "linux"))]
 fn native_pointer_x(window: &Window) -> Option<f32> {
     let global_x = global_pointer_x(window)?;
     let left = window.inner_position().ok()?.x as f64;
@@ -107,15 +141,6 @@ fn global_pointer_x(window: &Window) -> Option<f64> {
     unsafe { CFRelease(event) };
     // Quartz screen coordinates are in points; winit's inner_position is in pixels.
     Some(point.x * window.scale_factor())
-}
-
-#[cfg(target_os = "linux")]
-fn global_pointer_x(_window: &Window) -> Option<f64> {
-    use x11rb::{connection::Connection, protocol::xproto::ConnectionExt};
-    let (connection, screen) = x11rb::connect(None).ok()?;
-    let root = connection.setup().roots.get(screen)?.root;
-    let pointer = connection.query_pointer(root).ok()?.reply().ok()?;
-    Some(f64::from(pointer.root_x))
 }
 
 #[cfg(test)]

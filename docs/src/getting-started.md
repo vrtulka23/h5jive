@@ -95,6 +95,28 @@ viewer.graphics.forwarded_x11_backend = "vulkan,gl"
 If the display exposes neither backend, the window cannot render through that
 session; a graphical login or a remote desktop with graphics support is needed.
 
+### File drops on Linux
+
+The winit 0.30 Wayland backend does not deliver file drag-and-drop events to
+H5Jive. When an X11 display is available, H5Jive automatically selects X11;
+on a Wayland desktop this uses XWayland if the compositor provides it. This
+applies to Ubuntu 22.04 and openSUSE Leap as well.
+Start it normally with `h5jive`; no display variables need to be changed in
+the shell. If X11 is unavailable, H5Jive uses native Wayland and file drops
+remain unavailable; use **Browse A** or **Browse B**. To request a native
+Wayland window even when XWayland is available, run:
+
+```sh
+H5JIVE_WINDOW_BACKEND=wayland h5jive
+```
+
+On X11, H5Jive reads the pointer position relative to its window while a file
+is hovered, then uses the same position to choose A or B on drop. Winit 0.30
+does not expose XDND drag-motion coordinates, so a compositor that does not
+update the X11 pointer during a Wayland-to-XWayland drag may still leave the
+highlight stationary. If no position is available, H5Jive leaves both drop
+regions unselected and asks you to use Browse A or Browse B.
+
 ### Run over SSH with X11 forwarding
 
 The Linux app can display its window through SSH X11 forwarding. Connect from a
