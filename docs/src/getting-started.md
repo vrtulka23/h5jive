@@ -74,7 +74,7 @@ need a compatible Linux graphics stack on the host.
 
 ### Linux graphics on SUSE
 
-The Linux archive is built on Ubuntu and smoke-tested on openSUSE Leap. Its
+The Linux archive is built on Ubuntu and intended for openSUSE Leap. Its
 bundled HDF5 is built without the unused S3 driver, so it does not require
 Ubuntu's versioned libcurl symbols from the host. This applies to releases
 built with the updated workflow; an already installed release is unchanged

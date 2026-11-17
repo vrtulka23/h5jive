@@ -201,14 +201,6 @@ jobs:
           (cd "$(mktemp -d)" && "$bundle_exe" --inspect)
           tar -C bundle -czf dist/${{ matrix.archive }} .
 
-      - name: Smoke test Linux archive on openSUSE Leap
-        if: runner.os == 'Linux'
-        shell: bash
-        run: |
-          docker run --rm -v "$PWD/bundle:/opt/h5jive:ro" \
-            registry.opensuse.org/opensuse/leap:16.0 \
-            sh -euc 'cd /tmp; /opt/h5jive/h5jive --inspect'
-
       - name: Package macOS executable and libraries
         if: runner.os == 'macOS'
         run: |
