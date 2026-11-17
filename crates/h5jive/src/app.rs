@@ -336,8 +336,12 @@ struct FilePickerState {
 
 pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = env::args().skip(1).collect();
+    if args.iter().any(|arg| arg == "--version" || arg == "-v") {
+        println!("H5Jive v{}", env!("CARGO_PKG_VERSION"));
+        return Ok(());
+    }
     if args.iter().any(|arg| arg == "--help" || arg == "-h") {
-        println!("H5Jive [--inspect] [--view-VIEW] [FILE_A[:/DATASET]] [FILE_B[:/DATASET]]\nH5Jive --settings-help DIPL_PATH\nVIEW: data, 1d-profiles, 2d-slice, 3d, world-map, globe (requires :/DATASET)\nReads HDF5 and NetCDF files. DIPL: settings/runtime/DIPfile in source or settings/DIPfile in installs; overrides.dip beside it");
+        println!("H5Jive [--inspect] [--view-VIEW] [FILE_A[:/DATASET]] [FILE_B[:/DATASET]]\nH5Jive --settings-help DIPL_PATH\nH5Jive -v|--version\nVIEW: data, 1d-profiles, 2d-slice, 3d, world-map, globe (requires :/DATASET)\nReads HDF5 and NetCDF files. DIPL: settings/runtime/DIPfile in source or settings/DIPfile in installs; overrides.dip beside it");
         return Ok(());
     }
     if args.first().is_some_and(|arg| arg == "--settings-help") {

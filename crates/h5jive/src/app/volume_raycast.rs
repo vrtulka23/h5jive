@@ -347,11 +347,13 @@ fn render_exact_volume_with_cancel(
 ) -> Vec<u8> {
     let [width, height] = request.key.render_size;
     let mut image = vec![0; width as usize * height as usize * 4];
+    let special_bounds = visible_special_bounds(request);
     let workers = thread::available_parallelism()
         .map_or(1, |n| n.get())
         .min(8);
     let rows_per_worker = (height as usize + workers - 1) / workers;
     let chunk_bytes = rows_per_worker * width as usize * 4;
+    let special_bounds = special_bounds.as_slice();
     thread::scope(|scope| {
         for (worker, chunk) in image.chunks_mut(chunk_bytes).enumerate() {
             scope.spawn(move || {
@@ -361,10 +363,11 @@ fn render_exact_volume_with_cancel(
                     }
                     let y = worker * rows_per_worker + row;
                     for (x, pixel) in pixels.chunks_mut(4).enumerate() {
-                        pixel.copy_from_slice(&raycast_pixel(
+                        pixel.copy_from_slice(&raycast_pixel_with_special_search(
                             request,
                             (x as f32 + 0.5) * request.key.size[0] as f32 / width as f32,
                             (y as f32 + 0.5) * request.key.size[1] as f32 / height as f32,
+                            special_bounds,
                         ));
                     }
                 }
@@ -374,15 +377,15 @@ fn render_exact_volume_with_cancel(
     image
 }
 
-fn volume_ray_interval(
-    data: &ExactVolumeData,
+fn ray_bounds_interval(
+    bounds: [[f32; 2]; 3],
     origin: [f32; 3],
     direction: [f32; 3],
 ) -> Option<(f32, f32)> {
     let mut entry = f32::NEG_INFINITY;
     let mut exit = f32::INFINITY;
     for axis in 0..3 {
-        let [low, high] = data.bounds[axis];
+        let [low, high] = bounds[axis];
         if direction[axis].abs() < 1e-9 {
             if origin[axis] < low || origin[axis] >= high {
                 return None;
@@ -395,6 +398,60 @@ fn volume_ray_interval(
         exit = exit.min(a.max(b));
     }
     (exit > entry.max(0.0)).then_some((entry.max(0.0), exit))
+}
+
+fn volume_ray_interval(
+    data: &ExactVolumeData,
+    origin: [f32; 3],
+    direction: [f32; 3],
+) -> Option<(f32, f32)> {
+    ray_bounds_interval(data.bounds, origin, direction)
+}
+
+fn visible_special_bounds(request: &VolumeRasterRequest) -> Vec<[[f32; 2]; 3]> {
+    if request.key.opacity >= 1.0 {
+        return Vec::new();
+    }
+    request
+        .layers
+        .iter()
+        .filter_map(|data| {
+            let mut min = [usize::MAX; 3];
+            let mut max = [0; 3];
+            for (offset, &special) in data.specials.iter().enumerate() {
+                let visible = match special {
+                    1 => request.key.visibility.fill,
+                    2 => request.key.visibility.nan,
+                    3 => request.key.visibility.positive_inf,
+                    4 => request.key.visibility.negative_inf,
+                    _ => false,
+                };
+                if visible {
+                    for axis in 0..3 {
+                        let index = (offset / data.strides[axis].max(1)) % data.dimensions[axis];
+                        min[axis] = min[axis].min(index);
+                        max[axis] = max[axis].max(index);
+                    }
+                }
+            }
+            (min[0] != usize::MAX).then(|| {
+                std::array::from_fn(|axis| {
+                    let [low, high] = data.bounds[axis];
+                    let width = (high - low) / data.dimensions[axis] as f32;
+                    [
+                        high - width * (max[axis] + 1) as f32,
+                        high - width * min[axis] as f32,
+                    ]
+                })
+            })
+        })
+        .collect()
+}
+
+fn past_ray_boundary(boundary: f32) -> f32 {
+    // A fixed offset is lost to f32 rounding when zoom makes ray distances
+    // large. Move several representable steps so the next cell is sampled.
+    boundary + (boundary.abs().max(1.0) * f32::EPSILON * 8.0).max(1e-5)
 }
 
 fn volume_camera_ray(
@@ -420,10 +477,23 @@ fn volume_camera_ray(
     )
 }
 
+#[cfg(test)]
 fn raycast_pixel(request: &VolumeRasterRequest, x: f32, y: f32) -> [u8; 4] {
+    raycast_pixel_with_special_search(request, x, y, &visible_special_bounds(request))
+}
+
+fn raycast_pixel_with_special_search(
+    request: &VolumeRasterRequest,
+    x: f32,
+    y: f32,
+    special_bounds: &[[[f32; 2]; 3]],
+) -> [u8; 4] {
     let key = &request.key;
     let camera_distance = volume_camera_distance(key.scale);
     let (origin, direction) = volume_camera_ray(key.center, key.scale, key.rotation, [x, y]);
+    let search_specials = special_bounds
+        .iter()
+        .any(|&bounds| ray_bounds_interval(bounds, origin, direction).is_some());
     // The view retains at most four refined crops, an overview, and one
     // in-flight result. Keep intervals on the stack for every screen pixel.
     let mut interval_storage = [None; 8];
@@ -444,8 +514,9 @@ fn raycast_pixel(request: &VolumeRasterRequest, x: f32, y: f32) -> [u8; 4] {
         .flatten()
         .map(|(_, exit)| *exit)
         .fold(0.0, f32::max);
-    let mut distance = entry + 1e-5;
+    let mut distance = past_ray_boundary(entry);
     let mut accumulated = [0.0_f32; 4];
+    let mut found_special = false;
     let max_steps = request
         .layers
         .iter()
@@ -456,7 +527,7 @@ fn raycast_pixel(request: &VolumeRasterRequest, x: f32, y: f32) -> [u8; 4] {
     let depth_shading =
         DepthShading::new(VolumeRotation(key.rotation), key.back_brightness, key.scale);
     for _ in 0..max_steps {
-        if distance >= exit || accumulated[3] >= 0.995 {
+        if distance >= exit || (!search_specials || found_special) && accumulated[3] >= 0.995 {
             break;
         }
         let active = intervals.iter().position(|interval| {
@@ -469,7 +540,7 @@ fn raycast_pixel(request: &VolumeRasterRequest, x: f32, y: f32) -> [u8; 4] {
                 .filter_map(|(start, _)| (*start > distance).then_some(*start))
                 .min_by(f32::total_cmp);
             let Some(next) = next else { break };
-            distance = next + 1e-5;
+            distance = past_ray_boundary(next);
             continue;
         };
         let data = &request.layers[layer];
@@ -492,6 +563,18 @@ fn raycast_pixel(request: &VolumeRasterRequest, x: f32, y: f32) -> [u8; 4] {
             _ => None,
         };
         if key.visibility.allows_class(value, special) {
+            if special.is_some() && search_specials && !found_special {
+                // Many translucent ordinary cells can otherwise saturate the
+                // ray before it reaches a special cell. Keep their blended
+                // color, but limit their total coverage to the chosen opacity.
+                if accumulated[3] > key.opacity {
+                    let factor = key.opacity / accumulated[3];
+                    for channel in &mut accumulated {
+                        *channel *= factor;
+                    }
+                }
+                found_special = true;
+            }
             let color = if let Some(special) = special {
                 key.special_colors[match special {
                     SpecialValue::Fill => 0,
@@ -537,7 +620,7 @@ fn raycast_pixel(request: &VolumeRasterRequest, x: f32, y: f32) -> [u8; 4] {
         if !next.is_finite() {
             break;
         }
-        distance = next + 1e-5;
+        distance = past_ray_boundary(next);
     }
     let alpha = accumulated[3];
     if alpha > 0.0 {
@@ -796,6 +879,192 @@ mod tests {
         request.key.special_colors[1] = [1.0, 1.0, 1.0, 1.0];
         request.key.visibility.nan = true;
         assert_eq!(raycast_pixel(&request, 0.5, 0.5), [217, 217, 217, 255]);
+    }
+
+    #[test]
+    fn special_voxel_is_solid_from_each_axis() {
+        let data = Arc::new(ExactVolumeData {
+            values: vec![f32::NAN],
+            specials: vec![2],
+            dimensions: [1, 1, 1],
+            strides: [1, 1, 1],
+            bounds: [[-0.5, 0.5]; 3],
+            color_range: None,
+            sampled: false,
+        });
+        let mut request = VolumeRasterRequest {
+            key: VolumeRasterKey {
+                volume: VolumeKey {
+                    file: 0,
+                    path: String::new(),
+                    slice: VolumeSlice::new(&[1, 1, 1], false, PinnedDefault::Start),
+                },
+                layer_keys: Vec::new(),
+                size: [9, 9],
+                render_size: [9, 9],
+                center: [4.5, 4.5],
+                scale: [4.0; 3],
+                rotation: VolumeRotation::identity().0,
+                opacity: 0.0,
+                back_brightness: 1.0,
+                range: None,
+                logarithmic: false,
+                visibility: ValueVisibility::default(),
+                preset: ColormapPreset::Theme,
+                color_stops: [[0.0; 4]; 3],
+                special_colors: [[1.0, 0.0, 1.0, 1.0]; 4],
+            },
+            layers: vec![data],
+            colors: [[0.0; 4]; 256],
+        };
+        for rotation in [
+            VolumeRotation::identity(),
+            VolumeRotation::from_angles(std::f32::consts::FRAC_PI_2, 0.0),
+            VolumeRotation::from_angles(-std::f32::consts::FRAC_PI_2, 0.0),
+            VolumeRotation::from_angles(0.0, std::f32::consts::FRAC_PI_2),
+            VolumeRotation::from_angles(0.0, -std::f32::consts::FRAC_PI_2),
+        ] {
+            request.key.rotation = rotation.0;
+            assert_eq!(raycast_pixel(&request, 4.5, 4.5), [255, 0, 255, 255]);
+        }
+    }
+
+    #[test]
+    fn distant_special_survives_translucent_ordinary_voxels() {
+        let mut specials = vec![0; 64];
+        specials[60] = 2;
+        let data = Arc::new(ExactVolumeData {
+            values: vec![1.0; 64],
+            specials,
+            dimensions: [1, 1, 64],
+            strides: [64, 64, 1],
+            bounds: [[-0.5, 0.5]; 3],
+            color_range: Some((0.0, 1.0)),
+            sampled: false,
+        });
+        let mut request = VolumeRasterRequest {
+            key: VolumeRasterKey {
+                volume: VolumeKey {
+                    file: 0,
+                    path: String::new(),
+                    slice: VolumeSlice::new(&[1, 1, 64], false, PinnedDefault::Start),
+                },
+                layer_keys: Vec::new(),
+                size: [1, 1],
+                render_size: [1, 1],
+                center: [0.5, 0.5],
+                scale: [4.0; 3],
+                rotation: VolumeRotation::identity().0,
+                opacity: 0.1,
+                back_brightness: 1.0,
+                range: data.color_range,
+                logarithmic: false,
+                visibility: ValueVisibility::default(),
+                preset: ColormapPreset::Theme,
+                color_stops: [[0.0; 4]; 3],
+                special_colors: [[1.0, 0.0, 1.0, 1.0]; 4],
+            },
+            layers: vec![data],
+            colors: [[1.0, 1.0, 1.0, 1.0]; 256],
+        };
+        let pixel = raycast_pixel(&request, 0.5, 0.5);
+        assert!(pixel[1] < 128, "special should remain visible: {pixel:?}");
+        assert_eq!(pixel[3], 255);
+        request.key.rotation = VolumeRotation::from_angles(std::f32::consts::FRAC_PI_2, 0.0).0;
+        let special_center = [0.0, 0.0, 0.5 - 60.5 / 64.0];
+        let screen = project_rotated(
+            special_center,
+            request.key.center,
+            request.key.scale,
+            VolumeRotation(request.key.rotation),
+        )
+        .0;
+        let side_pixel = raycast_pixel(&request, screen[0], screen[1]);
+        assert!(
+            side_pixel[1] < 128,
+            "special should remain visible: {side_pixel:?}"
+        );
+        assert_eq!(side_pixel[3], 255);
+        request.key.visibility.nan = false;
+        assert!(visible_special_bounds(&request).is_empty());
+    }
+
+    #[test]
+    fn demo_special_regions_remain_filled_at_zoom_in_axis_views() {
+        let path = std::path::Path::new(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../examples/arrays/space_demo.hdf5"
+        ));
+        let file = File::open(path).unwrap();
+        let shape = [8, 32, 48, 16];
+        let mut slice = VolumeSlice::new(&shape, true, PinnedDefault::Middle);
+        slice.pinned = 4;
+        let data = Arc::new(
+            load_exact_volume(&file, "/observations/time_spectral_cube_4d", &shape, &slice)
+                .unwrap(),
+        );
+        let scale = volume_axis_ratios(&slice, &shape).map(|ratio| 220.0 * 3.3 * ratio);
+        let mut request = VolumeRasterRequest {
+            key: VolumeRasterKey {
+                volume: VolumeKey {
+                    file: 0,
+                    path: String::new(),
+                    slice,
+                },
+                layer_keys: Vec::new(),
+                size: [640, 480],
+                render_size: [640, 480],
+                center: [320.0, 240.0],
+                scale,
+                rotation: VolumeRotation::from_angles(0.5, 0.3).0,
+                opacity: 0.025,
+                back_brightness: 0.45,
+                range: data.color_range,
+                logarithmic: false,
+                visibility: ValueVisibility::default(),
+                preset: ColormapPreset::Theme,
+                color_stops: [[0.0; 4]; 3],
+                special_colors: [
+                    [1.0, 0.5, 0.5, 1.0],
+                    [1.0, 0.0, 1.0, 1.0],
+                    [1.0, 0.6, 0.0, 1.0],
+                    [0.0, 0.3, 1.0, 1.0],
+                ],
+            },
+            layers: vec![data],
+            colors: [[0.3, 0.6, 0.3, 1.0]; 256],
+        };
+        for rotation in [
+            VolumeRotation::from_angles(std::f32::consts::PI, std::f32::consts::PI),
+            VolumeRotation::from_angles(std::f32::consts::FRAC_PI_2, std::f32::consts::PI),
+            VolumeRotation::from_angles(std::f32::consts::PI, -std::f32::consts::FRAC_PI_2),
+        ] {
+            request.key.rotation = rotation.0;
+            for (index, special) in [([18, 34, 10], 3), ([24, 37, 5], 4)] {
+                let center = std::array::from_fn(|axis| {
+                    0.5 - (index[axis] as f32 + 0.5) / request.layers[0].dimensions[axis] as f32
+                });
+                let screen =
+                    project_rotated(center, request.key.center, request.key.scale, rotation).0;
+                let pixel = raycast_pixel(&request, screen[0], screen[1]);
+                assert_eq!(
+                    pixel[3], 255,
+                    "rotation {:?}, special {special}: {pixel:?}",
+                    rotation.0
+                );
+                match special {
+                    3 => assert!(
+                        u16::from(pixel[0]) > u16::from(pixel[2]) * 2,
+                        "+Inf should fill its center: {pixel:?}"
+                    ),
+                    4 => assert!(
+                        u16::from(pixel[2]) > u16::from(pixel[0]) * 2,
+                        "-Inf should fill its center: {pixel:?}"
+                    ),
+                    _ => unreachable!(),
+                }
+            }
+        }
     }
 
     #[test]
