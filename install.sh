@@ -126,6 +126,7 @@ trap 'rm -rf "$stage"' 0
 trap 'exit 1' 1 2 3 15
 
 echo "Downloading $archive"
+echo "Temporary archive: $stage/$archive (removed when the installer exits)"
 curl -fsSL "$base/$archive" -o "$stage/$archive"
 curl -fsSL "$base/SHA256SUMS" -o "$stage/SHA256SUMS"
 expected=$(awk -v name="$archive" '$2 == name { print $1 }' "$stage/SHA256SUMS")
@@ -138,10 +139,13 @@ if [ "$hash_command" = shasum ]; then
 else
     actual=$(sha256sum "$stage/$archive" | awk '{ print $1 }')
 fi
+echo "Expected SHA-256:   $expected"
+echo "Downloaded SHA-256: $actual"
 if [ "$actual" != "$expected" ]; then
     echo "Checksum mismatch for $archive" >&2
     exit 1
 fi
+echo 'Checksum verified.'
 
 package="$stage/package"
 mkdir "$package"
@@ -150,6 +154,8 @@ if [ ! -x "$package/h5jive" ] || [ ! -f "$package/settings/DIPfile" ]; then
     echo 'Release archive is missing the executable or DIPL settings.' >&2
     exit 1
 fi
+downloaded_version=$("$package/h5jive" --version)
+echo "Downloaded version: $downloaded_version"
 if [ -f "$install_dir/settings/overrides.dip" ]; then
     # Local repository paths belong to the user, so carry them into upgrades.
     cp "$install_dir/settings/overrides.dip" "$package/settings/overrides.dip"
