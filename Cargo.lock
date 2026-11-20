@@ -1181,6 +1181,7 @@ dependencies = [
  "hdf5-metno-sys",
  "image",
  "libc",
+ "ndarray",
  "regex",
  "scinumtools3",
  "scinumtools3-build",

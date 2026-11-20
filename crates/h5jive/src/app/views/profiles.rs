@@ -229,7 +229,7 @@ impl App {
             PlotNavAction::Reset => 1.0,
             PlotNavAction::ZoomOut => (self.profile_zoom / 1.25).max(1.0),
             PlotNavAction::ZoomIn => (self.profile_zoom * 1.25).min(64.0),
-            PlotNavAction::None => self.profile_zoom,
+            PlotNavAction::None | PlotNavAction::Center => self.profile_zoom,
         };
     }
 }
@@ -288,6 +288,7 @@ pub(crate) fn draw_profile_plot(
                 visibility,
                 palette,
                 tutorial_tips,
+                None,
             );
             ui.set_cursor_screen_pos([origin[0], origin[1] + PLOT_NAV_HEIGHT]);
             if !data.min.is_finite() || !data.max.is_finite() {

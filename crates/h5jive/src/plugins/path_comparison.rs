@@ -1554,7 +1554,7 @@ mod tests {
 
     #[test]
     fn side_by_side_table_renders_with_one_scroll_area() {
-        let (paths, files) = demo_files();
+        let (paths, mut files) = demo_files();
         let settings = Settings::load().unwrap();
         let mut context = Context::create();
         context.set_ini_filename(None::<String>).unwrap();
@@ -1578,10 +1578,11 @@ mod tests {
                     &mut lab,
                     ui,
                     PluginContext {
-                        files: &files,
+                        files: &mut files,
                         file_paths: &paths,
                         settings: &settings,
                         selection: None,
+                        write_allowed: [true, true],
                     }
                 )
                 .is_none());

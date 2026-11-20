@@ -57,7 +57,7 @@ use std::{
     env,
     path::PathBuf,
     sync::{
-        atomic::{AtomicU64, Ordering},
+        atomic::{AtomicBool, AtomicU64, Ordering},
         mpsc, Arc,
     },
     thread,
@@ -83,6 +83,7 @@ fn volume_camera_distance(scale: [f32; 3]) -> f32 {
 enum PlotNavAction {
     None,
     Reset,
+    Center,
     ZoomOut,
     ZoomIn,
 }
@@ -93,6 +94,15 @@ struct VolumeRotation([f32; 4]);
 enum MapJobUpdate {
     Preview(MapData),
     Complete(Result<(MapData, Option<Arc<Region>>), String>),
+}
+
+#[derive(Clone, Copy)]
+struct GlobeRotation {
+    start_yaw: f32,
+    yaw_delta: f32,
+    start_pitch: f32,
+    target_pitch: f32,
+    started_at: Instant,
 }
 
 enum ProfileJobUpdate {
@@ -207,6 +217,9 @@ struct App {
     globe_yaw: f32,
     globe_pitch: f32,
     globe_zoom: f32,
+    globe_auto_center_source: Option<(usize, String)>,
+    globe_auto_center_pending: bool,
+    globe_rotation: Option<GlobeRotation>,
     draft_slice: Option<TableSlice>,
     applied_slice: Option<TableSlice>,
     draft_table: Option<TableSlice>,
@@ -235,11 +248,21 @@ struct App {
     tutorial_tips_error: Option<String>,
     settings: Settings,
     resource_monitor: ResourceMonitor,
+    gpu_initialized: Arc<AtomicBool>,
     wayland_session: bool,
     display_backend: Option<&'static str>,
 }
 
 impl Application for App {
+    fn initialized(
+        &mut self,
+        _context: &mut dear_app::InitializedContext<'_>,
+        _gpu: &mut dear_app::GpuContext<'_>,
+    ) -> Result<(), RunError> {
+        self.gpu_initialized.store(true, Ordering::Relaxed);
+        Ok(())
+    }
+
     fn configure_imgui(&mut self, context: &mut InitContext<'_>) -> Result<(), RunError> {
         self.display_backend = display_backend_name(context.window(), self.wayland_session);
         context
@@ -291,6 +314,11 @@ impl Application for App {
         let frame_start = Instant::now();
         self.draw(ui, &plot_ui, plot_ctx);
         self.resource_monitor.record_ui_time(frame_start.elapsed());
+        if self.view == ViewMode::Globe && self.globe_rotation.is_some() {
+            let _ = frame
+                .wake_handle()
+                .request_redraw_at(Instant::now() + Duration::from_millis(16));
+        }
         let _ = frame
             .wake_handle()
             .request_redraw_at(self.resource_monitor.next_sample_at());
@@ -305,6 +333,7 @@ impl Application for App {
             || self.heatmap_view_overview_job.is_some()
             || self.profile_job.is_some()
             || self.volume_raster_job.is_some()
+            || self.map_job.is_some()
         {
             let _ = frame.wake_handle().request_redraw_at(
                 std::time::Instant::now() + std::time::Duration::from_millis(80),
@@ -394,6 +423,15 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
         .graphics_backend
         .unwrap_or_else(|| default_wgpu_backends(settings.forwarded_x11_backend))
         .with_env();
+    let retry_with_gl = cfg!(target_os = "linux")
+        && settings.graphics_backend.is_none()
+        && env::var_os("WGPU_BACKEND").is_none()
+        && env::var_os("H5JIVE_GL_RETRY").is_none()
+        && config
+            .wgpu
+            .backends
+            .contains(wgpu::Backends::VULKAN | wgpu::Backends::GL);
+    let gpu_initialized = Arc::new(AtomicBool::new(false));
     let app = App {
         files,
         file_paths: inputs.iter().map(|(path, _)| path.clone()).collect(),
@@ -491,6 +529,9 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
         globe_yaw: 0.0,
         globe_pitch: 0.0,
         globe_zoom: 1.0,
+        globe_auto_center_source: None,
+        globe_auto_center_pending: false,
+        globe_rotation: None,
         draft_slice: None,
         applied_slice: None,
         draft_table: None,
@@ -518,6 +559,7 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
         sidebar_width: settings.sidebar_width,
         details_panel_fraction: settings.details_panel_fraction,
         resource_monitor: ResourceMonitor::new(),
+        gpu_initialized: Arc::clone(&gpu_initialized),
         wayland_session,
         display_backend: None,
         show_about: false,
@@ -525,8 +567,36 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
         tutorial_tips_error: None,
         settings,
     };
-    run_app(config, app)?;
-    Ok(())
+    match run_app(config, app) {
+        Ok(()) => Ok(()),
+        Err(error) => {
+            if retry_with_gl
+                && !gpu_initialized.load(Ordering::Relaxed)
+                && matches!(
+                    error,
+                    RunError::SurfaceCreation(_)
+                        | RunError::AdapterUnavailable(_)
+                        | RunError::SurfaceFormatUnavailable
+                        | RunError::DeviceRequest(_)
+                        | RunError::RendererInit(_)
+                )
+            {
+                #[cfg(unix)]
+                {
+                    use std::os::unix::process::CommandExt;
+
+                    eprintln!("Graphics startup failed ({error}); retrying with OpenGL.");
+                    let exec_error = std::process::Command::new(env::current_exe()?)
+                        .args(env::args_os().skip(1))
+                        .env("WGPU_BACKEND", "gl")
+                        .env("H5JIVE_GL_RETRY", "1")
+                        .exec();
+                    return Err(format!("OpenGL retry could not start: {exec_error}").into());
+                }
+            }
+            Err(error.into())
+        }
+    }
 }
 
 #[cfg(target_os = "linux")]

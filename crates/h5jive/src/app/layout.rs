@@ -15,6 +15,9 @@ impl App {
         self.poll_cell_edit_job();
         self.poll_file_open_jobs();
         if self.plugins.take_reload().is_some() {
+            if self.sync_restore_selection.is_none() {
+                self.sync_restore_selection = self.selection.clone();
+            }
             self.pending_browser_b = self.file_paths.get(1).cloned();
             if let Some(path) = self.file_paths.first() {
                 self.file_path_inputs[0] = path.display().to_string();
@@ -202,10 +205,10 @@ impl App {
                     ui.set_cursor_pos_x(x);
                     ui.text_colored(palette.muted, label);
                     item_plain_tip(ui,
-                        "Display: window system in use. On macOS, AppKit creates windows managed by WindowServer. XWayland is X11 inside a Wayland session.\n\
+                        "Raw: uncompressed byte size of the selected dataset, not its measured memory use.\n\
                          RAM: resident memory used by the whole H5Jive process (CPU memory).\n\
                          UI: average time spent building a UI frame during the last second; excludes GPU rendering.\n\
-                         Raw: uncompressed byte size of the selected dataset, not its measured memory use.\n\
+                         Display: window system in use. On macOS, AppKit creates windows managed by WindowServer. XWayland is X11 inside a Wayland session.\n\
                          Compare RAM before and after loading or processing a dataset to observe its impact.",
                     );
                 }
@@ -349,6 +352,7 @@ impl App {
                     .clamp(minimum, (panel_space - minimum).max(minimum));
                 let tree_height = (panel_space - details_height).max(1.0);
                 let prior_selection = self.selection.clone();
+                let mut reload_requested = false;
                 ui.child_window("file_tree")
                     .size([0.0, tree_height])
                     .build(ui, || {
@@ -378,7 +382,7 @@ impl App {
                                                 );
                                                 ui.separator();
                                                 for entry in &file.tree.children {
-                                                    draw_entry(
+                                                    reload_requested |= draw_entry(
                                                         ui,
                                                         entry,
                                                         file,
@@ -403,6 +407,9 @@ impl App {
                             self.startup_tab = None;
                         }
                     });
+                if reload_requested && prior_selection == self.selection {
+                    self.reload_selected_dataset();
+                }
                 if let (Some(previous), Some(requested)) =
                     (prior_selection, self.selection.clone())
                 {
@@ -787,13 +794,19 @@ impl App {
                 }
             }
             WorkspaceMode::PluginLab => {
+                let can_write_files = self.cell_edit_job.is_none()
+                    && !self.plugins.is_syncing()
+                    && self.file_open_jobs.iter().all(Option::is_none)
+                    && self.pending_cell_edits.is_empty();
+                let write_allowed = [can_write_files; 2];
                 if let Some(selection) = self.plugins.draw(
                     ui,
                     plot_ui,
-                    &self.files,
+                    &mut self.files,
                     &self.file_paths,
                     &self.settings,
                     self.selection.as_ref(),
+                    write_allowed,
                 ) {
                     if let Some(current) = &self.selection {
                         if (current.file != selection.file || current.path != selection.path)
@@ -1374,9 +1387,16 @@ impl App {
                 self.load_file_slot(1);
             }
         }
-        if self.files.len() == 2 && self.file_open_jobs.iter().all(Option::is_none) {
+        if !self.files.is_empty()
+            && self.pending_browser_b.is_none()
+            && self.file_open_jobs.iter().all(Option::is_none)
+        {
             if let Some(selection) = self.sync_restore_selection.take() {
-                if find_entry(&self.files[selection.file].tree, &selection.path).is_some() {
+                if self
+                    .files
+                    .get(selection.file)
+                    .is_some_and(|file| find_entry(&file.tree, &selection.path).is_some())
+                {
                     self.selection = Some(selection);
                     self.refresh_selection();
                 }
@@ -1407,6 +1427,9 @@ impl App {
         self.globe_controls = GeoViewControls::new(self.settings.map_show_pics)
             .with_dummy_rgb(self.settings.palette.accent);
         self.map_viewport = MapViewport::default();
+        self.globe_auto_center_source = None;
+        self.globe_auto_center_pending = false;
+        self.globe_rotation = None;
         self.draft_slice = None;
         self.applied_slice = None;
         self.draft_table = None;

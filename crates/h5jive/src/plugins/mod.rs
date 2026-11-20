@@ -2,6 +2,7 @@
 //! Add a plugin to `PLUGINS`, give it a DIPL schema and settings file, and
 //! render it through `PluginContext`. A plugin can return a core Selection to
 //! open any of the existing inspector views for that dataset.
+mod dataset_manipulation;
 mod path_comparison;
 mod value_comparison;
 
@@ -17,10 +18,11 @@ pub(crate) struct PluginLayout {
 }
 
 pub(super) struct PluginContext<'a> {
-    pub files: &'a [File],
+    pub files: &'a mut [File],
     pub file_paths: &'a [PathBuf],
     pub settings: &'a Settings,
     pub selection: Option<&'a Selection>,
+    pub write_allowed: [bool; 2],
 }
 
 struct PluginDefinition {
@@ -42,6 +44,15 @@ fn draw_path_comparison(
     path_comparison::draw(lab, ui, context)
 }
 
+fn draw_dataset_manipulation(
+    lab: &mut PluginLab,
+    ui: &Ui,
+    _plot_ui: &PlotUi<'_>,
+    context: PluginContext<'_>,
+) -> Option<Selection> {
+    dataset_manipulation::draw(lab, ui, context)
+}
+
 const PLUGINS: &[PluginDefinition] = &[
     PluginDefinition {
         key: "path_comparison",
@@ -56,10 +67,19 @@ const PLUGINS: &[PluginDefinition] = &[
         key: "value_comparison",
         title: "Dataset value comparison",
         description: "Compare matching numeric arrays from A or B as a 2D difference or ratio.",
-        help: "Choose a numeric dataset on the left, then pick a same-shaped dataset on the right from either file. Compare their difference or ratio in a 2D view. Select two dimensions to display and pin the others. Invalid values, fill values, and division by zero are excluded from the preview.",
+        help: "Choose a numeric dataset on the left, then pick a same-shaped dataset on the right from either file. Compare their difference or ratio in a 2D view. Select two dimensions to display and pin the others. Invalid values, fill values, and division by zero are excluded from the calculation. The buttons beside the plot show or hide special classes; their counts refer to cells in the sampled 2D preview.",
         enabled: |settings| settings.value_comparison_enabled,
         icon: value_comparison::draw_icon,
         draw: value_comparison::draw,
+    },
+    PluginDefinition {
+        key: "dataset_manipulation",
+        title: "Dataset manipulation",
+        description: "Create a new dataset from a slice, difference, or ratio.",
+        help: "Choose a numeric dataset and slice it with independent start, stop, and step controls, or combine two matching datasets by subtraction or division. Give the result a new dataset path in file A or B, or save it in a new HDF5 file. Existing datasets and files are protected. Slices keep their numeric datatype; integer subtraction writes i64 when the result fits, while division writes floating point values. Metadata attributes are not copied.",
+        enabled: |settings| settings.dataset_manipulation_enabled,
+        icon: dataset_manipulation::draw_icon,
+        draw: draw_dataset_manipulation,
     },
 ];
 
@@ -68,6 +88,7 @@ pub(super) struct PluginLab {
     selected: usize,
     comparison: path_comparison::State,
     value_comparison: value_comparison::State,
+    dataset_manipulation: dataset_manipulation::State,
 }
 
 impl PluginLab {
@@ -98,18 +119,25 @@ impl PluginLab {
         self.comparison.start_requested_sync(paths);
     }
     pub fn take_reload(&mut self) -> Option<(usize, PathBuf)> {
-        self.comparison.take_reload()
+        self.comparison.take_reload().or_else(|| {
+            self.dataset_manipulation
+                .take_reload()
+                .then(|| (0, PathBuf::new()))
+        })
     }
     pub fn invalidate(&mut self) {
         self.comparison.invalidate();
         self.value_comparison.invalidate();
+        self.dataset_manipulation.invalidate();
     }
 
     pub fn is_busy(&mut self) -> bool {
         self.comparison.poll();
         self.value_comparison.poll();
+        let manipulation_busy = self.dataset_manipulation.is_busy();
         self.comparison.is_busy()
             || self.value_comparison.is_busy()
+            || manipulation_busy
             || self.comparison.take_redraw()
             || self.value_comparison.take_redraw()
     }
@@ -118,10 +146,11 @@ impl PluginLab {
         &mut self,
         ui: &Ui,
         plot_ui: &PlotUi<'_>,
-        files: &[File],
+        files: &mut [File],
         file_paths: &[PathBuf],
         settings: &Settings,
         selection: Option<&Selection>,
+        write_allowed: [bool; 2],
     ) -> Option<Selection> {
         let available: Vec<_> = PLUGINS
             .iter()
@@ -202,6 +231,7 @@ impl PluginLab {
                         file_paths,
                         settings,
                         selection,
+                        write_allowed,
                     },
                 );
             });

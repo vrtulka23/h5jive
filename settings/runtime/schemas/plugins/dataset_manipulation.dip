@@ -1,0 +1,4 @@
+?descr "Create a new dataset by slicing or combining numeric datasets."
+chunk_elements int = 65536
+  ?descr "Maximum values processed in one tile while writing the result."
+  !condition ({.} >= 1024 && {.} <= 1048576)

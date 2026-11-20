@@ -762,6 +762,7 @@ impl App {
             &mut self.value_visibility,
             &self.settings.palette,
             self.settings.tutorial_tips,
+            None,
         );
         if visibility_changed {
             self.profile_cache = None;
@@ -771,7 +772,7 @@ impl App {
             PlotNavAction::Reset => Some(full_limits),
             PlotNavAction::ZoomOut => Some(heatmap_zoom_limits(current, full_limits, 0.8)),
             PlotNavAction::ZoomIn => Some(heatmap_zoom_limits(current, full_limits, 1.25)),
-            PlotNavAction::None => None,
+            PlotNavAction::None | PlotNavAction::Center => None,
         };
         if let Some(next) = next {
             self.heatmap_nav_override = Some((tick_key, next));

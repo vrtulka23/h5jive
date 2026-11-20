@@ -699,6 +699,7 @@ impl App {
             &mut self.value_visibility,
             palette,
             self.settings.tutorial_tips,
+            None,
         );
         if visibility_changed {
             self.profile_cache = None;
@@ -716,7 +717,7 @@ impl App {
                     self.settings.map_max_zoom,
                 );
             }
-            PlotNavAction::None => {}
+            PlotNavAction::None | PlotNavAction::Center => {}
         }
         ui.set_cursor_screen_pos(controls_cursor);
         let changes = draw_geo_controls(

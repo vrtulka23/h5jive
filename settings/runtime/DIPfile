@@ -43,6 +43,9 @@ schemas[]
 schemas[]
   name = "value_comparison_plugin_settings"
   file = "schemas/plugins/value_comparison.dip"
+schemas[]
+  name = "dataset_manipulation_plugin_settings"
+  file = "schemas/plugins/dataset_manipulation.dip"
 
 sources[]
   name = "viewer_data"
@@ -71,6 +74,9 @@ sources[]
 sources[]
   name = "plugin_value_comparison"
   filepath = "plugins/value_comparison.dip"
+sources[]
+  name = "plugin_dataset_manipulation"
+  filepath = "plugins/dataset_manipulation.dip"
 
 code[]
   file = "viewer.dip"

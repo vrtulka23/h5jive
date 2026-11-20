@@ -1,6 +1,52 @@
 use super::*;
 
 impl ValueVisibility {
+    pub(super) fn draw_special_panel(
+        &mut self,
+        ui: &Ui,
+        palette: &Palette,
+        width: f32,
+        tutorial_tips: bool,
+        counts: [usize; 4],
+    ) -> bool {
+        let mut changed = false;
+        for (count, enabled, label, tooltip, color) in [
+            (
+                counts[0],
+                &mut self.nan,
+                "NaN",
+                "Undefined comparison or NaN input",
+                palette.nan,
+            ),
+            (
+                counts[1],
+                &mut self.fill,
+                "Fill",
+                "Fill-value input",
+                palette.fill,
+            ),
+            (
+                counts[2],
+                &mut self.positive_inf,
+                "+Inf",
+                "Positive infinity input or result",
+                palette.positive_inf,
+            ),
+            (
+                counts[3],
+                &mut self.negative_inf,
+                "-Inf",
+                "Negative infinity input or result",
+                palette.negative_inf,
+            ),
+        ] {
+            let _disabled = ui.begin_disabled_with_cond(count == 0);
+            let caption = format!("{label}  {count}##comparison_{label}");
+            changed |= toggle_button(ui, enabled, &caption, tooltip, color, width, tutorial_tips);
+        }
+        changed
+    }
+
     pub(super) fn draw_panel(
         &mut self,
         ui: &Ui,
@@ -179,6 +225,42 @@ mod tests {
                 let last_button = ui.item_rect_min();
                 assert!(last_button[0] > rail_x + 60.0);
                 assert!(last_button[0] < rail_x + 126.0);
+            });
+    }
+
+    #[test]
+    fn comparison_special_buttons_stay_in_their_side_panel() {
+        let mut context = Context::create();
+        context.set_ini_filename(None::<String>).unwrap();
+        context.io_mut().set_display_size([700.0, 450.0]);
+        context.io_mut().set_delta_time(1.0 / 60.0);
+        context
+            .font_atlas()
+            .try_claim_legacy_renderer()
+            .unwrap()
+            .build();
+        let settings = Settings::load().unwrap();
+        let mut visibility = ValueVisibility::default();
+        let ui = context.frame();
+        ui.window("Comparison")
+            .size([600.0, 350.0], Condition::Always)
+            .build(|| {
+                ui.dummy([250.0, 150.0]);
+                ui.same_line();
+                let panel_x = ui.cursor_screen_pos()[0];
+                ui.child_window("Special values")
+                    .size([116.0, 180.0])
+                    .build(ui, || {
+                        ui.text("Special values");
+                        visibility.draw_special_panel(
+                            ui,
+                            &settings.palette,
+                            ui.content_region_avail()[0],
+                            false,
+                            [1, 0, 2, 0],
+                        );
+                        assert!(ui.item_rect_min()[0] >= panel_x);
+                    });
             });
     }
 }

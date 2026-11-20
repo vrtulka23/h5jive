@@ -1,6 +1,22 @@
 use super::*;
 
 impl App {
+    /// Invalidate the selected dataset's derived data without changing view controls.
+    pub(super) fn reload_selected_dataset(&mut self) {
+        let Some(selection) = self.selection.as_ref() else {
+            return;
+        };
+        self.tree_geolocation_cache
+            .remove(&(selection.file, selection.path.clone()));
+        self.axis_names = self.files[selection.file]
+            .axis_names(&selection.path)
+            .unwrap_or_default();
+        self.details_key = None;
+        self.clear_selected_dataset_views();
+        self.globe_auto_center_source = None;
+        self.globe_rotation = None;
+    }
+
     /// Clear metadata derived from the currently selected file entry.
     pub(super) fn clear_selection_details(&mut self) {
         self.details_default_pending = true;

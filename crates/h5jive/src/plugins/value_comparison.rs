@@ -42,8 +42,24 @@ struct Preview {
     left_values: Vec<f64>,
     right_values: Vec<f64>,
     plotted: Vec<f64>,
+    specials: Vec<Option<SpecialValue>>,
+    special_counts: [usize; 4],
     range: Option<(f64, f64)>,
     invalid: usize,
+}
+
+fn count_specials(specials: &[Option<SpecialValue>]) -> [usize; 4] {
+    let mut counts = [0; 4];
+    for special in specials.iter().flatten() {
+        let index = match special {
+            SpecialValue::Nan => 0,
+            SpecialValue::Fill => 1,
+            SpecialValue::PositiveInf => 2,
+            SpecialValue::NegativeInf => 3,
+        };
+        counts[index] += 1;
+    }
+    counts
 }
 
 #[derive(Default)]
@@ -55,6 +71,7 @@ pub(super) struct State {
     right_search: String,
     slice: Option<TableSlice>,
     operation: Operation,
+    visibility: ValueVisibility,
     preview: Option<(PreviewKey, Result<Preview, String>)>,
     job: Option<(PreviewKey, mpsc::Receiver<Result<Preview, String>>)>,
     generation: Arc<AtomicU64>,
@@ -236,6 +253,35 @@ fn compare_cell(
     }
 }
 
+fn comparison_special(
+    left: f64,
+    right: f64,
+    left_fill: Option<f64>,
+    right_fill: Option<f64>,
+    operation: Operation,
+) -> Option<SpecialValue> {
+    let left_special = SpecialValue::from_value(left, left_fill);
+    let right_special = SpecialValue::from_value(right, right_fill);
+    if left_special == Some(SpecialValue::Fill) || right_special == Some(SpecialValue::Fill) {
+        return Some(SpecialValue::Fill);
+    }
+    if left.is_nan() || right.is_nan() {
+        return Some(SpecialValue::Nan);
+    }
+    if left.is_infinite() && right.is_infinite() {
+        return Some(SpecialValue::Nan);
+    }
+    if let Some(special) = left_special.or(right_special) {
+        return Some(special);
+    }
+    let result = match operation {
+        Operation::Difference => left - right,
+        Operation::Ratio if right != 0.0 => left / right,
+        Operation::Ratio => return Some(SpecialValue::Nan),
+    };
+    SpecialValue::from_value(result, None)
+}
+
 fn comparison_grid(shape: &[usize], slice: &TableSlice, max_cells: usize) -> [usize; 2] {
     let mut grid = [slice.rows(shape).min(512), slice.columns(shape).min(512)];
     if grid[0].saturating_mul(grid[1]) > max_cells {
@@ -300,6 +346,14 @@ fn load_preview(
         .zip(&b.values)
         .map(|(&left, &right)| compare_cell(left, right, a.fill_value, b.fill_value, key.operation))
         .collect::<Vec<_>>();
+    let specials = a
+        .values
+        .iter()
+        .zip(&b.values)
+        .map(|(&left, &right)| {
+            comparison_special(left, right, a.fill_value, b.fill_value, key.operation)
+        })
+        .collect::<Vec<_>>();
     let mut range = None;
     extend_finite_range(&mut range, &values, None);
     if let Some((min, max)) = &mut range {
@@ -326,12 +380,15 @@ fn load_preview(
             });
         }
     }
-    let invalid = values.iter().filter(|value| !value.is_finite()).count();
+    let special_counts = count_specials(&specials);
+    let invalid = special_counts.iter().sum();
     Ok(Preview {
         values,
         left_values: a.values,
         right_values: b.values,
         plotted,
+        specials,
+        special_counts,
         range,
         invalid,
     })
@@ -375,7 +432,11 @@ fn picker(
     );
     ui.set_next_item_width(ui.content_region_avail()[0].max(1.0));
     let mut picked = None;
-    if let Some(_combo) = ui.begin_combo(format!("##dataset_select_{id}"), &preview) {
+    let combo = ui.begin_combo(format!("##dataset_select_{id}"), &preview);
+    if ui.is_item_hovered() {
+        item_plain_tip(ui, &preview);
+    }
+    if let Some(_combo) = combo {
         ui.set_next_item_width(ui.content_region_avail()[0].max(1.0));
         ui.input_text(format!("Search##{id}"), search).build();
         let query = search.trim().to_lowercase();
@@ -419,6 +480,12 @@ fn picker(
                 }
             });
     }
+    if let Some(choice) = selected {
+        ui.text_disabled(format!("Path: {}", choice.path));
+        if ui.is_item_hovered() {
+            item_plain_tip(ui, &choice.path);
+        }
+    }
     picked
 }
 
@@ -429,15 +496,17 @@ fn draw_preview(
     preview: &Preview,
     palette: &Palette,
     decimals: usize,
+    visibility: &mut ValueVisibility,
+    tutorial_tips: bool,
 ) {
-    let Some((min, max)) = preview.range else {
-        ui.text_wrapped("No finite comparison values in this slice.");
-        return;
-    };
+    let (min, max) = preview.range.unwrap_or((0.0, 1.0));
+    if preview.range.is_none() {
+        ui.text_disabled("No finite comparison values in this slice.");
+    }
     let rows = key.slice.rows(&key.left.shape);
     let columns = key.slice.columns(&key.left.shape);
     let available = ui.content_region_avail();
-    let plot_width = (available[0] - 75.0).max(100.0);
+    let plot_width = (available[0] - 75.0 - 128.0).max(100.0);
     let plot_height = available[1].max(180.0);
     let map = if key.operation == Operation::Difference {
         Colormap::RdBu
@@ -477,9 +546,10 @@ fn draw_preview(
             );
             for row in 0..key.grid[0] {
                 for column in 0..key.grid[1] {
-                    if preview.values[row * key.grid[1] + column].is_finite() {
+                    let index = row * key.grid[1] + column;
+                    let Some(special) = preview.specials[index] else {
                         continue;
-                    }
+                    };
                     let x0 = column as f64 * columns as f64 / key.grid[1] as f64;
                     let x1 = (column + 1) as f64 * columns as f64 / key.grid[1] as f64;
                     let y0 = row as f64 * rows as f64 / key.grid[0] as f64;
@@ -494,7 +564,12 @@ fn draw_preview(
                         XAxis::X1,
                         YAxis::Y1,
                     );
-                    draw.add_rect(first, last, palette.nan).filled(true).build();
+                    let color = if visibility.allows_class(preview.values[index], Some(special)) {
+                        special.color(palette)
+                    } else {
+                        palette.background
+                    };
+                    draw.add_rect(first, last, color).filled(true).build();
                 }
             }
         }
@@ -514,7 +589,11 @@ fn draw_preview(
                         format_value(preview.left_values[index], decimals),
                         format_value(preview.right_values[index], decimals),
                         key.operation.label(),
-                        format_value(preview.values[index], decimals)
+                        if let Some(special) = preview.specials[index] {
+                            format!("excluded ({})", special.label())
+                        } else {
+                            format_value(preview.values[index], decimals)
+                        }
                     ),
                 );
             }
@@ -522,6 +601,19 @@ fn draw_preview(
     }
     ui.same_line_with_spacing(0.0, 6.0);
     plot_ui.colormap_scale("##comparison_scale", min, max, plot_height, map);
+    ui.same_line_with_spacing(0.0, 6.0);
+    ui.child_window("comparison_special_controls")
+        .size([116.0, plot_height])
+        .build(ui, || {
+            ui.text("Special values");
+            visibility.draw_special_panel(
+                ui,
+                palette,
+                ui.content_region_avail()[0],
+                tutorial_tips,
+                preview.special_counts,
+            );
+        });
 }
 
 pub(super) fn draw(
@@ -546,13 +638,16 @@ pub(super) fn draw(
         context.selection,
         context.settings.pinned_default,
     );
+    let _compact_spacing = ui.push_style_var(StyleVar::ItemSpacing([6.0, 4.0]));
     let all = choices.iter().collect::<Vec<_>>();
-    let width = ((ui.content_region_avail()[0] - 8.0) * 0.5).max(1.0);
-    let mut new_left = None;
-    ui.child_window("value_left_picker")
-        .size([width, 72.0])
+    let available_width = ui.content_region_avail()[0];
+    let left_width = (available_width * 0.68).max(1.0);
+    let right_width = (available_width - left_width - 6.0).max(1.0);
+    ui.child_window("value_dataset_controls")
+        .size([left_width, 0.0])
+        .child_flags(ChildFlags::AUTO_RESIZE_Y | ChildFlags::ALWAYS_AUTO_RESIZE)
         .build(ui, || {
-            new_left = picker(
+            let new_left = picker(
                 ui,
                 "left",
                 "Left dataset · A or B",
@@ -560,28 +655,22 @@ pub(super) fn draw(
                 state.left.as_ref(),
                 &mut state.left_search,
             );
-        });
-    ui.same_line_with_spacing(0.0, 8.0);
-    if let Some(left) = new_left {
-        state.left = Some(left);
-        state.right = None;
-        state.slice = None;
-        state.right_search.clear();
-        state.invalidate_preview();
-        default_pair(
-            state,
-            &choices,
-            context.selection,
-            context.settings.pinned_default,
-        );
-    }
-    let left = state.left.as_ref().unwrap().clone();
-    let candidates = compatible(&choices, &left);
-    let mut new_right = None;
-    ui.child_window("value_right_picker")
-        .size([0.0, 72.0])
-        .build(ui, || {
-            new_right = picker(
+            if let Some(left) = new_left {
+                state.left = Some(left);
+                state.right = None;
+                state.slice = None;
+                state.right_search.clear();
+                state.invalidate_preview();
+                default_pair(
+                    state,
+                    &choices,
+                    context.selection,
+                    context.settings.pinned_default,
+                );
+            }
+            let left = state.left.as_ref().unwrap();
+            let candidates = compatible(&choices, left);
+            let new_right = picker(
                 ui,
                 "right",
                 "Right dataset · matching shape",
@@ -589,106 +678,108 @@ pub(super) fn draw(
                 state.right.as_ref(),
                 &mut state.right_search,
             );
+            if let Some(right) = new_right {
+                state.right = Some(right);
+                state.invalidate_preview();
+            }
         });
-    if let Some(right) = new_right {
-        state.right = Some(right);
-        state.invalidate_preview();
-    }
+    ui.same_line_with_spacing(0.0, 6.0);
+    let left = state.left.as_ref().unwrap().clone();
+    ui.child_window("value_axis_controls")
+        .size([right_width, 0.0])
+        .child_flags(ChildFlags::AUTO_RESIZE_Y | ChildFlags::ALWAYS_AUTO_RESIZE)
+        .build(ui, || {
+            if state.right.is_none() {
+                return;
+            }
+            let control_width = (ui.content_region_avail()[0] - 95.0).max(80.0);
+            let labels = axis_option_labels(&[], &left.shape);
+            let slice = state.slice.as_mut().unwrap();
+            let mut row = slice.row_axis.unwrap_or(0);
+            ui.set_next_item_width(control_width);
+            if ui.combo_simple_string("Rows##value_rows", &mut row, &labels) {
+                slice.row_axis = Some(row);
+                if slice.column_axis == row {
+                    slice.column_axis = (0..left.shape.len()).find(|&axis| axis != row).unwrap();
+                }
+                state.invalidate_preview();
+            }
+            item_tip(
+                ui,
+                context.settings.tutorial_tips,
+                "",
+                "Choose the dimension shown down the comparison preview.",
+            );
+            let slice = state.slice.as_mut().unwrap();
+            ui.set_next_item_width(control_width);
+            if ui.combo_simple_string("Columns##value_columns", &mut slice.column_axis, &labels) {
+                if slice.row_axis == Some(slice.column_axis) {
+                    slice.row_axis = (0..left.shape.len()).find(|&axis| axis != slice.column_axis);
+                }
+                state.invalidate_preview();
+            }
+            item_tip(
+                ui,
+                context.settings.tutorial_tips,
+                "",
+                "Choose the dimension shown across the comparison preview.",
+            );
+            let slice = state.slice.as_mut().unwrap();
+            let mut pins_changed = false;
+            for (axis, &length) in left.shape.iter().enumerate() {
+                if slice.row_axis == Some(axis) || slice.column_axis == axis {
+                    continue;
+                }
+                let mut pin = slice.pinned[axis].min(i32::MAX as usize) as i32;
+                ui.set_next_item_width(control_width);
+                if ui.slider(
+                    format!("Pinned dimension {axis}##value_pin_{axis}"),
+                    0,
+                    length.saturating_sub(1).min(i32::MAX as usize) as i32,
+                    &mut pin,
+                ) {
+                    slice.pinned[axis] = pin as usize;
+                    pins_changed = true;
+                }
+                item_tip(
+                    ui,
+                    context.settings.tutorial_tips,
+                    "",
+                    "Pick the fixed index for a dimension outside the preview plane.",
+                );
+            }
+            if pins_changed {
+                state.invalidate_preview();
+            }
+            let button_width = ((ui.content_region_avail()[0] - 6.0) * 0.5).max(1.0);
+            for operation in [Operation::Difference, Operation::Ratio] {
+                if operation == Operation::Ratio {
+                    ui.same_line_with_spacing(0.0, 6.0);
+                }
+                let active = state.operation == operation;
+                let _button = ui.push_style_color(
+                    StyleColor::Button,
+                    if active {
+                        context.settings.palette.accent
+                    } else {
+                        context.settings.palette.panel
+                    },
+                );
+                if ui.button_with_size(operation.label(), [button_width, 26.0]) && !active {
+                    state.operation = operation;
+                    state.invalidate_preview();
+                }
+                item_tip(
+                    ui,
+                    context.settings.tutorial_tips,
+                    "",
+                    "Switch between subtraction and division of matching datasets.",
+                );
+            }
+        });
     let Some(right) = state.right.as_ref().cloned() else {
         return None;
     };
-    ui.text_wrapped(format!(
-        "Left: {} {}    Right: {} {}    Shape {:?}",
-        if left.file == 0 { "A" } else { "B" },
-        left.path,
-        if right.file == 0 { "A" } else { "B" },
-        right.path,
-        left.shape
-    ));
-    ui.spacing();
-    for operation in [Operation::Difference, Operation::Ratio] {
-        if operation == Operation::Ratio {
-            ui.same_line_with_spacing(0.0, 8.0);
-        }
-        let active = state.operation == operation;
-        let _button = ui.push_style_color(
-            StyleColor::Button,
-            if active {
-                context.settings.palette.accent
-            } else {
-                context.settings.palette.panel
-            },
-        );
-        if ui.button(operation.label()) && !active {
-            state.operation = operation;
-            state.invalidate_preview();
-        }
-        item_tip(
-            ui,
-            context.settings.tutorial_tips,
-            "",
-            "Switch between subtraction and division of matching datasets.",
-        );
-    }
-    let slice = state.slice.as_mut().unwrap();
-    let labels = axis_option_labels(&[], &left.shape);
-    let mut row = slice.row_axis.unwrap_or(0);
-    ui.set_next_item_width(150.0);
-    if ui.combo_simple_string("Rows##value_rows", &mut row, &labels) {
-        slice.row_axis = Some(row);
-        if slice.column_axis == row {
-            slice.column_axis = (0..left.shape.len()).find(|&axis| axis != row).unwrap();
-        }
-        state.invalidate_preview();
-    }
-    item_tip(
-        ui,
-        context.settings.tutorial_tips,
-        "",
-        "Choose the dimension shown down the comparison preview.",
-    );
-    ui.same_line_with_spacing(0.0, 8.0);
-    let slice = state.slice.as_mut().unwrap();
-    ui.set_next_item_width(150.0);
-    if ui.combo_simple_string("Columns##value_columns", &mut slice.column_axis, &labels) {
-        if slice.row_axis == Some(slice.column_axis) {
-            slice.row_axis = (0..left.shape.len()).find(|&axis| axis != slice.column_axis);
-        }
-        state.invalidate_preview();
-    }
-    item_tip(
-        ui,
-        context.settings.tutorial_tips,
-        "",
-        "Choose the dimension shown across the comparison preview.",
-    );
-    let slice = state.slice.as_mut().unwrap();
-    let mut pins_changed = false;
-    for (axis, &length) in left.shape.iter().enumerate() {
-        if slice.row_axis == Some(axis) || slice.column_axis == axis {
-            continue;
-        }
-        let mut pin = slice.pinned[axis].min(i32::MAX as usize) as i32;
-        ui.set_next_item_width(180.0);
-        if ui.slider(
-            format!("Pinned dimension {axis}##value_pin_{axis}"),
-            0,
-            length.saturating_sub(1).min(i32::MAX as usize) as i32,
-            &mut pin,
-        ) {
-            slice.pinned[axis] = pin as usize;
-            pins_changed = true;
-        }
-        item_tip(
-            ui,
-            context.settings.tutorial_tips,
-            "",
-            "Pick the fixed index for a dimension outside the preview plane.",
-        );
-    }
-    if pins_changed {
-        state.invalidate_preview();
-    }
     let slice = state.slice.as_ref().unwrap().clone();
     let grid = comparison_grid(
         &left.shape,
@@ -741,6 +832,8 @@ pub(super) fn draw(
                 preview,
                 &context.settings.palette,
                 context.settings.display_decimals,
+                &mut state.visibility,
+                context.settings.tutorial_tips,
             );
         }
         Some((_, Err(error))) => ui.text_wrapped(format!("Could not compare datasets: {error}")),
@@ -840,8 +933,46 @@ mod tests {
     }
 
     #[test]
+    fn preview_specials_match_excluded_input_and_arithmetic_classes() {
+        assert_eq!(
+            comparison_special(-999.0, 2.0, Some(-999.0), None, Operation::Difference),
+            Some(SpecialValue::Fill)
+        );
+        assert_eq!(
+            comparison_special(f64::NAN, 2.0, None, None, Operation::Difference),
+            Some(SpecialValue::Nan)
+        );
+        assert_eq!(
+            comparison_special(f64::INFINITY, 2.0, None, None, Operation::Difference),
+            Some(SpecialValue::PositiveInf)
+        );
+        assert_eq!(
+            comparison_special(2.0, f64::NEG_INFINITY, None, None, Operation::Ratio),
+            Some(SpecialValue::NegativeInf)
+        );
+        assert_eq!(
+            comparison_special(2.0, 0.0, None, None, Operation::Ratio),
+            Some(SpecialValue::Nan)
+        );
+        assert_eq!(
+            comparison_special(2.0, 1.0, None, None, Operation::Difference),
+            None
+        );
+        assert_eq!(
+            count_specials(&[
+                Some(SpecialValue::Nan),
+                Some(SpecialValue::Fill),
+                Some(SpecialValue::Fill),
+                Some(SpecialValue::PositiveInf),
+                None,
+            ]),
+            [1, 2, 1, 0]
+        );
+    }
+
+    #[test]
     fn plugin_heatmap_renders_with_its_own_state() {
-        let (paths, files) = demos();
+        let (paths, mut files) = demos();
         let choices = collect_choices(&files);
         let left = choices
             .iter()
@@ -861,7 +992,11 @@ mod tests {
             operation: Operation::Difference,
             grid: [3, 4],
         };
-        let preview = load_preview(&paths[0], &paths[1], &key, &|| false).unwrap();
+        let mut preview = load_preview(&paths[0], &paths[1], &key, &|| false).unwrap();
+        preview.values[0] = f64::NAN;
+        preview.specials[0] = Some(SpecialValue::Nan);
+        preview.special_counts = [1, 0, 0, 0];
+        preview.invalid = 1;
         let settings = Settings::load().unwrap();
         let mut context = Context::create();
         context.set_ini_filename(None::<String>).unwrap();
@@ -885,7 +1020,15 @@ mod tests {
             .size([1000.0, 720.0], Condition::Always)
             .build(|| {
                 assert!(lab
-                    .draw(ui, &plot_ui, &files, &paths, &settings, None)
+                    .draw(
+                        ui,
+                        &plot_ui,
+                        &mut files,
+                        &paths,
+                        &settings,
+                        None,
+                        [true, true]
+                    )
                     .is_none());
             });
         context.end_frame();

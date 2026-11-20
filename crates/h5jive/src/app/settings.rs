@@ -459,6 +459,8 @@ pub(super) struct Settings {
     pub(super) path_comparison_show_groups: bool,
     pub(super) value_comparison_enabled: bool,
     pub(super) value_comparison_max_cells: usize,
+    pub(super) dataset_manipulation_enabled: bool,
+    pub(super) dataset_manipulation_chunk_elements: usize,
     pub(super) dataset_rules: Vec<GeolocationRule>,
     pub(super) dataset_sources: Vec<DatasetSource>,
     pub(super) profiles: Vec<ThemeProfile>,
@@ -623,6 +625,9 @@ impl Settings {
             value_comparison_enabled: values.boolean("plugins.value_comparison_enabled")?,
             value_comparison_max_cells: values
                 .count("plugins.value_comparison.preview_max_cells")?,
+            dataset_manipulation_enabled: values.boolean("plugins.dataset_manipulation_enabled")?,
+            dataset_manipulation_chunk_elements: values
+                .count("plugins.dataset_manipulation.chunk_elements")?,
             dataset_rules: read_dataset_rules(&dip)?,
             dataset_sources: read_dataset_sources(&dip, project.parent().unwrap())?,
             profiles,

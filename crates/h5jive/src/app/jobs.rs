@@ -54,6 +54,9 @@ impl App {
         self.heatmap_navigation_at = None;
         self.volume_navigation_at = None;
         self.view = view;
+        if view != ViewMode::Globe {
+            self.globe_rotation = None;
+        }
     }
 
     pub(super) fn poll_heatmap_tile(

@@ -117,3 +117,6 @@ plugins
   value_comparison_enabled bool = true
     ?descr "Show the dataset value comparison plugin in Plugin Lab."
   value_comparison : value_comparison_plugin_settings
+  dataset_manipulation_enabled bool = true
+    ?descr "Show the dataset manipulation plugin in Plugin Lab."
+  dataset_manipulation : dataset_manipulation_plugin_settings

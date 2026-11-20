@@ -494,6 +494,7 @@ impl App {
             &mut self.volume_visibility,
             &self.settings.palette,
             self.settings.tutorial_tips,
+            None,
         );
         if visibility_changed {
             self.profile_cache = None;
@@ -514,7 +515,7 @@ impl App {
                 self.volume_zoom =
                     (self.volume_zoom * 1.1).clamp(0.35, self.settings.volume_max_zoom);
             }
-            PlotNavAction::None => {}
+            PlotNavAction::None | PlotNavAction::Center => {}
         }
         if previous_camera.0 != self.volume_zoom {
             self.note_volume_zoom();

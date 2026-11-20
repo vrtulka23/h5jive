@@ -19,3 +19,5 @@ viewer : h5jive_settings
       {plugin_path_comparison?}
     value_comparison
       {plugin_value_comparison?}
+    dataset_manipulation
+      {plugin_dataset_manipulation?}

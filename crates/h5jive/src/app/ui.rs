@@ -136,15 +136,36 @@ pub(super) fn draw_plot_navigation(
     width: f32,
     zoom: f32,
     tutorial_tips: bool,
+    center_available: Option<bool>,
 ) -> PlotNavAction {
     ui.set_cursor_screen_pos(origin);
-    let reset = ui.button_with_size(format!("Reset##plot_nav_{id}"), [width.max(1.0), 22.0]);
+    let reset_width = if center_available.is_some() {
+        ((width - CONTROL_INLINE_GAP) * 0.5).max(1.0)
+    } else {
+        width.max(1.0)
+    };
+    let reset = ui.button_with_size(format!("Reset##plot_nav_{id}"), [reset_width, 22.0]);
     item_tip(
         ui,
         tutorial_tips,
         "Restore the initial view",
         "Return to the initial zoom and position.",
     );
+    let center = if let Some(available) = center_available {
+        ui.same_line_with_spacing(0.0, CONTROL_INLINE_GAP);
+        let _disabled = ui.begin_disabled_with_cond(!available);
+        let clicked =
+            ui.button_with_size(format!("Center##plot_nav_center_{id}"), [reset_width, 22.0]);
+        item_tip(
+            ui,
+            tutorial_tips,
+            "Rotate toward the selected dataset.",
+            "Turn the globe toward the selected dataset.",
+        );
+        clicked
+    } else {
+        false
+    };
     ui.set_cursor_screen_pos([origin[0], origin[1] + 22.0 + CONTROL_INLINE_GAP]);
     let label = format!("{zoom:.1}×");
     let button_width =
@@ -163,6 +184,8 @@ pub(super) fn draw_plot_navigation(
     item_tip(ui, tutorial_tips, "", "Zoom in for more detail.");
     if reset {
         PlotNavAction::Reset
+    } else if center {
+        PlotNavAction::Center
     } else if out {
         PlotNavAction::ZoomOut
     } else if inside {
@@ -181,6 +204,7 @@ pub(super) fn draw_visibility_navigation(
     visibility: &mut ValueVisibility,
     palette: &Palette,
     tutorial_tips: bool,
+    center_available: Option<bool>,
 ) -> (PlotNavAction, bool) {
     ui.set_cursor_screen_pos(origin);
     let changed = visibility.draw_panel(ui, palette, width, tutorial_tips);
@@ -191,6 +215,7 @@ pub(super) fn draw_visibility_navigation(
         width,
         zoom,
         tutorial_tips,
+        center_available,
     );
     (nav, changed)
 }
@@ -199,6 +224,62 @@ pub(super) fn draw_visibility_navigation(
 mod navigation_tests {
     use super::*;
     use dear_app::imgui::{Condition, Context};
+
+    #[test]
+    fn globe_center_button_reports_center_action() {
+        use dear_app::imgui::MouseButton;
+
+        let mut context = Context::create();
+        context.set_ini_filename(None::<String>).unwrap();
+        context.io_mut().set_display_size([300.0, 200.0]);
+        context.io_mut().set_delta_time(1.0 / 60.0);
+        context
+            .font_atlas()
+            .try_claim_legacy_renderer()
+            .unwrap()
+            .build();
+        let draw = |context: &mut Context| {
+            let ui = context.frame();
+            let mut action = PlotNavAction::None;
+            ui.window("Globe navigation")
+                .position([0.0, 0.0], Condition::Always)
+                .size([200.0, 140.0], Condition::Always)
+                .build(|| {
+                    action = draw_plot_navigation(
+                        ui,
+                        "globe",
+                        [20.0, 40.0],
+                        110.0,
+                        1.0,
+                        false,
+                        Some(true),
+                    );
+                });
+            context.end_frame();
+            action
+        };
+        assert_eq!(draw(&mut context), PlotNavAction::None);
+        context.io_mut().add_mouse_pos_event([105.0, 50.0]);
+        assert_eq!(draw(&mut context), PlotNavAction::None);
+        context
+            .io_mut()
+            .add_mouse_button_event(MouseButton::Left, true);
+        assert_eq!(draw(&mut context), PlotNavAction::None);
+        context
+            .io_mut()
+            .add_mouse_button_event(MouseButton::Left, false);
+        assert_eq!(draw(&mut context), PlotNavAction::Center);
+        context.io_mut().add_mouse_pos_event([45.0, 50.0]);
+        assert_eq!(draw(&mut context), PlotNavAction::None);
+        context
+            .io_mut()
+            .add_mouse_button_event(MouseButton::Left, true);
+        assert_eq!(draw(&mut context), PlotNavAction::None);
+        context
+            .io_mut()
+            .add_mouse_button_event(MouseButton::Left, false);
+        assert_eq!(draw(&mut context), PlotNavAction::Reset);
+    }
 
     #[test]
     fn value_table_row_height_is_stable_while_editing() {
@@ -303,6 +384,116 @@ mod navigation_tests {
     }
 
     #[test]
+    fn double_click_on_selected_dataset_requests_reload() {
+        use dear_app::imgui::MouseButton;
+
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../examples/arrays/space_demo.hdf5");
+        let file = File::open(&path).unwrap();
+        let entry = find_entry(&file.tree, "/observations/swath_2d").unwrap();
+        let settings = Settings::load().unwrap();
+        let mut context = Context::create();
+        context.set_ini_filename(None::<String>).unwrap();
+        context.io_mut().set_display_size([500.0, 300.0]);
+        context.io_mut().set_delta_time(1.0 / 60.0);
+        context
+            .font_atlas()
+            .try_claim_legacy_renderer()
+            .unwrap()
+            .build();
+        let mut selection = Some(Selection {
+            file: 0,
+            path: entry.path.clone(),
+        });
+        let mut geolocation_cache = HashMap::new();
+        fn draw(
+            context: &mut Context,
+            entry: &Entry,
+            file: &File,
+            selection: &mut Option<Selection>,
+            geolocation_cache: &mut HashMap<(usize, String), Option<Geolocation>>,
+            settings: &Settings,
+        ) -> (bool, ([f32; 2], [f32; 2])) {
+            let ui = context.frame();
+            let mut reload = false;
+            let mut bounds = ([0.0; 2], [0.0; 2]);
+            ui.window("Double click dataset")
+                .position([0.0, 0.0], Condition::Always)
+                .size([400.0, 200.0], Condition::Always)
+                .build(|| {
+                    reload = draw_entry(
+                        ui,
+                        entry,
+                        &file,
+                        0,
+                        false,
+                        selection,
+                        geolocation_cache,
+                        &settings.dataset_rules,
+                        true,
+                        false,
+                        &settings.palette,
+                    );
+                    bounds = (ui.item_rect_min(), ui.item_rect_max());
+                });
+            context.end_frame();
+            (reload, bounds)
+        }
+        let (_, (min, max)) = draw(
+            &mut context,
+            entry,
+            &file,
+            &mut selection,
+            &mut geolocation_cache,
+            &settings,
+        );
+        let center = [(min[0] + max[0]) * 0.5, (min[1] + max[1]) * 0.5];
+        context.io_mut().add_mouse_pos_event(center);
+        context
+            .io_mut()
+            .add_mouse_button_event(MouseButton::Left, true);
+        assert!(
+            !draw(
+                &mut context,
+                entry,
+                &file,
+                &mut selection,
+                &mut geolocation_cache,
+                &settings
+            )
+            .0
+        );
+        context
+            .io_mut()
+            .add_mouse_button_event(MouseButton::Left, false);
+        assert!(
+            !draw(
+                &mut context,
+                entry,
+                &file,
+                &mut selection,
+                &mut geolocation_cache,
+                &settings
+            )
+            .0
+        );
+        context
+            .io_mut()
+            .add_mouse_button_event(MouseButton::Left, true);
+        assert!(
+            draw(
+                &mut context,
+                entry,
+                &file,
+                &mut selection,
+                &mut geolocation_cache,
+                &settings
+            )
+            .0
+        );
+    }
+
+    #[test]
     fn dataset_icon_sits_below_parent_folder_icon() {
         let mut context = Context::create();
         context.set_ini_filename(None::<String>).unwrap();
@@ -397,6 +588,7 @@ mod navigation_tests {
                                 &mut visibility,
                                 &settings.palette,
                                 settings.tutorial_tips,
+                                None,
                             );
                             if frame == 1 {
                                 assert_eq!(ui.scroll_max_y(), 0.0);
@@ -742,7 +934,7 @@ pub(crate) fn draw_entry(
     show_shape: bool,
     tutorial_tips: bool,
     palette: &Palette,
-) {
+) -> bool {
     let geolocation = match &entry.kind {
         Kind::Dataset {
             shape,
@@ -805,9 +997,10 @@ pub(crate) fn draw_entry(
                 path: entry.path.clone(),
             });
         }
+        let mut reload_requested = false;
         if let Some(_node) = node {
             for child in &entry.children {
-                draw_entry(
+                reload_requested |= draw_entry(
                     ui,
                     child,
                     source,
@@ -822,22 +1015,31 @@ pub(crate) fn draw_entry(
                 );
             }
         }
+        reload_requested
     } else {
         let row_x = ui.cursor_screen_pos()[0];
         let is_selected = selected
             .as_ref()
             .is_some_and(|s| s.file == file && s.path == entry.path);
         let clicked = ui.selectable_config(&label).selected(is_selected).build();
-        let normal_tip = geolocation
-            .as_ref()
-            .map(|geo| {
-                format!(
-                    "Geolocated dataset\nLatitude: {}\nLongitude: {}",
-                    geo.latitude, geo.longitude
-                )
-            })
-            .unwrap_or_default();
-        if clicked {
+        let is_dataset = matches!(entry.kind, Kind::Dataset { .. });
+        let reload_requested = is_dataset
+            && ui.is_item_hovered()
+            && ui.is_mouse_double_clicked(dear_app::imgui::MouseButton::Left);
+        let normal_tip = if is_dataset {
+            geolocation
+                .as_ref()
+                .map(|geo| {
+                    format!(
+                        "Geolocated dataset\nLatitude: {}\nLongitude: {}\nDouble-click to reload.",
+                        geo.latitude, geo.longitude
+                    )
+                })
+                .unwrap_or_else(|| "Double-click to reload this dataset.".into())
+        } else {
+            String::new()
+        };
+        if clicked || reload_requested {
             *selected = Some(Selection {
                 file,
                 path: entry.path.clone(),
@@ -851,8 +1053,13 @@ pub(crate) fn draw_entry(
             ui,
             tutorial_tips,
             &normal_tip,
-            "Select this dataset to inspect values, plots, and attributes.",
+            if is_dataset {
+                "Click to select this dataset; double-click to reload it."
+            } else {
+                "Select this entry to inspect it."
+            },
         );
+        reload_requested
     }
 }
 

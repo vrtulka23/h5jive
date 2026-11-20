@@ -104,9 +104,72 @@ fn project(lon: f32, lat: f32, center: [f32; 2], radius: f32, yaw: f32, pitch: f
     }
 }
 
+const AUTO_CENTER_DURATION: Duration = Duration::from_millis(500);
+
+impl GlobeRotation {
+    fn toward(start_yaw: f32, start_pitch: f32, longitude: f32, latitude: f32) -> Option<Self> {
+        let target_yaw = -longitude.to_radians();
+        let target_pitch = latitude.to_radians().clamp(-1.5, 1.5);
+        let yaw_delta = (target_yaw - start_yaw + std::f32::consts::PI)
+            .rem_euclid(std::f32::consts::TAU)
+            - std::f32::consts::PI;
+        if yaw_delta.abs() < 0.01 && (target_pitch - start_pitch).abs() < 0.01 {
+            return None;
+        }
+        Some(Self {
+            start_yaw,
+            yaw_delta,
+            start_pitch,
+            target_pitch,
+            started_at: Instant::now(),
+        })
+    }
+
+    fn angles_at(self, now: Instant) -> (f32, f32, bool) {
+        let progress = (now.saturating_duration_since(self.started_at).as_secs_f32()
+            / AUTO_CENTER_DURATION.as_secs_f32())
+        .clamp(0.0, 1.0);
+        let eased = progress * progress * (3.0 - 2.0 * progress);
+        (
+            self.start_yaw + self.yaw_delta * eased,
+            self.start_pitch + (self.target_pitch - self.start_pitch) * eased,
+            progress >= 1.0,
+        )
+    }
+}
+
 impl App {
+    fn try_center_dataset(&mut self, key: Option<&MapKey>, scan_filter: ScanFilter) {
+        if !self.globe_auto_center_pending {
+            return;
+        }
+        let (Some(key), Some((cached, result))) = (key, self.map_cache.as_ref()) else {
+            return;
+        };
+        if cached != key || self.map_job.is_some() {
+            return;
+        }
+        let center = result
+            .as_ref()
+            .ok()
+            .and_then(|data| geospatial_center(&data.points, scan_filter));
+        self.globe_auto_center_pending = false;
+        if let Some([longitude, latitude]) = center {
+            self.globe_rotation =
+                GlobeRotation::toward(self.globe_yaw, self.globe_pitch, longitude, latitude);
+        }
+    }
+
     pub(crate) fn draw_globe_view(&mut self, ui: &Ui, plot_ctx: &PlotContext) {
         let source = self.selected_geo_source();
+        let source_id = source
+            .as_ref()
+            .map(|source| (source.selection.file, source.selection.path.clone()));
+        if self.globe_auto_center_source != source_id {
+            self.globe_auto_center_pending = source_id.is_some();
+            self.globe_auto_center_source = source_id;
+            self.globe_rotation = None;
+        }
         self.globe_controls.sync_source(
             source
                 .as_ref()
@@ -170,9 +233,20 @@ impl App {
             .clamp(self.settings.globe_zoom_min, self.settings.globe_zoom_max);
         }
         if ui.is_item_active() && ui.is_mouse_dragging(dear_app::imgui::MouseButton::Left) {
+            self.globe_auto_center_pending = false;
+            self.globe_rotation = None;
             let d = ui.io().mouse_delta();
             self.globe_yaw += d[0] / radius;
             self.globe_pitch = (self.globe_pitch + d[1] / radius).clamp(-1.5, 1.5);
+        }
+        self.try_center_dataset(key.as_ref(), options.scan_filter);
+        if let Some(rotation) = self.globe_rotation {
+            let (yaw, pitch, finished) = rotation.angles_at(Instant::now());
+            self.globe_yaw = yaw;
+            self.globe_pitch = pitch;
+            if finished {
+                self.globe_rotation = None;
+            }
         }
         let earth_texture = self.earth_texture_id(&self.settings.globe_background);
         let draw = ui.get_window_draw_list();
@@ -570,15 +644,23 @@ impl App {
             &mut self.value_visibility,
             palette,
             self.settings.tutorial_tips,
+            Some(source.is_some()),
         );
         if visibility_changed {
             self.profile_cache = None;
         }
         match nav {
             PlotNavAction::Reset => {
+                self.globe_auto_center_pending = false;
+                self.globe_rotation = None;
                 self.globe_yaw = 0.0;
                 self.globe_pitch = 0.0;
                 self.globe_zoom = 1.0;
+            }
+            PlotNavAction::Center => {
+                self.globe_auto_center_pending = true;
+                self.globe_rotation = None;
+                self.try_center_dataset(key.as_ref(), options.scan_filter);
             }
             PlotNavAction::ZoomOut | PlotNavAction::ZoomIn => {
                 let step = if nav == PlotNavAction::ZoomIn { 1 } else { -1 };
@@ -603,6 +685,8 @@ impl App {
             &self.settings,
         );
         if changes.site_changed {
+            self.globe_auto_center_pending = false;
+            self.globe_rotation = None;
             if let Some(site) = self
                 .selected_pics
                 .checked_sub(1)
@@ -625,5 +709,63 @@ impl App {
             self.map_load_generation.fetch_add(1, Ordering::Relaxed);
         }
         self.globe_footer_height = (ui.cursor_pos_y() - content_start_y - area[1]).max(1.0);
+    }
+}
+
+#[cfg(test)]
+mod centering_tests {
+    use super::*;
+
+    fn point(longitude: f32, latitude: f32) -> MapPoint {
+        MapPoint {
+            longitude,
+            latitude,
+            value: 1.0,
+            special: None,
+            scan_direction: None,
+            footprint: None,
+        }
+    }
+
+    #[test]
+    fn date_line_dataset_centers_on_visible_hemisphere() {
+        let points = [point(179.0, 20.0), point(-179.0, 20.0)];
+        let [longitude, latitude] = geospatial_center(&points, ScanFilter::Both).unwrap();
+        assert!((longitude.abs() - 180.0).abs() < 0.01);
+        assert!((latitude - 20.0).abs() < 0.01);
+        for point in points {
+            let projected = project(
+                point.longitude,
+                point.latitude,
+                [0.0, 0.0],
+                1.0,
+                -longitude.to_radians(),
+                latitude.to_radians(),
+            );
+            assert!(projected.depth > 0.99);
+        }
+    }
+
+    #[test]
+    fn invalid_and_globally_balanced_coordinates_do_not_move_globe() {
+        assert_eq!(
+            geospatial_center(&[point(f32::NAN, 0.0)], ScanFilter::Both),
+            None
+        );
+        assert_eq!(
+            geospatial_center(&[point(0.0, 0.0), point(180.0, 0.0)], ScanFilter::Both),
+            None
+        );
+    }
+
+    #[test]
+    fn rotation_takes_short_path_from_current_orientation() {
+        let start_yaw = 179.0_f32.to_radians();
+        let rotation = GlobeRotation::toward(start_yaw, 0.0, 179.0, 30.0).unwrap();
+        assert!(rotation.yaw_delta.abs() < 5.0_f32.to_radians());
+        let (yaw, pitch, finished) = rotation.angles_at(rotation.started_at + AUTO_CENTER_DURATION);
+        assert!(finished);
+        assert!((yaw - (start_yaw + rotation.yaw_delta)).abs() < 1e-5);
+        assert!((pitch - 30.0_f32.to_radians()).abs() < 1e-5);
     }
 }

@@ -2,6 +2,38 @@
 use super::*;
 use h5jive_data::ScanDirection;
 
+/// Geographic center of the selected observations, including date-line crossings.
+pub(crate) fn geospatial_center(
+    points: &[MapPoint],
+    scan_filter: h5jive_data::ScanFilter,
+) -> Option<[f32; 2]> {
+    let mut sum = [0.0_f64; 3];
+    let mut count = 0;
+    for point in points {
+        if !scan_filter.allows(point.scan_direction)
+            || !point.longitude.is_finite()
+            || !point.latitude.is_finite()
+            || !(-90.0..=90.0).contains(&point.latitude)
+        {
+            continue;
+        }
+        let lon = f64::from(point.longitude).to_radians();
+        let lat = f64::from(point.latitude).to_radians();
+        sum[0] += lat.cos() * lon.sin();
+        sum[1] += lat.sin();
+        sum[2] += lat.cos() * lon.cos();
+        count += 1;
+    }
+    let length = sum[0].hypot(sum[1]).hypot(sum[2]);
+    if count == 0 || length / f64::from(count) < 0.1 {
+        return None;
+    }
+    Some([
+        sum[0].atan2(sum[2]).to_degrees() as f32,
+        sum[1].atan2(sum[0].hypot(sum[2])).to_degrees() as f32,
+    ])
+}
+
 pub(crate) fn sampled_indexes(length: usize, wanted: usize) -> Vec<usize> {
     let count = length.min(wanted.max(1));
     if count == 1 {

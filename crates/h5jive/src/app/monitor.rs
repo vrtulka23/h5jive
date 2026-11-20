@@ -59,10 +59,10 @@ impl ResourceMonitor {
             .ui_millis
             .map(|ms| format!("{ms:.1} ms"))
             .unwrap_or_else(|| "—".into());
-        let mut label = format!("RAM {ram}  ·  UI {ui}");
+        let label = format!("RAM {ram}  ·  UI {ui}");
         if include_raw {
             if let Some(bytes) = self.selected_raw_bytes {
-                label.push_str(&format!("  ·  Raw {}", format_bytes(bytes)));
+                return format!("Raw {}  ·  {label}", format_bytes(bytes));
             }
         }
         label

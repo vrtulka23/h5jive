@@ -71,6 +71,23 @@ cargo run -p h5jive --example generate_value_comparison_demo
 cargo run -p h5jive -- examples/plugins/value_comparison/value_demo_a.hdf5 examples/plugins/value_comparison/value_demo_b.hdf5
 ```
 
+## Create a dataset
+
+The Dataset manipulation plugin has its own dataset selection and slice controls.
+Choose **Slice** and set a start (inclusive), stop (exclusive), and step for
+each dimension, or choose **Left − Right** or **Left ÷ Right** for two datasets
+of identical shape. The result is written under a new dataset path in file A or
+B, or in a new HDF5 file. Existing datasets and files are not overwritten.
+Slices preserve the source numeric datatype. Integer differences use signed
+64-bit values when they fit; integer ratios use 64-bit floating point values.
+Two 32-bit floating point inputs produce a 32-bit result, while operations
+involving 64-bit floating point values produce a 64-bit result. Source metadata
+attributes are not copied. The plugin reads HDF5 and NetCDF-4 inputs; classic
+NetCDF inputs need conversion to HDF5 first.
+
+The [dataset manipulation demo](../../examples/plugins/dataset_manipulation/README.md)
+shows a reproducible slice, difference, and ratio.
+
 ## Add a plugin
 
 Coding agents should also read the [plugin agent notes](https://github.com/vrtulka23/h5jive/blob/main/crates/h5jive/src/plugins/AGENTS.md)

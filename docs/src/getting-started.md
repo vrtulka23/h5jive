@@ -94,6 +94,10 @@ viewer.graphics.forwarded_x11_backend = "vulkan,gl"
 
 If the display exposes neither backend, the window cannot render through that
 session; a graphical login or a remote desktop with graphics support is needed.
+With automatic graphics selection on Linux, H5Jive tries both backends with the
+window surface. If graphics initialization fails, it restarts once with OpenGL
+alone. An explicit `WGPU_BACKEND` or `viewer.graphics.backend` setting is
+respected and does not trigger this retry.
 
 ### File drops on Linux
 

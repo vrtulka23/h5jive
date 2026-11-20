@@ -13,6 +13,7 @@ image = { version = "0.25", default-features = false, features = ["png", "jpeg"]
 h5jive-data = { path = "../data-source" }
 hdf5-metno = "0.15"
 hdf5-metno-sys = "0.12"
+ndarray = "0.17"
 scinumtools3 = "=0.10.2"
 dunce = "1.0"
 regex = "1"
