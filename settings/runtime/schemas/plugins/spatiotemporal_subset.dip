@@ -1,0 +1,4 @@
+?descr "Coverage preview settings for spatiotemporal exports."
+preview_max_points int = 1000000
+  ?descr "Approximate maximum coordinate samples across all selected products in the coverage preview. Every product is included."
+  !condition ({.} >= 10000 && {.} <= 10000000)

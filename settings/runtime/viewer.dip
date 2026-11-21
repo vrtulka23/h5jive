@@ -21,3 +21,5 @@ viewer : h5jive_settings
       {plugin_value_comparison?}
     dataset_manipulation
       {plugin_dataset_manipulation?}
+    spatiotemporal_subset
+      {plugin_spatiotemporal_subset?}

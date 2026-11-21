@@ -47,6 +47,9 @@ fn draw_native_heatmap_tile(
     visibility: ValueVisibility,
     palette: &Palette,
 ) {
+    if !visibility.any_enabled() {
+        return;
+    }
     let [r0, r1, c0, c1] = image.bounds;
     let (min, max) = range;
     let scale_max = if max == min {
@@ -481,14 +484,16 @@ impl App {
                     } else {
                         max
                     };
-                    plot_heatmap_grid(
-                        plot_ui,
-                        "overview while loading",
-                        &image.plotted,
-                        image.grid,
-                        (min, scale_max),
-                        overview_plot_bounds(image),
-                    );
+                    if self.value_visibility.any_enabled() {
+                        plot_heatmap_grid(
+                            plot_ui,
+                            "overview while loading",
+                            &image.plotted,
+                            image.grid,
+                            (min, scale_max),
+                            overview_plot_bounds(image),
+                        );
+                    }
                 }
                 self.draw_cached_heatmap_tiles(
                     ui,
@@ -544,62 +549,66 @@ impl App {
                         display_range = image.range;
                     }
                     let (min, max) = display_range.unwrap_or((0.0, 1.0));
-                    plot_heatmap_grid(
-                        plot_ui,
-                        "overview",
-                        &image.plotted,
-                        image.grid,
-                        (min, max),
-                        overview_plot_bounds(image),
-                    );
+                    if self.value_visibility.any_enabled() {
+                        plot_heatmap_grid(
+                            plot_ui,
+                            "overview",
+                            &image.plotted,
+                            image.grid,
+                            (min, max),
+                            overview_plot_bounds(image),
+                        );
+                    }
                     let [r0, r1, c0, c1] = image.bounds;
-                    let draw = ui.get_window_draw_list();
-                    let lower_right = plot_ui.plot_to_pixels_axes(
-                        ImPlotPoint {
-                            x: limits.X.Max,
-                            y: limits.Y.Min,
-                        },
-                        XAxis::X1,
-                        YAxis::Y1,
-                    );
-                    let _clip = draw.push_clip_rect(pos, lower_right, true);
-                    for row_bin in 0..image.grid[0] {
-                        for column_bin in 0..image.grid[1] {
-                            let value = image.values[row_bin * image.grid[1] + column_bin];
-                            let special = SpecialValue::from_value(value, image.fill_value);
-                            if self.value_visibility.allows_class(value, special)
-                                && special.is_none()
-                            {
-                                continue;
+                    if self.value_visibility.any_enabled() {
+                        let draw = ui.get_window_draw_list();
+                        let lower_right = plot_ui.plot_to_pixels_axes(
+                            ImPlotPoint {
+                                x: limits.X.Max,
+                                y: limits.Y.Min,
+                            },
+                            XAxis::X1,
+                            YAxis::Y1,
+                        );
+                        let _clip = draw.push_clip_rect(pos, lower_right, true);
+                        for row_bin in 0..image.grid[0] {
+                            for column_bin in 0..image.grid[1] {
+                                let value = image.values[row_bin * image.grid[1] + column_bin];
+                                let special = SpecialValue::from_value(value, image.fill_value);
+                                if self.value_visibility.allows_class(value, special)
+                                    && special.is_none()
+                                {
+                                    continue;
+                                }
+                                let x0 = c0 as f64
+                                    + column_bin as f64 * (c1 - c0) as f64 / image.grid[1] as f64;
+                                let x1 = c0 as f64
+                                    + (column_bin + 1) as f64 * (c1 - c0) as f64
+                                        / image.grid[1] as f64;
+                                let y0 = r0 as f64
+                                    + (row_bin + 1) as f64 * (r1 - r0) as f64
+                                        / image.grid[0] as f64;
+                                let y1 = r0 as f64
+                                    + row_bin as f64 * (r1 - r0) as f64 / image.grid[0] as f64;
+                                let first = plot_ui.plot_to_pixels_axes(
+                                    ImPlotPoint { x: x0, y: y0 },
+                                    XAxis::X1,
+                                    YAxis::Y1,
+                                );
+                                let last = plot_ui.plot_to_pixels_axes(
+                                    ImPlotPoint { x: x1, y: y1 },
+                                    XAxis::X1,
+                                    YAxis::Y1,
+                                );
+                                let color = if self.value_visibility.allows_class(value, special) {
+                                    special.unwrap().color(&self.settings.palette)
+                                } else {
+                                    self.settings.palette.background
+                                };
+                                draw.add_rect(first, last, color).filled(true).build();
                             }
-                            let x0 = c0 as f64
-                                + column_bin as f64 * (c1 - c0) as f64 / image.grid[1] as f64;
-                            let x1 = c0 as f64
-                                + (column_bin + 1) as f64 * (c1 - c0) as f64 / image.grid[1] as f64;
-                            let y0 = r0 as f64
-                                + (row_bin + 1) as f64 * (r1 - r0) as f64 / image.grid[0] as f64;
-                            let y1 = r0 as f64
-                                + row_bin as f64 * (r1 - r0) as f64 / image.grid[0] as f64;
-                            let first = plot_ui.plot_to_pixels_axes(
-                                ImPlotPoint { x: x0, y: y0 },
-                                XAxis::X1,
-                                YAxis::Y1,
-                            );
-                            let last = plot_ui.plot_to_pixels_axes(
-                                ImPlotPoint { x: x1, y: y1 },
-                                XAxis::X1,
-                                YAxis::Y1,
-                            );
-                            let color = if self.value_visibility.allows_class(value, special) {
-                                special.unwrap().color(&self.settings.palette)
-                            } else {
-                                self.settings.palette.background
-                            };
-                            draw.add_rect(first, last, color).filled(true).build();
                         }
                     }
-                    drop(_clip);
-                    drop(draw);
                     if plot_ui.is_plot_hovered() {
                         let mouse = plot_ui.plot_mouse_position_axes(XAxis::X1, YAxis::Y1);
                         if mouse.x >= c0 as f64

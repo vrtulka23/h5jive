@@ -4,7 +4,7 @@ use image::{DynamicImage, GenericImage, ImageFormat, Rgba, RgbaImage};
 use std::fs::OpenOptions as FileOptions;
 
 pub(super) struct ExportDialog {
-    path: String,
+    pub(super) path: String,
     message: Option<String>,
 }
 
@@ -48,13 +48,20 @@ impl App {
         let mut opened = true;
         let mut save = false;
         let mut close = false;
+        let mut browse_path = None;
         ui.window("Save current view")
             .size([520.0, 145.0], Condition::FirstUseEver)
             .opened(&mut opened)
             .build(|| {
                 ui.text("Save the current visualization as PNG or JPEG.");
-                ui.set_next_item_width(-1.0);
-                ui.input_text("##export_path", &mut dialog.path).build();
+                if file_path_field(
+                    ui,
+                    "view_export",
+                    &mut dialog.path,
+                    ui.content_region_avail()[0],
+                ) {
+                    browse_path = Some(dialog.path.clone());
+                }
                 if ui.button("Save") {
                     save = true;
                 }
@@ -79,6 +86,9 @@ impl App {
                 }
                 Err(error) => self.export_dialog.as_mut().unwrap().message = Some(error),
             }
+        }
+        if let Some(path) = browse_path {
+            self.open_file_picker_for(FilePickerTarget::ViewExport, path);
         }
     }
 

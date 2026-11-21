@@ -98,17 +98,12 @@ fn open_copy_files(
 ) -> Result<
     (
         hdf5_metno::File,
-        hdf5_metno::File,
+        WritableFile,
         hdf5_metno::plist::ObjectCopy,
     ),
     String,
 > {
-    if source_path == destination_path
-        || std::fs::canonicalize(source_path)
-            .ok()
-            .zip(std::fs::canonicalize(destination_path).ok())
-            .is_some_and(|(source, destination)| source == destination)
-    {
+    if same_file(source_path, destination_path) {
         return Err("Source and destination must be different files".into());
     }
     let source = hdf5_metno::File::open(source_path).map_err(|e| e.to_string())?;
@@ -124,20 +119,7 @@ fn open_copy_files(
     if property_result < 0 {
         return Err("Could not enable HDF5 reference copying".into());
     }
-    // Cancelled inspector reads can hold a read handle briefly.
-    let mut retries = 0;
-    let destination = loop {
-        match hdf5_metno::File::open_rw(destination_path) {
-            Ok(file) => break file,
-            Err(error)
-                if retries < 50 && error.to_string().contains("already open for read-only") =>
-            {
-                retries += 1;
-                thread::sleep(std::time::Duration::from_millis(100));
-            }
-            Err(error) => return Err(error.to_string()),
-        }
-    };
+    let destination = WritableFile::open(destination_path).map_err(|error| error.to_string())?;
     Ok((source, destination, copy_properties))
 }
 
@@ -1556,6 +1538,8 @@ mod tests {
     fn side_by_side_table_renders_with_one_scroll_area() {
         let (paths, mut files) = demo_files();
         let settings = Settings::load().unwrap();
+        let browser = DatasetBrowser::new(&[]);
+        let mut picker_request = None;
         let mut context = Context::create();
         context.set_ini_filename(None::<String>).unwrap();
         context.io_mut().set_display_size([900.0, 600.0]);
@@ -1583,6 +1567,8 @@ mod tests {
                         settings: &settings,
                         selection: None,
                         write_allowed: [true, true],
+                        browser: &browser,
+                        picker_request: &mut picker_request,
                     }
                 )
                 .is_none());

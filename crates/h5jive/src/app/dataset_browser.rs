@@ -23,6 +23,7 @@ struct SourceIndex {
 
 pub(super) struct DatasetBrowser {
     sources: Vec<SourceIndex>,
+    products_revision: u64,
     selected_source: usize,
     selected_product: Option<String>,
     search: String,
@@ -39,6 +40,16 @@ pub(super) struct DatasetBrowser {
 }
 
 impl DatasetBrowser {
+    /// Shared read-only view of the Browser's indexed products.
+    pub fn products(&self, source_index: usize) -> &[Product] {
+        self.sources
+            .get(source_index)
+            .map_or(&[], |source| &source.products)
+    }
+    pub fn products_revision(&self) -> u64 {
+        self.products_revision
+    }
+
     pub fn new(sources: &[DatasetSource]) -> Self {
         let mut tags: Vec<String> = sources
             .iter()
@@ -68,6 +79,7 @@ impl DatasetBrowser {
             .collect();
         Self {
             sources: indexes,
+            products_revision: 0,
             selected_source: 0,
             selected_product: None,
             search: String::new(),
@@ -130,6 +142,7 @@ impl DatasetBrowser {
                                 let _ = write_cache(&config, &products);
                             });
                             self.dirty = true;
+                            self.products_revision = self.products_revision.wrapping_add(1);
                         }
                         index.metadata_status = Some("Product metadata read".into());
                         index.metadata_job = None;
@@ -178,6 +191,7 @@ impl DatasetBrowser {
                         match result {
                             Ok((products, cache_error)) => {
                                 index.products = products;
+                                self.products_revision = self.products_revision.wrapping_add(1);
                                 index.error = cache_error;
                                 if number == self.selected_source
                                     && self.selected_product.as_ref().is_some_and(|selected| {

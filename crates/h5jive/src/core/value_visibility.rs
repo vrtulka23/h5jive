@@ -26,6 +26,16 @@ impl Default for ValueVisibility {
 }
 
 impl ValueVisibility {
+    pub(crate) fn any_enabled(&self) -> bool {
+        self.positive
+            || self.zero
+            || self.negative
+            || self.nan
+            || self.positive_inf
+            || self.negative_inf
+            || self.fill
+    }
+
     pub(crate) fn all_enabled(&self) -> bool {
         self.positive
             && self.zero
@@ -60,5 +70,22 @@ impl ValueVisibility {
             None if value < 0.0 => self.negative,
             None => self.zero,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn none_and_individual_classes_control_heatmap_visibility() {
+        let mut visibility = ValueVisibility::default();
+        assert!(visibility.any_enabled());
+        visibility.set_all(false);
+        assert!(!visibility.any_enabled());
+        visibility.fill = true;
+        assert!(visibility.any_enabled());
+        visibility.set_all(true);
+        assert!(visibility.all_enabled());
     }
 }

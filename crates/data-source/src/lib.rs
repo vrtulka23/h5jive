@@ -1,4 +1,4 @@
-//! Read-only HDF5/NetCDF-4 access through `hdf5-metno`, plus classic NetCDF through `netcdf-reader`.
+//! HDF5/NetCDF access and bounded NetCDF export for H5Jive.
 use hdf5_metno::{
     types::{
         FixedAscii, FixedUnicode, FloatSize, IntSize, TypeDescriptor, VarLenArray, VarLenAscii,
@@ -10,12 +10,20 @@ use hdf5_metno::{
 use ndarray::{ArrayD, IxDyn};
 use netcdf_reader::{NcAttrValue, NcAttribute, NcFile, NcSliceInfo, NcSliceInfoElem, NcType};
 use std::{cell::RefCell, error::Error, fmt, path::Path};
+mod file_operations;
 mod geolocation;
 mod statistics;
+mod subset;
+pub use file_operations::{same_file, WritableFile};
 pub use geolocation::{
     Geolocation, GeolocationRule, ScanDirection, ScanDirectionClass, ScanDirectionRule, ScanFilter,
 };
 pub use statistics::{DatasetDistribution, DatasetStatistics};
+pub use subset::{
+    export_subset, inspect_subset_product, inspect_subset_product_with_rules,
+    preview_subset_coverage, CoveragePreview, SubsetBounds, SubsetMode, SubsetRequest,
+    SubsetVariable,
+};
 
 #[derive(Debug)]
 pub struct DataError(pub String);
@@ -154,18 +162,9 @@ impl File {
             applied: 0,
             error: Some(message),
         };
-        let mut attempts = 0;
-        let file = loop {
-            match H5File::open_rw(path) {
-                Ok(file) => break file,
-                Err(err)
-                    if attempts < 30 && err.to_string().contains("already open for read-only") =>
-                {
-                    attempts += 1;
-                    std::thread::sleep(std::time::Duration::from_millis(100));
-                }
-                Err(err) => return fail(err.to_string()),
-            }
+        let file = match WritableFile::open(path) {
+            Ok(file) => file,
+            Err(err) => return fail(err.to_string()),
         };
         let dataset = match file.dataset(dataset_path) {
             Ok(dataset) => dataset,

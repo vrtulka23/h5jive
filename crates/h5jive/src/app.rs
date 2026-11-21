@@ -3,6 +3,7 @@ mod dataset_browser;
 mod details;
 mod export;
 mod file_drop;
+mod file_path_field;
 mod geo_texture;
 mod jobs;
 mod layout;
@@ -23,6 +24,7 @@ use crate::core::*;
 use dataset_browser::*;
 use export::*;
 use file_drop::*;
+use file_path_field::*;
 use geo_texture::*;
 use model::*;
 use monitor::*;
@@ -48,8 +50,8 @@ use dear_implot::{
     PlotContext, PlotUi, XAxis, YAxis,
 };
 use h5jive_data::{
-    AttributeValue, CoordinateAxis, DatasetDistribution, DatasetStatistics, Entry, File,
-    Geolocation, GeolocationRule, Kind, NumericEdit, OpenOptions, Region, ScanFilter,
+    same_file, AttributeValue, CoordinateAxis, DatasetDistribution, DatasetStatistics, Entry, File,
+    Geolocation, GeolocationRule, Kind, NumericEdit, OpenOptions, Region, ScanFilter, WritableFile,
 };
 use scinumtools3::Project;
 use std::{
@@ -358,9 +360,50 @@ struct FilePickerEntry {
     is_directory: bool,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum FilePickerTarget {
+    Input(usize),
+    ViewExport,
+    ManipulationOutput,
+    SubsetOutput,
+}
+
+impl FilePickerTarget {
+    fn is_save(self) -> bool {
+        !matches!(self, Self::Input(_))
+    }
+    fn title(self) -> &'static str {
+        match self {
+            Self::Input(0) => "Open File A",
+            Self::Input(_) => "Open File B",
+            Self::ViewExport => "Choose image path",
+            Self::ManipulationOutput => "Choose HDF5 path",
+            Self::SubsetOutput => "Choose NetCDF path",
+        }
+    }
+    fn accepts(self, path: &std::path::Path) -> bool {
+        if let Self::Input(_) = self {
+            return layout::is_supported_input_file(path);
+        }
+        match path
+            .extension()
+            .and_then(|s| s.to_str())
+            .map(str::to_ascii_lowercase)
+            .as_deref()
+        {
+            Some("png" | "jpg" | "jpeg") if self == Self::ViewExport => true,
+            Some("h5" | "hdf5") if self == Self::ManipulationOutput => true,
+            Some("nc") if self == Self::SubsetOutput => true,
+            _ => false,
+        }
+    }
+}
+
 struct FilePickerState {
-    slot: usize,
+    target: FilePickerTarget,
+    needs_open: bool,
     directory: PathBuf,
+    filename: String,
     entries: Vec<FilePickerEntry>,
     selected: Option<PathBuf>,
     error: Option<String>,

@@ -4,6 +4,7 @@
 //! open any of the existing inspector views for that dataset.
 mod dataset_manipulation;
 mod path_comparison;
+mod spatiotemporal_subset;
 mod value_comparison;
 
 use super::*;
@@ -23,6 +24,8 @@ pub(super) struct PluginContext<'a> {
     pub settings: &'a Settings,
     pub selection: Option<&'a Selection>,
     pub write_allowed: [bool; 2],
+    pub browser: &'a DatasetBrowser,
+    pub picker_request: &'a mut Option<(FilePickerTarget, String)>,
 }
 
 struct PluginDefinition {
@@ -53,6 +56,15 @@ fn draw_dataset_manipulation(
     dataset_manipulation::draw(lab, ui, context)
 }
 
+fn draw_spatiotemporal_subset(
+    lab: &mut PluginLab,
+    ui: &Ui,
+    _plot_ui: &PlotUi<'_>,
+    context: PluginContext<'_>,
+) -> Option<Selection> {
+    spatiotemporal_subset::draw(lab, ui, context)
+}
+
 const PLUGINS: &[PluginDefinition] = &[
     PluginDefinition {
         key: "path_comparison",
@@ -67,7 +79,7 @@ const PLUGINS: &[PluginDefinition] = &[
         key: "value_comparison",
         title: "Dataset value comparison",
         description: "Compare matching numeric arrays from A or B as a 2D difference or ratio.",
-        help: "Choose a numeric dataset on the left, then pick a same-shaped dataset on the right from either file. Compare their difference or ratio in a 2D view. Select two dimensions to display and pin the others. Invalid values, fill values, and division by zero are excluded from the calculation. The buttons beside the plot show or hide special classes; their counts refer to cells in the sampled 2D preview.",
+        help: "Choose a numeric dataset on the left, then pick a same-shaped dataset on the right from either file. Compare their difference or ratio in a 2D view. Select two dimensions to display and pin the others. Invalid values, fill values, and division by zero are excluded from the calculation. The buttons beside the plot show or hide positive, zero, and negative results and special classes; their counts refer to cells in the sampled 2D preview.",
         enabled: |settings| settings.value_comparison_enabled,
         icon: value_comparison::draw_icon,
         draw: value_comparison::draw,
@@ -75,11 +87,20 @@ const PLUGINS: &[PluginDefinition] = &[
     PluginDefinition {
         key: "dataset_manipulation",
         title: "Dataset manipulation",
-        description: "Create a new dataset from a slice, difference, or ratio.",
-        help: "Choose a numeric dataset and slice it with independent start, stop, and step controls, or combine two matching datasets by subtraction or division. Give the result a new dataset path in file A or B, or save it in a new HDF5 file. Existing datasets and files are protected. Slices keep their numeric datatype; integer subtraction writes i64 when the result fits, while division writes floating point values. Metadata attributes are not copied.",
+        description: "Create a new dataset from a slice or arithmetic on two datasets.",
+        help: "Choose a numeric dataset and slice it with independent start, stop, and step controls, or combine two matching datasets by addition, subtraction, multiplication, or division. Give the result a new dataset path in file A or B, or save it in a new HDF5 file. Existing datasets and files are protected. Slices keep their numeric datatype; integer addition, subtraction, and multiplication write i64 when the result fits, while division writes floating point values. Metadata attributes are not copied.",
         enabled: |settings| settings.dataset_manipulation_enabled,
         icon: dataset_manipulation::draw_icon,
         draw: draw_dataset_manipulation,
+    },
+    PluginDefinition {
+        key: "spatiotemporal_subset",
+        title: "Spatiotemporal subset",
+        description: "Preview product coverage and export geographic and time subsets to NetCDF-4.",
+        help: "Choose a Dataset Browser source, a date or orbit range, and fields from a representative NetCDF product. Preview the combined coverage on a world map or globe. Drag on the map or enter latitude and longitude bounds. Native export keeps each selected product in its own NetCDF group, with cropped spatial dimensions, coordinates, attributes, and an optional time subset. Mosaic export averages overlapping samples into one regular latitude/longitude grid and writes sample counts. Exports create a new .nc file and never replace an existing file.",
+        enabled: |settings| settings.spatiotemporal_subset_enabled,
+        icon: spatiotemporal_subset::draw_icon,
+        draw: draw_spatiotemporal_subset,
     },
 ];
 
@@ -89,9 +110,17 @@ pub(super) struct PluginLab {
     comparison: path_comparison::State,
     value_comparison: value_comparison::State,
     dataset_manipulation: dataset_manipulation::State,
+    spatiotemporal_subset: spatiotemporal_subset::State,
 }
 
 impl PluginLab {
+    pub fn set_picker_path(&mut self, target: FilePickerTarget, path: String) {
+        match target {
+            FilePickerTarget::ManipulationOutput => self.dataset_manipulation.new_file = path,
+            FilePickerTarget::SubsetOutput => self.spatiotemporal_subset.output = path,
+            _ => {}
+        }
+    }
     pub fn help_topic(&self, settings: &Settings) -> (&'static str, &'static str) {
         let available: Vec<_> = PLUGINS
             .iter()
@@ -129,15 +158,18 @@ impl PluginLab {
         self.comparison.invalidate();
         self.value_comparison.invalidate();
         self.dataset_manipulation.invalidate();
+        self.spatiotemporal_subset.invalidate();
     }
 
     pub fn is_busy(&mut self) -> bool {
         self.comparison.poll();
         self.value_comparison.poll();
         let manipulation_busy = self.dataset_manipulation.is_busy();
+        let subset_busy = self.spatiotemporal_subset.is_busy();
         self.comparison.is_busy()
             || self.value_comparison.is_busy()
             || manipulation_busy
+            || subset_busy
             || self.comparison.take_redraw()
             || self.value_comparison.take_redraw()
     }
@@ -151,6 +183,8 @@ impl PluginLab {
         settings: &Settings,
         selection: Option<&Selection>,
         write_allowed: [bool; 2],
+        browser: &DatasetBrowser,
+        picker_request: &mut Option<(FilePickerTarget, String)>,
     ) -> Option<Selection> {
         let available: Vec<_> = PLUGINS
             .iter()
@@ -232,6 +266,8 @@ impl PluginLab {
                         settings,
                         selection,
                         write_allowed,
+                        browser,
+                        picker_request,
                     },
                 );
             });

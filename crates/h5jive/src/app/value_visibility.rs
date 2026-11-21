@@ -1,15 +1,49 @@
 use super::*;
 
 impl ValueVisibility {
-    pub(super) fn draw_special_panel(
+    pub(super) fn draw_comparison_panel(
         &mut self,
         ui: &Ui,
         palette: &Palette,
         width: f32,
         tutorial_tips: bool,
+        finite_counts: [usize; 3],
         counts: [usize; 4],
     ) -> bool {
         let mut changed = false;
+        ui.text("Normal values");
+        for (index, (count, enabled, label, tooltip)) in [
+            (
+                finite_counts[0],
+                &mut self.positive,
+                "Pos",
+                "Positive results",
+            ),
+            (finite_counts[1], &mut self.zero, "Zero", "Zero results"),
+            (
+                finite_counts[2],
+                &mut self.negative,
+                "Neg",
+                "Negative results",
+            ),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let _disabled = ui.begin_disabled_with_cond(count == 0);
+            changed |= toggle_button(
+                ui,
+                enabled,
+                &format!("{label}  {count}##comparison_normal_{index}"),
+                &format!("{tooltip} ({count} cells)"),
+                palette.muted,
+                width,
+                tutorial_tips,
+            );
+        }
+        changed |= self.draw_all_button(ui, palette, width, tutorial_tips);
+        ui.separator();
+        ui.text("Special values");
         for (count, enabled, label, tooltip, color) in [
             (
                 counts[0],
@@ -90,35 +124,7 @@ impl ValueVisibility {
             tutorial_tips,
         );
         ui.same_line();
-        let all_background = mix_color(ui.style_color(StyleColor::FrameBg), neutral, 0.38);
-        let _all_button = ui.push_style_color(StyleColor::Button, all_background);
-        let _all_hovered = ui.push_style_color(
-            StyleColor::ButtonHovered,
-            mix_color(all_background, neutral, 0.45),
-        );
-        let _all_active = ui.push_style_color(
-            StyleColor::ButtonActive,
-            mix_color(all_background, neutral, 0.65),
-        );
-        let all_enabled = self.all_enabled();
-        let label = if all_enabled { "None" } else { "All" };
-        if ui.button_with_size(label, [button_width, 26.0]) {
-            self.set_all(!all_enabled);
-            changed = true;
-        }
-        item_tip(
-            ui,
-            tutorial_tips,
-            if all_enabled {
-                "Hide all value classes"
-            } else {
-                "Show all value classes"
-            },
-            "Use these buttons to control which value classes appear in plots.",
-        );
-        drop(_all_active);
-        drop(_all_hovered);
-        drop(_all_button);
+        changed |= self.draw_all_button(ui, palette, button_width, tutorial_tips);
         ui.set_cursor_screen_pos([origin[0], origin[1] + 2.0 * row_height]);
         changed |= toggle_button(
             ui,
@@ -158,6 +164,42 @@ impl ValueVisibility {
             palette.negative_inf,
             button_width,
             tutorial_tips,
+        );
+        changed
+    }
+
+    fn draw_all_button(
+        &mut self,
+        ui: &Ui,
+        palette: &Palette,
+        width: f32,
+        tutorial_tips: bool,
+    ) -> bool {
+        let all_background = mix_color(ui.style_color(StyleColor::FrameBg), palette.muted, 0.38);
+        let _all_button = ui.push_style_color(StyleColor::Button, all_background);
+        let _all_hovered = ui.push_style_color(
+            StyleColor::ButtonHovered,
+            mix_color(all_background, palette.muted, 0.45),
+        );
+        let _all_active = ui.push_style_color(
+            StyleColor::ButtonActive,
+            mix_color(all_background, palette.muted, 0.65),
+        );
+        let all_enabled = self.all_enabled();
+        let label = if all_enabled { "None" } else { "All" };
+        let changed = ui.button_with_size(label, [width, 26.0]);
+        if changed {
+            self.set_all(!all_enabled);
+        }
+        item_tip(
+            ui,
+            tutorial_tips,
+            if all_enabled {
+                "Hide all value classes"
+            } else {
+                "Show all value classes"
+            },
+            "Use these buttons to control which value classes appear in plots.",
         );
         changed
     }
@@ -251,12 +293,12 @@ mod tests {
                 ui.child_window("Special values")
                     .size([116.0, 180.0])
                     .build(ui, || {
-                        ui.text("Special values");
-                        visibility.draw_special_panel(
+                        visibility.draw_comparison_panel(
                             ui,
                             &settings.palette,
                             ui.content_region_avail()[0],
                             false,
+                            [4, 1, 3],
                             [1, 0, 2, 0],
                         );
                         assert!(ui.item_rect_min()[0] >= panel_x);

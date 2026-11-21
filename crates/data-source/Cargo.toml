@@ -3,10 +3,11 @@ name = "h5jive-data"
 version = "0.1.0"
 edition.workspace = true
 license.workspace = true
-description = "Read-only HDF5 and NetCDF-4 data adapter for H5Jive"
+description = "HDF5 and NetCDF data access and export for H5Jive"
 
 [dependencies]
 hdf5-metno = "0.15"
 netcdf-reader = "0.9"
+netcdf = { version = "0.12.1", features = ["static"] }
 ndarray = "0.17"
 

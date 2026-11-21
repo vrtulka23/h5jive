@@ -8,14 +8,16 @@ use std::{
     path::{Path, PathBuf},
     sync::mpsc,
     thread,
-    time::{Duration, SystemTime, UNIX_EPOCH},
+    time::{SystemTime, UNIX_EPOCH},
 };
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 enum Operation {
     #[default]
     Slice,
+    Sum,
     Difference,
+    Product,
     Ratio,
 }
 
@@ -77,7 +79,7 @@ pub(super) struct State {
     destination: Destination,
     ranges: Vec<[String; 3]>,
     output_path: String,
-    new_file: String,
+    pub(super) new_file: String,
     job: Option<(Destination, mpsc::Receiver<Result<String, String>>)>,
     status: Option<Result<String, String>>,
     reload: bool,
@@ -183,8 +185,10 @@ fn output_type(
     {
         return OutputType::F32;
     }
-    if operation == Operation::Difference
-        && !has_fill
+    if matches!(
+        operation,
+        Operation::Sum | Operation::Difference | Operation::Product
+    ) && !has_fill
         && matches!(
             left,
             TypeDescriptor::Integer(_) | TypeDescriptor::Unsigned(_)
@@ -339,9 +343,17 @@ fn calculate(
             .into_iter()
             .zip(b)
             .map(|(a, b)| {
-                a.checked_sub(b)
+                let result = match operation {
+                    Operation::Sum => a.checked_add(b),
+                    Operation::Difference => a.checked_sub(b),
+                    Operation::Product => a.checked_mul(b),
+                    Operation::Slice | Operation::Ratio => {
+                        unreachable!("integer arithmetic output")
+                    }
+                };
+                result
                     .and_then(|value| i64::try_from(value).ok())
-                    .ok_or_else(|| "Integer difference exceeds the i64 range".to_string())
+                    .ok_or_else(|| "Integer result exceeds the i64 range".to_string())
             })
             .collect::<Result<Vec<_>, _>>()?;
         let array = ArrayD::from_shape_vec(IxDyn(count), values).map_err(|e| e.to_string())?;
@@ -362,12 +374,15 @@ fn calculate(
             .map(|(&a, &b)| {
                 if left_fill == Some(a as f64) || right_fill == Some(b as f64) {
                     f32::NAN
-                } else if operation == Operation::Difference {
-                    a - b
-                } else if b == 0.0 {
-                    f32::NAN
                 } else {
-                    a / b
+                    match operation {
+                        Operation::Sum => a + b,
+                        Operation::Difference => a - b,
+                        Operation::Product => a * b,
+                        Operation::Ratio if b == 0.0 => f32::NAN,
+                        Operation::Ratio => a / b,
+                        Operation::Slice => unreachable!("slice uses copy_slice"),
+                    }
                 }
             })
             .collect::<Vec<_>>();
@@ -388,12 +403,15 @@ fn calculate(
         .map(|(&a, &b)| {
             if left_fill == Some(a) || right_fill == Some(b) {
                 f64::NAN
-            } else if operation == Operation::Difference {
-                a - b
-            } else if b == 0.0 {
-                f64::NAN
             } else {
-                a / b
+                match operation {
+                    Operation::Sum => a + b,
+                    Operation::Difference => a - b,
+                    Operation::Product => a * b,
+                    Operation::Ratio if b == 0.0 => f64::NAN,
+                    Operation::Ratio => a / b,
+                    Operation::Slice => unreachable!("slice uses copy_slice"),
+                }
             }
         })
         .collect::<Vec<_>>();
@@ -469,7 +487,7 @@ fn run(spec: JobSpec) -> Result<String, String> {
                 .as_ref()
                 .is_none_or(|dataset| dataset.shape() != shape)
         {
-            return Err("Difference and ratio require equal dataset shapes".into());
+            return Err("Arithmetic operations require equal dataset shapes".into());
         }
         let ranges = if spec.operation == Operation::Slice {
             if spec.ranges.len() != shape.len() {
@@ -559,20 +577,8 @@ fn run(spec: JobSpec) -> Result<String, String> {
         if spec.destination == Destination::NewFile {
             std::fs::hard_link(&stage_path, &spec.destination_file).map_err(|e| e.to_string())?;
         } else {
-            let mut retries = 0;
-            let destination = loop {
-                match hdf5_metno::File::open_rw(&spec.destination_file) {
-                    Ok(file) => break file,
-                    Err(error)
-                        if retries < 50
-                            && error.to_string().contains("already open for read-only") =>
-                    {
-                        retries += 1;
-                        thread::sleep(Duration::from_millis(100));
-                    }
-                    Err(error) => return Err(error.to_string()),
-                }
-            };
+            let destination =
+                WritableFile::open(&spec.destination_file).map_err(|error| error.to_string())?;
             if destination.link_exists(&spec.output_path) {
                 return Err("Output dataset already exists".into());
             }
@@ -716,6 +722,153 @@ pub(super) fn draw_icon(draw: &DrawListMut<'_>, min: [f32; 2], max: [f32; 2], co
         .build();
 }
 
+#[derive(Clone, Copy)]
+enum SegmentIcon {
+    Slice,
+    Add,
+    Subtract,
+    Multiply,
+    Divide,
+    File,
+    NewFile,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum SegmentLayout {
+    Horizontal,
+    Vertical,
+}
+
+fn draw_segment_icon(ui: &Ui, icon: SegmentIcon, color: [f32; 4]) {
+    let min = ui.item_rect_min();
+    let max = ui.item_rect_max();
+    let x = min[0] + 15.0;
+    let y = (min[1] + max[1]) * 0.5;
+    let draw = ui.get_window_draw_list();
+    match icon {
+        SegmentIcon::Slice => {
+            for edge in [x - 6.0, x + 6.0] {
+                draw.add_line([edge, y - 7.0], [edge, y + 7.0], color)
+                    .thickness(1.6)
+                    .build();
+            }
+            draw.add_line([x - 2.5, y], [x + 2.5, y], color)
+                .thickness(2.0)
+                .build();
+        }
+        SegmentIcon::Add | SegmentIcon::Subtract | SegmentIcon::Multiply | SegmentIcon::Divide => {
+            if !matches!(icon, SegmentIcon::Multiply) {
+                draw.add_line([x - 6.0, y], [x + 6.0, y], color)
+                    .thickness(1.8)
+                    .build();
+            }
+            if matches!(icon, SegmentIcon::Add) {
+                draw.add_line([x, y - 6.0], [x, y + 6.0], color)
+                    .thickness(1.8)
+                    .build();
+            }
+            if matches!(icon, SegmentIcon::Multiply) {
+                draw.add_line([x - 4.5, y - 4.5], [x + 4.5, y + 4.5], color)
+                    .thickness(1.8)
+                    .build();
+                draw.add_line([x - 4.5, y + 4.5], [x + 4.5, y - 4.5], color)
+                    .thickness(1.8)
+                    .build();
+            }
+            if matches!(icon, SegmentIcon::Divide) {
+                for dot_y in [y - 5.5, y + 5.5] {
+                    draw.add_circle([x, dot_y], 1.3, color).filled(true).build();
+                }
+            }
+        }
+        SegmentIcon::File | SegmentIcon::NewFile => {
+            draw.add_rect([x - 5.0, y - 7.0], [x + 5.0, y + 7.0], color)
+                .thickness(1.4)
+                .build();
+            if matches!(icon, SegmentIcon::NewFile) {
+                draw.add_line([x - 2.5, y], [x + 2.5, y], color)
+                    .thickness(1.4)
+                    .build();
+                draw.add_line([x, y - 2.5], [x, y + 2.5], color)
+                    .thickness(1.4)
+                    .build();
+            } else {
+                draw.add_line([x - 2.5, y - 2.0], [x + 2.5, y - 2.0], color)
+                    .thickness(1.2)
+                    .build();
+            }
+        }
+    }
+}
+
+fn segmented_control<T: Copy + PartialEq>(
+    ui: &Ui,
+    id: &str,
+    selected: &mut T,
+    options: &[(T, &str, SegmentIcon, &str)],
+    layout: SegmentLayout,
+    tutorial_tips: bool,
+    accent: [f32; 4],
+    border: [f32; 4],
+) -> bool {
+    let _id = ui.push_id(id);
+    let base = ui.style_color(StyleColor::Button);
+    let mut changed = false;
+    let mut group_min = [0.0; 2];
+    let mut group_max = [0.0; 2];
+    let _rounding = ui.push_style_var(StyleVar::FrameRounding(0.0));
+    let _spacing = ui.push_style_var(StyleVar::ItemSpacing([0.0, 0.0]));
+    let vertical_width = ui.content_region_avail()[0].max(1.0);
+    for (index, &(value, label, icon, tip)) in options.iter().enumerate() {
+        if index > 0 && layout == SegmentLayout::Horizontal {
+            ui.same_line_with_spacing(0.0, 0.0);
+        }
+        let active = *selected == value;
+        let background = if active {
+            mix_color(base, accent, 0.65)
+        } else {
+            base
+        };
+        let _button = ui.push_style_color(StyleColor::Button, background);
+        let _hover = ui.push_style_color(
+            StyleColor::ButtonHovered,
+            mix_color(background, accent, 0.25),
+        );
+        let _pressed = ui.push_style_color(StyleColor::ButtonActive, accent);
+        let width = if layout == SegmentLayout::Vertical {
+            vertical_width
+        } else {
+            ui.calc_text_size(label)[0] + 44.0
+        };
+        if ui.button_with_size(format!("    {label}##{index}"), [width, 30.0]) && !active {
+            *selected = value;
+            changed = true;
+        }
+        let min = ui.item_rect_min();
+        let max = ui.item_rect_max();
+        if index == 0 {
+            group_min = min;
+        } else {
+            let draw = ui.get_window_draw_list();
+            if layout == SegmentLayout::Vertical {
+                draw.add_line([min[0] + 3.0, min[1]], [max[0] - 3.0, min[1]], border)
+                    .build();
+            } else {
+                draw.add_line([min[0], min[1] + 3.0], [min[0], max[1] - 3.0], border)
+                    .build();
+            }
+        }
+        group_max = max;
+        draw_segment_icon(ui, icon, ui.style_color(StyleColor::Text));
+        item_tip(ui, tutorial_tips, tip, tip);
+    }
+    ui.get_window_draw_list()
+        .add_rect(group_min, group_max, border)
+        .rounding(4.0)
+        .build();
+    changed
+}
+
 pub(super) fn draw(lab: &mut PluginLab, ui: &Ui, context: PluginContext<'_>) -> Option<Selection> {
     let state = &mut lab.dataset_manipulation;
     if state.choices.is_empty() {
@@ -746,202 +899,286 @@ pub(super) fn draw(lab: &mut PluginLab, ui: &Ui, context: PluginContext<'_>) -> 
     }
     state.left = state.left.min(state.choices.len() - 1);
     state.right = state.right.min(state.choices.len() - 1);
-    let operations = ["Slice", "Left - Right", "Left / Right"];
-    let mut operation = match state.operation {
-        Operation::Slice => 0,
-        Operation::Difference => 1,
-        Operation::Ratio => 2,
-    };
-    if ui.combo_simple_string("Operation", &mut operation, &operations) {
-        state.operation = [Operation::Slice, Operation::Difference, Operation::Ratio][operation];
-        state.status = None;
-    }
-    if dataset_picker(
-        ui,
-        "Source",
-        "left",
-        &state.choices,
-        &mut state.left,
-        &mut state.left_search,
-        None,
-        context.settings.tutorial_tips,
-    ) {
-        state.ranges.clear();
-        state.status = None;
-        let shape = &state.choices[state.left].shape;
-        if state.choices[state.right].shape != *shape {
-            state.right = state
-                .choices
-                .iter()
-                .position(|choice| choice.shape == *shape)
-                .unwrap_or(0);
+    if let Some(_table) = ui.begin_table("manipulation_inputs", 2) {
+        ui.table_setup_column_fixed_width("Operation", TableColumnFlags::NONE, 160.0);
+        ui.table_setup_column_stretch_weight("Datasets", TableColumnFlags::NONE, 1.0);
+        ui.table_next_row();
+        ui.table_next_column();
+        ui.text("Operation");
+        if segmented_control(
+            ui,
+            "manipulation_operation",
+            &mut state.operation,
+            &[
+                (
+                    Operation::Slice,
+                    "Slice",
+                    SegmentIcon::Slice,
+                    "Select a range of values from the source dataset.",
+                ),
+                (
+                    Operation::Sum,
+                    "Add",
+                    SegmentIcon::Add,
+                    "Create Left + Right from two matching datasets.",
+                ),
+                (
+                    Operation::Difference,
+                    "Subtract",
+                    SegmentIcon::Subtract,
+                    "Create Left - Right from two matching datasets.",
+                ),
+                (
+                    Operation::Product,
+                    "Multiply",
+                    SegmentIcon::Multiply,
+                    "Create Left * Right from two matching datasets.",
+                ),
+                (
+                    Operation::Ratio,
+                    "Divide",
+                    SegmentIcon::Divide,
+                    "Create Left / Right from two matching datasets.",
+                ),
+            ],
+            SegmentLayout::Vertical,
+            context.settings.tutorial_tips,
+            context.settings.palette.accent,
+            context.settings.palette.border,
+        ) {
+            state.status = None;
+        }
+        ui.table_next_column();
+        if dataset_picker(
+            ui,
+            "Source",
+            "left",
+            &state.choices,
+            &mut state.left,
+            &mut state.left_search,
+            None,
+            context.settings.tutorial_tips,
+        ) {
+            state.ranges.clear();
+            state.status = None;
+            let shape = &state.choices[state.left].shape;
+            if state.choices[state.right].shape != *shape {
+                state.right = state
+                    .choices
+                    .iter()
+                    .position(|choice| choice.shape == *shape)
+                    .unwrap_or(0);
+            }
+        }
+        let left = &state.choices[state.left];
+        if state.operation == Operation::Slice {
+            if state.ranges.len() != left.shape.len() {
+                state.ranges = left
+                    .shape
+                    .iter()
+                    .map(|&length| ["0".into(), length.to_string(), "1".into()])
+                    .collect();
+            }
+            ui.text("Slice ranges (start inclusive, stop exclusive)");
+            item_tip(ui, context.settings.tutorial_tips, "", "Set a start, stop, and step for each dimension. The result keeps every selected index in each dimension.");
+            if let Some(_ranges) = ui.begin_table("manipulation_slice_ranges", 4) {
+                let axis_width = (ui.content_region_avail()[0] * 0.22).clamp(76.0, 120.0);
+                ui.table_setup_column_fixed_width("Axis", TableColumnFlags::NONE, axis_width);
+                for label in ["Start", "Stop", "Step"] {
+                    ui.table_setup_column_stretch_weight(label, TableColumnFlags::NONE, 1.0);
+                }
+                ui.table_headers_row();
+                for (axis, fields) in state.ranges.iter_mut().enumerate() {
+                    ui.table_next_row();
+                    ui.table_next_column();
+                    ui.text(format!("{axis} (len {})", left.shape[axis]));
+                    for (field, name) in fields.iter_mut().zip(["start", "stop", "step"]) {
+                        ui.table_next_column();
+                        ui.set_next_item_width(ui.content_region_avail()[0].max(1.0));
+                        ui.input_text(format!("##manip_{name}_{axis}"), field)
+                            .build();
+                    }
+                }
+            }
+        } else {
+            dataset_picker(
+                ui,
+                "Second dataset",
+                "right",
+                &state.choices,
+                &mut state.right,
+                &mut state.right_search,
+                Some(&left.shape),
+                context.settings.tutorial_tips,
+            );
+            if state.choices[state.right].shape != left.shape {
+                ui.text_disabled("Arithmetic requires datasets with identical shapes.");
+            }
         }
     }
     let left = &state.choices[state.left];
-    if state.operation == Operation::Slice {
-        if state.ranges.len() != left.shape.len() {
-            state.ranges = left
-                .shape
-                .iter()
-                .map(|&length| ["0".into(), length.to_string(), "1".into()])
-                .collect();
-        }
-        ui.text("Slice ranges (start inclusive, stop exclusive)");
-        item_tip(ui, context.settings.tutorial_tips, "", "Set a start, stop, and step for each dimension. The result keeps every selected index in each dimension.");
-        for (axis, fields) in state.ranges.iter_mut().enumerate() {
-            ui.text(format!("Axis {axis}  length {}", left.shape[axis]));
-            ui.same_line_with_spacing(0.0, 12.0);
-            ui.set_next_item_width(90.0);
-            ui.input_text(format!("Start##manip_start_{axis}"), &mut fields[0])
-                .build();
-            ui.same_line();
-            ui.set_next_item_width(90.0);
-            ui.input_text(format!("Stop##manip_stop_{axis}"), &mut fields[1])
-                .build();
-            ui.same_line();
-            ui.set_next_item_width(70.0);
-            ui.input_text(format!("Step##manip_step_{axis}"), &mut fields[2])
-                .build();
-        }
-    } else {
-        dataset_picker(
-            ui,
-            "Second dataset",
-            "right",
-            &state.choices,
-            &mut state.right,
-            &mut state.right_search,
-            Some(&left.shape),
-            context.settings.tutorial_tips,
-        );
-        if state.choices[state.right].shape != left.shape {
-            ui.text_disabled("Arithmetic requires datasets with identical shapes.");
-        }
-    }
     ui.separator();
-    let destinations = ["File A", "File B", "New file"];
-    let mut destination = match state.destination {
-        Destination::A => 0,
-        Destination::B => 1,
-        Destination::NewFile => 2,
-    };
-    if ui.combo_simple_string("Save into", &mut destination, &destinations) {
-        state.destination = [Destination::A, Destination::B, Destination::NewFile][destination];
-    }
-    if state.destination == Destination::NewFile {
-        ui.input_text("New HDF5 file", &mut state.new_file).build();
+    if let Some(_table) = ui.begin_table("manipulation_output", 2) {
+        ui.table_setup_column_fixed_width("Destination", TableColumnFlags::NONE, 160.0);
+        ui.table_setup_column_stretch_weight("Output", TableColumnFlags::NONE, 1.0);
+        ui.table_next_row();
+        ui.table_next_column();
+        ui.text("Save into");
+        segmented_control(
+            ui,
+            "manipulation_destination",
+            &mut state.destination,
+            &[
+                (
+                    Destination::A,
+                    "File A",
+                    SegmentIcon::File,
+                    "Save a new dataset in file A.",
+                ),
+                (
+                    Destination::B,
+                    "File B",
+                    SegmentIcon::File,
+                    "Save a new dataset in file B.",
+                ),
+                (
+                    Destination::NewFile,
+                    "New file",
+                    SegmentIcon::NewFile,
+                    "Save to a new HDF5 file.",
+                ),
+            ],
+            SegmentLayout::Vertical,
+            context.settings.tutorial_tips,
+            context.settings.palette.accent,
+            context.settings.palette.border,
+        );
+        ui.table_next_column();
+        ui.text("Destination");
+        if state.destination == Destination::NewFile {
+            ui.text("New HDF5 file");
+            if file_path_field(
+                ui,
+                "manipulation_new_file",
+                &mut state.new_file,
+                ui.content_region_avail()[0],
+            ) {
+                *context.picker_request =
+                    Some((FilePickerTarget::ManipulationOutput, state.new_file.clone()));
+            }
+            item_tip(
+                ui,
+                context.settings.tutorial_tips,
+                "",
+                "Enter a new .hdf5 or .h5 filename; existing files are protected.",
+            );
+        }
+        ui.input_text("New dataset path", &mut state.output_path)
+            .build();
         item_tip(
             ui,
             context.settings.tutorial_tips,
             "",
-            "Enter a new .hdf5 or .h5 filename; existing files are protected.",
+            "Use an absolute path such as /processed/slice. Existing datasets are never replaced.",
         );
-    }
-    ui.input_text("New dataset path", &mut state.output_path)
-        .build();
-    item_tip(
-        ui,
-        context.settings.tutorial_tips,
-        "",
-        "Use an absolute path such as /processed/slice. Existing datasets are never replaced.",
-    );
-    ui.text_disabled("Source attributes are not copied to the result.");
-    if state.job.is_some() {
-        ui.text("Writing dataset...");
-    }
-    if let Some(status) = &state.status {
-        match status {
-            Ok(message) => ui.text_wrapped(message),
-            Err(error) => ui.text_wrapped(format!("Could not save dataset: {error}")),
+        ui.text_disabled("Source attributes are not copied to the result.");
+        if state.job.is_some() {
+            ui.text("Writing dataset...");
         }
-    }
-    let _disabled = ui.begin_disabled_with_cond(state.job.is_some());
-    if ui.button("Create dataset") {
-        let ranges = if state.operation == Operation::Slice {
-            state
-                .ranges
-                .iter()
-                .map(|fields| {
-                    let parse = |text: &str| {
-                        text.trim()
-                            .parse::<usize>()
-                            .map_err(|_| format!("Invalid slice index: {text}"))
-                    };
-                    Ok(AxisRange {
-                        start: parse(&fields[0])?,
-                        stop: parse(&fields[1])?,
-                        step: parse(&fields[2])?,
-                    })
-                })
-                .collect::<Result<Vec<_>, String>>()
-        } else {
-            Ok(Vec::new())
-        };
-        let destination_file = match state.destination {
-            Destination::A => context.file_paths.first().cloned(),
-            Destination::B => context.file_paths.get(1).cloned(),
-            Destination::NewFile => Some(PathBuf::from(state.new_file.trim())),
-        };
-        let spec = ranges.and_then(|ranges| {
-            let destination_file = destination_file.ok_or("Load file B to save there")?;
-            if state.destination == Destination::NewFile && state.new_file.trim().is_empty() {
-                return Err("Enter a new output filename".into());
+        if let Some(status) = &state.status {
+            match status {
+                Ok(message) => ui.text_wrapped(message),
+                Err(error) => ui.text_wrapped(format!("Could not save dataset: {error}")),
             }
-            validate_output_path(state.output_path.trim())?;
-            let right = if state.operation == Operation::Slice {
-                None
-            } else {
-                let choice = &state.choices[state.right];
-                if choice.shape != left.shape {
-                    return Err("Both datasets must have identical shapes".into());
-                }
-                Some((context.file_paths[choice.file].clone(), choice.path.clone()))
-            };
-            Ok(JobSpec {
-                left_file: context.file_paths[left.file].clone(),
-                left_path: left.path.clone(),
-                right,
-                operation: state.operation,
-                ranges,
-                destination: state.destination,
-                destination_file,
-                output_path: state.output_path.trim().to_owned(),
-                chunk_elements: context.settings.dataset_manipulation_chunk_elements,
-            })
-        });
-        match spec {
-            Ok(spec) => {
-                let release = match spec.destination {
-                    Destination::A | Destination::B => {
-                        let slot = if spec.destination == Destination::A {
-                            0
-                        } else {
-                            1
+        }
+        let _disabled = ui.begin_disabled_with_cond(state.job.is_some());
+        if ui.button("Create dataset") {
+            let ranges = if state.operation == Operation::Slice {
+                state
+                    .ranges
+                    .iter()
+                    .map(|fields| {
+                        let parse = |text: &str| {
+                            text.trim()
+                                .parse::<usize>()
+                                .map_err(|_| format!("Invalid slice index: {text}"))
                         };
-                        if !context.write_allowed[slot] {
-                            Err("Finish file loading or synchronization and apply or discard pending inspector edits before writing to A/B".into())
-                        } else {
-                            context.files[slot]
-                                .release_for_edit()
-                                .map_err(|error| error.to_string())
-                        }
-                    }
-                    Destination::NewFile => Ok(()),
-                };
-                match release {
-                    Ok(()) => {
-                        let spec_destination = spec.destination;
-                        let (sender, receiver) = mpsc::channel();
-                        thread::spawn(move || {
-                            let _ = sender.send(run(spec));
-                        });
-                        state.job = Some((spec_destination, receiver));
-                        state.status = None;
-                    }
-                    Err(error) => state.status = Some(Err(error)),
+                        Ok(AxisRange {
+                            start: parse(&fields[0])?,
+                            stop: parse(&fields[1])?,
+                            step: parse(&fields[2])?,
+                        })
+                    })
+                    .collect::<Result<Vec<_>, String>>()
+            } else {
+                Ok(Vec::new())
+            };
+            let destination_file = match state.destination {
+                Destination::A => context.file_paths.first().cloned(),
+                Destination::B => context.file_paths.get(1).cloned(),
+                Destination::NewFile => Some(PathBuf::from(state.new_file.trim())),
+            };
+            let spec = ranges.and_then(|ranges| {
+                let destination_file = destination_file.ok_or("Load file B to save there")?;
+                if state.destination == Destination::NewFile && state.new_file.trim().is_empty() {
+                    return Err("Enter a new output filename".into());
                 }
+                validate_output_path(state.output_path.trim())?;
+                let right = if state.operation == Operation::Slice {
+                    None
+                } else {
+                    let choice = &state.choices[state.right];
+                    if choice.shape != left.shape {
+                        return Err("Both datasets must have identical shapes".into());
+                    }
+                    Some((context.file_paths[choice.file].clone(), choice.path.clone()))
+                };
+                Ok(JobSpec {
+                    left_file: context.file_paths[left.file].clone(),
+                    left_path: left.path.clone(),
+                    right,
+                    operation: state.operation,
+                    ranges,
+                    destination: state.destination,
+                    destination_file,
+                    output_path: state.output_path.trim().to_owned(),
+                    chunk_elements: context.settings.dataset_manipulation_chunk_elements,
+                })
+            });
+            match spec {
+                Ok(spec) => {
+                    let release = match spec.destination {
+                        Destination::A | Destination::B => {
+                            let slot = if spec.destination == Destination::A {
+                                0
+                            } else {
+                                1
+                            };
+                            if !context.write_allowed[slot] {
+                                Err("Finish file loading or synchronization and apply or discard pending inspector edits before writing to A/B".into())
+                            } else {
+                                context.files[slot]
+                                    .release_for_edit()
+                                    .map_err(|error| error.to_string())
+                            }
+                        }
+                        Destination::NewFile => Ok(()),
+                    };
+                    match release {
+                        Ok(()) => {
+                            let spec_destination = spec.destination;
+                            let (sender, receiver) = mpsc::channel();
+                            thread::spawn(move || {
+                                let _ = sender.send(run(spec));
+                            });
+                            state.job = Some((spec_destination, receiver));
+                            state.status = None;
+                        }
+                        Err(error) => state.status = Some(Err(error)),
+                    }
+                }
+                Err(error) => state.status = Some(Err(error)),
             }
-            Err(error) => state.status = Some(Err(error)),
         }
     }
     None
@@ -1063,6 +1300,82 @@ mod tests {
     }
 
     #[test]
+    fn addition_and_multiplication_keep_integer_results() {
+        let (directory, a, b) = fixture();
+        for (operation, name, expected) in [
+            (
+                Operation::Sum,
+                "sum.hdf5",
+                (0..12).map(|value| 2 * value + 2).collect::<Vec<i64>>(),
+            ),
+            (
+                Operation::Product,
+                "product.hdf5",
+                (0..12)
+                    .map(|value| value * (value + 2))
+                    .collect::<Vec<i64>>(),
+            ),
+        ] {
+            let output = directory.join(name);
+            run(spec(&a, &b, &output, operation)).unwrap();
+            let file = hdf5_metno::File::open(&output).unwrap();
+            let dataset = file.dataset("/derived/result").unwrap();
+            assert_eq!(dataset.shape(), vec![3, 4]);
+            assert_eq!(
+                dataset.dtype().unwrap().to_descriptor().unwrap(),
+                TypeDescriptor::Integer(IntSize::U8)
+            );
+            assert_eq!(dataset.read_raw::<i64>().unwrap(), expected);
+        }
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn addition_and_multiplication_keep_float32_precision() {
+        let (directory, a, b) = fixture();
+        for (operation, name, expected) in [
+            (Operation::Sum, "float_sum.hdf5", 4.0_f32),
+            (Operation::Product, "float_product.hdf5", 3.0_f32),
+        ] {
+            let output = directory.join(name);
+            let mut job = spec(&a, &b, &output, operation);
+            job.left_path = "/float32".into();
+            job.right = Some((b.clone(), "/float32".into()));
+            run(job).unwrap();
+            let file = hdf5_metno::File::open(&output).unwrap();
+            let dataset = file.dataset("/derived/result").unwrap();
+            assert_eq!(
+                dataset.dtype().unwrap().to_descriptor().unwrap(),
+                TypeDescriptor::Float(FloatSize::U4)
+            );
+            assert_eq!(dataset.read_raw::<f32>().unwrap(), vec![expected; 12]);
+        }
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn integer_arithmetic_rejects_results_outside_i64() {
+        let (directory, a, b) = fixture();
+        for (path, value) in [(&a, i64::MAX), (&b, 2_i64)] {
+            let file = hdf5_metno::File::open_rw(path).unwrap();
+            file.new_dataset::<i64>()
+                .shape([1])
+                .create("large")
+                .unwrap()
+                .write_raw(&[value])
+                .unwrap();
+        }
+        for operation in [Operation::Sum, Operation::Product] {
+            let output = directory.join(format!("overflow_{operation:?}.hdf5"));
+            let mut job = spec(&a, &b, &output, operation);
+            job.left_path = "/large".into();
+            job.right = Some((b.clone(), "/large".into()));
+            assert!(run(job).unwrap_err().contains("i64 range"));
+        }
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
     fn floating_point_results_keep_the_higher_input_precision() {
         let (directory, a, b) = fixture();
         let f32_output = directory.join("f32.hdf5");
@@ -1142,6 +1455,8 @@ mod tests {
         let paths = [a, b];
         let mut files = paths.each_ref().map(|path| File::open(path).unwrap());
         let settings = Settings::load().unwrap();
+        let browser = DatasetBrowser::new(&[]);
+        let mut picker_request = None;
         let mut context = Context::create();
         context.set_ini_filename(None::<String>).unwrap();
         context.io_mut().set_display_size([1000.0, 700.0]);
@@ -1165,6 +1480,8 @@ mod tests {
                         settings: &settings,
                         selection: None,
                         write_allowed: [true, true],
+                        browser: &browser,
+                        picker_request: &mut picker_request,
                     }
                 )
                 .is_none());
@@ -1186,6 +1503,8 @@ mod tests {
                         settings: &settings,
                         selection: None,
                         write_allowed: [true, true],
+                        browser: &browser,
+                        picker_request: &mut picker_request,
                     },
                 );
             });

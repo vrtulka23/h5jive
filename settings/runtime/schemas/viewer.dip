@@ -120,3 +120,6 @@ plugins
   dataset_manipulation_enabled bool = true
     ?descr "Show the dataset manipulation plugin in Plugin Lab."
   dataset_manipulation : dataset_manipulation_plugin_settings
+  spatiotemporal_subset_enabled bool = true
+    ?descr "Show the spatiotemporal subset plugin in Plugin Lab."
+  spatiotemporal_subset : spatiotemporal_subset_plugin_settings

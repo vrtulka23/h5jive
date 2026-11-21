@@ -11,6 +11,7 @@ mod model;
 #[allow(dead_code)]
 mod overpass;
 mod pinned_default;
+mod subsetting;
 mod value_visibility;
 mod volume;
 
@@ -22,5 +23,6 @@ pub(crate) use map_plane_cache::*;
 pub(crate) use model::*;
 pub(crate) use overpass::*;
 pub(crate) use pinned_default::*;
+pub(crate) use subsetting::*;
 pub(crate) use value_visibility::*;
 pub(crate) use volume::*;

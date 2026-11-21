@@ -2,3 +2,4 @@
 path_comparison_enabled bool = true
 value_comparison_enabled bool = true
 dataset_manipulation_enabled bool = true
+spatiotemporal_subset_enabled bool = true

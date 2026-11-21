@@ -13,6 +13,9 @@ state. Share stateless data and drawing helpers when behavior overlaps.
    `PluginLab` only when the plugin needs it. Invalidate cached results when
    files A or B change.
 2. Use `PluginContext.files` for the loaded A/B files and their `tree` entries.
+   For filesystem paths, draw the shared `file_path_field` control and send its
+   browse request through `PluginContext.picker_request`; the app owns the file
+   picker window. Keep dataset paths as ordinary text fields.
    Use `PluginContext.selection` when the current core selection matters. Reuse
    `h5jive-data` and `core` APIs for data access and analysis. For expensive
    metadata scans, use `PluginContext.file_paths` to reopen files on a worker
@@ -38,6 +41,9 @@ state. Share stateless data and drawing helpers when behavior overlaps.
    existing normal tooltip visible when Tutorial tips are off. Follow the
    shared `app/tutorial_tips.rs` helpers for tutorial and plain tooltips.
    Keep claims about value comparison or visualization precise.
+
+Use the plain ASCII `-` sign in plugin UI labels and buttons. The bundled font
+can render the typographic minus `−` as `?`.
 
 Plugins are compiled from source with H5Jive. This directory is not a loader
 for untrusted runtime binaries.

@@ -61,10 +61,12 @@ drawing components as the inspector while keeping its own selection and cache.
 Invalid values, fill values, and ratio cells with a zero denominator are
 excluded. For large planes, the preview samples matching positions from both
 datasets, up to `plugins.value_comparison.preview_max_cells` in DIPL.
+The buttons beside the heatmap filter positive, zero, and negative finite
+results, as well as NaN, fill, and infinite values.
 
 The [value comparison demo](../../examples/plugins/value_comparison/README.md)
-contains known differences, ratios, a 3D array for pinning, and an incompatible
-shape. Generate it with:
+contains smooth peaks that shift between files, visible special-value patches,
+a 3D array for pinning, and an incompatible shape. Generate it with:
 
 ```sh
 cargo run -p h5jive --example generate_value_comparison_demo
@@ -75,18 +77,42 @@ cargo run -p h5jive -- examples/plugins/value_comparison/value_demo_a.hdf5 examp
 
 The Dataset manipulation plugin has its own dataset selection and slice controls.
 Choose **Slice** and set a start (inclusive), stop (exclusive), and step for
-each dimension, or choose **Left − Right** or **Left ÷ Right** for two datasets
+each dimension, or choose **Add**, **Subtract**, **Multiply**, or **Divide** for two datasets
 of identical shape. The result is written under a new dataset path in file A or
 B, or in a new HDF5 file. Existing datasets and files are not overwritten.
-Slices preserve the source numeric datatype. Integer differences use signed
-64-bit values when they fit; integer ratios use 64-bit floating point values.
+Slices preserve the source numeric datatype. Integer additions, differences,
+and products use signed 64-bit values when they fit; integer ratios use 64-bit floating point values.
 Two 32-bit floating point inputs produce a 32-bit result, while operations
 involving 64-bit floating point values produce a 64-bit result. Source metadata
 attributes are not copied. The plugin reads HDF5 and NetCDF-4 inputs; classic
 NetCDF inputs need conversion to HDF5 first.
 
 The [dataset manipulation demo](../../examples/plugins/dataset_manipulation/README.md)
-shows a reproducible slice, difference, and ratio.
+shows reproducible slices and arithmetic operations.
+
+## Spatiotemporal subset
+
+The Spatiotemporal subset plugin uses Dataset Browser's indexed products. Select
+a source, product date or orbit range, geographic bounds, and numeric variables.
+Its coverage preview layers sampled coordinates from every selected product on
+a world map or globe; dragging on the map sets the bounds. **Native products**
+exports cropped swaths in separate groups of one NetCDF-4 file, keeping their
+coordinates, numeric time axis, and variable attributes. **Gridded mosaic**
+averages overlapping samples onto one regular grid and writes sample counts
+for each variable. Both modes read spatial rows in bounded chunks and create a
+new file without overwriting an existing one.
+
+The first version supports NetCDF products with 2D swath coordinates or 1D
+regular latitude and longitude axes, numeric 2D fields, and 3D fields with a
+leading CF time coordinate. It does not reproject curvilinear grids, preserve
+source numeric storage types, or write into existing A/B files. See the
+[subset demo](../../examples/plugins/spatiotemporal_subset/README.md) for a
+reproducible source and export.
+
+Filesystem paths throughout H5Jive use the same text field with an attached
+folder button. Typing remains available; the button opens the Files picker.
+For output paths, the picker chooses a folder and filename and returns to the
+calling tool before saving.
 
 ## Add a plugin
 

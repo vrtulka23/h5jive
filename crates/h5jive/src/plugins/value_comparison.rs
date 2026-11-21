@@ -43,6 +43,7 @@ struct Preview {
     right_values: Vec<f64>,
     plotted: Vec<f64>,
     specials: Vec<Option<SpecialValue>>,
+    finite_counts: [usize; 3],
     special_counts: [usize; 4],
     range: Option<(f64, f64)>,
     invalid: usize,
@@ -58,6 +59,22 @@ fn count_specials(specials: &[Option<SpecialValue>]) -> [usize; 4] {
             SpecialValue::NegativeInf => 3,
         };
         counts[index] += 1;
+    }
+    counts
+}
+
+fn count_finite(values: &[f64], specials: &[Option<SpecialValue>]) -> [usize; 3] {
+    let mut counts = [0; 3];
+    for (&value, special) in values.iter().zip(specials) {
+        if special.is_none() {
+            counts[if value > 0.0 {
+                0
+            } else if value == 0.0 {
+                1
+            } else {
+                2
+            }] += 1;
+        }
     }
     counts
 }
@@ -381,6 +398,7 @@ fn load_preview(
         }
     }
     let special_counts = count_specials(&specials);
+    let finite_counts = count_finite(&values, &specials);
     let invalid = special_counts.iter().sum();
     Ok(Preview {
         values,
@@ -388,6 +406,7 @@ fn load_preview(
         right_values: b.values,
         plotted,
         specials,
+        finite_counts,
         special_counts,
         range,
         invalid,
@@ -480,12 +499,6 @@ fn picker(
                 }
             });
     }
-    if let Some(choice) = selected {
-        ui.text_disabled(format!("Path: {}", choice.path));
-        if ui.is_item_hovered() {
-            item_plain_tip(ui, &choice.path);
-        }
-    }
     picked
 }
 
@@ -507,7 +520,7 @@ fn draw_preview(
     let columns = key.slice.columns(&key.left.shape);
     let available = ui.content_region_avail();
     let plot_width = (available[0] - 75.0 - 128.0).max(100.0);
-    let plot_height = available[1].max(180.0);
+    let plot_height = available[1].max(310.0);
     let map = if key.operation == Operation::Difference {
         Colormap::RdBu
     } else {
@@ -527,15 +540,22 @@ fn draw_preview(
         );
         plot_ui.setup_axes_limits(0.0, columns as f64, 0.0, rows as f64, PlotCond::Once);
         plot_ui.setup_finish();
-        plot_heatmap_grid(
-            plot_ui,
-            "comparison",
-            &preview.plotted,
-            key.grid,
-            (min, max),
-            [0.0, 0.0, columns as f64, rows as f64],
-        );
-        if preview.invalid > 0 {
+        if visibility.any_enabled() {
+            plot_heatmap_grid(
+                plot_ui,
+                "comparison",
+                &preview.plotted,
+                key.grid,
+                (min, max),
+                [0.0, 0.0, columns as f64, rows as f64],
+            );
+        }
+        if visibility.any_enabled()
+            && (preview.invalid > 0
+                || !visibility.positive
+                || !visibility.zero
+                || !visibility.negative)
+        {
             let draw = ui.get_window_draw_list();
             let plot_pos = plot_ui.plot_pos();
             let plot_size = plot_ui.plot_size();
@@ -547,7 +567,20 @@ fn draw_preview(
             for row in 0..key.grid[0] {
                 for column in 0..key.grid[1] {
                     let index = row * key.grid[1] + column;
-                    let Some(special) = preview.specials[index] else {
+                    let special = preview.specials[index];
+                    let color = match special {
+                        Some(special)
+                            if visibility.allows_class(preview.values[index], Some(special)) =>
+                        {
+                            Some(special.color(palette))
+                        }
+                        Some(_) => Some(palette.background),
+                        None if !visibility.allows_class(preview.values[index], None) => {
+                            Some(palette.background)
+                        }
+                        None => None,
+                    };
+                    let Some(color) = color else {
                         continue;
                     };
                     let x0 = column as f64 * columns as f64 / key.grid[1] as f64;
@@ -564,11 +597,6 @@ fn draw_preview(
                         XAxis::X1,
                         YAxis::Y1,
                     );
-                    let color = if visibility.allows_class(preview.values[index], Some(special)) {
-                        special.color(palette)
-                    } else {
-                        palette.background
-                    };
                     draw.add_rect(first, last, color).filled(true).build();
                 }
             }
@@ -605,12 +633,12 @@ fn draw_preview(
     ui.child_window("comparison_special_controls")
         .size([116.0, plot_height])
         .build(ui, || {
-            ui.text("Special values");
-            visibility.draw_special_panel(
+            visibility.draw_comparison_panel(
                 ui,
                 palette,
                 ui.content_region_avail()[0],
                 tutorial_tips,
+                preview.finite_counts,
                 preview.special_counts,
             );
         });
@@ -901,14 +929,36 @@ mod tests {
             right,
             slice,
             operation: Operation::Difference,
-            grid: [3, 4],
+            grid: [96, 128],
         };
         let preview = load_preview(&paths[0], &paths[1], &key, &|| false).unwrap();
-        assert_eq!(preview.values, vec![-2.0; 12]);
-        assert_eq!(preview.invalid, 0);
+        assert_eq!(preview.values.len(), 96 * 128);
+        assert_eq!(preview.special_counts, [120, 120, 120, 120]);
+        assert_eq!(preview.invalid, 480);
+        assert!(preview.finite_counts[0] > 0);
+        assert!(preview.finite_counts[1] >= 72);
+        assert!(preview.finite_counts[2] > 0);
+        assert!(preview.values.iter().copied().fold(f64::INFINITY, f64::min) < -0.1);
+        assert!(
+            preview
+                .values
+                .iter()
+                .copied()
+                .fold(f64::NEG_INFINITY, f64::max)
+                > 0.1
+        );
         key.operation = Operation::Ratio;
         let preview = load_preview(&paths[0], &paths[1], &key, &|| false).unwrap();
-        assert!((preview.values[0] - 1.0 / 3.0).abs() < 1e-12);
+        assert_eq!(preview.special_counts, [240, 120, 120, 120]);
+        assert!(preview.values.iter().copied().fold(f64::INFINITY, f64::min) < 0.85);
+        assert!(
+            preview
+                .values
+                .iter()
+                .copied()
+                .fold(f64::NEG_INFINITY, f64::max)
+                > 1.1
+        );
         key.left = pick(0, "/field/cube");
         key.right = pick(1, "/field/cube");
         key.slice = TableSlice::new(&key.left.shape, PinnedDefault::Start);
@@ -916,8 +966,11 @@ mod tests {
         key.slice.row_axis = Some(1);
         key.slice.column_axis = 2;
         key.operation = Operation::Difference;
+        key.grid = [48, 64];
         let preview = load_preview(&paths[0], &paths[1], &key, &|| false).unwrap();
-        assert_eq!(preview.values, vec![-3.0; 12]);
+        assert_eq!(preview.values.len(), 48 * 64);
+        assert!(preview.values.iter().any(|value| *value < -0.1));
+        assert!(preview.values.iter().any(|value| *value > 0.1));
     }
 
     #[test]
@@ -990,14 +1043,13 @@ mod tests {
             right: right.clone(),
             slice,
             operation: Operation::Difference,
-            grid: [3, 4],
+            grid: [96, 128],
         };
-        let mut preview = load_preview(&paths[0], &paths[1], &key, &|| false).unwrap();
-        preview.values[0] = f64::NAN;
-        preview.specials[0] = Some(SpecialValue::Nan);
-        preview.special_counts = [1, 0, 0, 0];
-        preview.invalid = 1;
+        let preview = load_preview(&paths[0], &paths[1], &key, &|| false).unwrap();
+        assert_eq!(preview.special_counts, [120, 120, 120, 120]);
         let settings = Settings::load().unwrap();
+        let browser = DatasetBrowser::new(&[]);
+        let mut picker_request = None;
         let mut context = Context::create();
         context.set_ini_filename(None::<String>).unwrap();
         context.io_mut().set_display_size([1100.0, 800.0]);
@@ -1027,7 +1079,9 @@ mod tests {
                         &paths,
                         &settings,
                         None,
-                        [true, true]
+                        [true, true],
+                        &browser,
+                        &mut picker_request
                     )
                     .is_none());
             });

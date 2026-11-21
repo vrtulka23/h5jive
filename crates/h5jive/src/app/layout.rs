@@ -100,30 +100,20 @@ impl App {
             .main_menu_bar(|| {
                 if let Some(_menu) = ui.begin_menu("Files") {
                     ui.text("Input file A");
-                    ui.set_next_item_width(360.0);
-                    ui.input_text("##input_file_a", &mut self.file_path_inputs[0])
-                        .build();
-                    item_tip(ui, tutorial_tips, "", "Paste a local file path, then choose Load A.");
-                    if ui.button("Browse A...") {
+                    if file_path_field(ui,"input_a",&mut self.file_path_inputs[0],360.0) {
                         self.open_file_picker(0);
                     }
-                    item_tip(ui, tutorial_tips, "", "Select a file, then double-click it to open.");
-                    ui.same_line();
+                    item_tip(ui, tutorial_tips, "Browse for file A", "Type a path or click the folder icon to browse for file A.");
                     if ui.button("Load A") {
                         self.load_file_slot(0);
                     }
                     item_tip(ui, tutorial_tips, "", "File A is the primary file for browsing and comparisons.");
                     ui.separator();
                     ui.text("Input file B");
-                    ui.set_next_item_width(360.0);
-                    ui.input_text("##input_file_b", &mut self.file_path_inputs[1])
-                        .build();
-                    item_tip(ui, tutorial_tips, "", "Paste a second file path to compare with File A.");
-                    if ui.button("Browse B...") {
+                    if file_path_field(ui,"input_b",&mut self.file_path_inputs[1],360.0) {
                         self.open_file_picker(1);
                     }
-                    item_tip(ui, tutorial_tips, "", "Select a file, then double-click it to open.");
-                    ui.same_line();
+                    item_tip(ui, tutorial_tips, "Browse for file B", "Type a path or click the folder icon to browse for file B.");
                     if ui.button("Load B") {
                         self.load_file_slot(1);
                     }
@@ -799,6 +789,7 @@ impl App {
                     && self.file_open_jobs.iter().all(Option::is_none)
                     && self.pending_cell_edits.is_empty();
                 let write_allowed = [can_write_files; 2];
+                let mut picker_request = None;
                 if let Some(selection) = self.plugins.draw(
                     ui,
                     plot_ui,
@@ -807,6 +798,8 @@ impl App {
                     &self.settings,
                     self.selection.as_ref(),
                     write_allowed,
+                    &self.dataset_browser,
+                    &mut picker_request,
                 ) {
                     if let Some(current) = &self.selection {
                         if (current.file != selection.file || current.path != selection.path)
@@ -824,6 +817,9 @@ impl App {
                     }
                     self.workspace_mode = WorkspaceMode::DataInspector;
                     self.switch_view(ViewMode::Data);
+                }
+                if let Some((target, path)) = picker_request {
+                    self.open_file_picker_for(target, path);
                 }
                 if self.plugins.has_sync_request() {
                     if !self.pending_cell_edits.is_empty() || self.cell_edit_job.is_some() {
@@ -1014,10 +1010,16 @@ impl App {
     }
 }
 
-fn make_file_picker_state(slot: usize, directory: PathBuf) -> FilePickerState {
+fn make_file_picker_state(
+    target: FilePickerTarget,
+    directory: PathBuf,
+    filename: String,
+) -> FilePickerState {
     let mut state = FilePickerState {
-        slot,
+        target,
+        needs_open: true,
         directory: directory.clone(),
+        filename,
         entries: Vec::new(),
         selected: None,
         error: None,
@@ -1029,7 +1031,7 @@ fn make_file_picker_state(slot: usize, directory: PathBuf) -> FilePickerState {
                     Ok(entry) => {
                         let path = entry.path();
                         let is_directory = path.is_dir();
-                        if !is_directory && (!path.is_file() || !is_supported_input_file(&path)) {
+                        if !is_directory && (!path.is_file() || !target.accepts(&path)) {
                             continue;
                         }
                         let name = entry.file_name().to_string_lossy().into_owned();
@@ -1067,7 +1069,7 @@ fn make_file_picker_state(slot: usize, directory: PathBuf) -> FilePickerState {
     state
 }
 
-fn is_supported_input_file(path: &std::path::Path) -> bool {
+pub(super) fn is_supported_input_file(path: &std::path::Path) -> bool {
     matches!(
         path.extension()
             .and_then(|extension| extension.to_str())
@@ -1079,7 +1081,7 @@ fn is_supported_input_file(path: &std::path::Path) -> bool {
 
 #[cfg(test)]
 mod file_picker_tests {
-    use super::is_supported_input_file;
+    use super::{is_supported_input_file, make_file_picker_state, FilePickerTarget};
     use std::path::Path;
 
     #[test]
@@ -1098,6 +1100,21 @@ mod file_picker_tests {
         for name in ["notes.txt", "image.png", "data.hdf4", "no_extension"] {
             assert!(!is_supported_input_file(Path::new(name)), "{name}");
         }
+    }
+
+    #[test]
+    fn shared_picker_uses_the_destination_file_type() {
+        assert!(FilePickerTarget::ViewExport.accepts(Path::new("figure.JPEG")));
+        assert!(!FilePickerTarget::ViewExport.accepts(Path::new("figure.nc")));
+        assert!(FilePickerTarget::ManipulationOutput.accepts(Path::new("derived.hdf5")));
+        assert!(!FilePickerTarget::ManipulationOutput.accepts(Path::new("derived.png")));
+        assert!(FilePickerTarget::SubsetOutput.accepts(Path::new("subset.nc")));
+        assert!(!FilePickerTarget::SubsetOutput.accepts(Path::new("subset.h5")));
+        let folder = std::env::temp_dir();
+        let picker =
+            make_file_picker_state(FilePickerTarget::SubsetOutput, folder, "new.nc".into());
+        assert_eq!(picker.filename, "new.nc");
+        assert!(picker.target.is_save());
     }
 }
 
@@ -1192,9 +1209,16 @@ impl App {
         }
     }
     fn open_file_picker(&mut self, slot: usize) {
-        let current = PathBuf::from(self.file_path_inputs[slot].trim());
+        self.open_file_picker_for(
+            FilePickerTarget::Input(slot),
+            self.file_path_inputs[slot].clone(),
+        );
+    }
+
+    pub(super) fn open_file_picker_for(&mut self, target: FilePickerTarget, current: String) {
+        let current = PathBuf::from(current.trim());
         let directory = if current.is_dir() {
-            current
+            current.clone()
         } else {
             current
                 .parent()
@@ -1203,90 +1227,175 @@ impl App {
                 .or_else(|| std::env::current_dir().ok())
                 .unwrap_or_else(|| PathBuf::from("."))
         };
-        self.file_picker = Some(make_file_picker_state(slot, directory));
+        let filename = if current.is_dir() {
+            String::new()
+        } else {
+            current
+                .file_name()
+                .map(|s| s.to_string_lossy().into_owned())
+                .unwrap_or_default()
+        };
+        self.file_picker = Some(make_file_picker_state(target, directory, filename));
     }
 
     fn draw_file_picker(&mut self, ui: &Ui) {
+        const POPUP: &str = "File picker###file_picker";
         let Some(picker) = self.file_picker.as_mut() else {
             return;
         };
-        let slot_name = if picker.slot == 0 { "A" } else { "B" };
-        let title = format!("Open File {slot_name}###file_picker");
+        if picker.needs_open {
+            ui.open_popup(POPUP);
+            picker.needs_open = false;
+        }
         let mut opened = true;
         let mut navigate = None;
         let mut chosen = None;
-        ui.window(title)
-            .size([640.0, 520.0], Condition::FirstUseEver)
+        let mut cancel = false;
+        if let Some(_popup) = ui
+            .begin_modal_popup_config(POPUP)
             .opened(&mut opened)
-            .build(|| {
-                if ui.button_with_size("##file_picker_refresh", [ui.frame_height(); 2]) {
-                    navigate = Some(picker.directory.clone());
-                }
-                draw_file_picker_refresh_icon(ui, &self.settings.palette);
-                item_tip(
-                    ui,
-                    self.settings.tutorial_tips,
-                    "Refresh current folder",
-                    "Rescan this folder if a file was added outside H5Jive.",
-                );
-                ui.same_line_with_spacing(0.0, PANEL_GAP);
-                ui.align_text_to_frame_padding();
-                ui.text_wrapped(picker.directory.display().to_string());
-                if let Some(error) = &picker.error {
-                    ui.text_wrapped(error);
-                }
-                ui.separator();
-                ui.child_window("##file_picker_entries")
-                    .size([0.0, 0.0])
-                    .build(ui, || {
-                        for entry in &picker.entries {
-                            let selected = picker.selected.as_ref() == Some(&entry.path);
-                            let icon_position = ui.cursor_screen_pos();
-                            ui.dummy([17.0, ui.text_line_height()]);
-                            draw_file_picker_icon(
-                                ui,
-                                icon_position,
-                                entry.is_directory,
-                                &self.settings.palette,
-                            );
-                            ui.same_line_with_spacing(0.0, 3.0);
-                            let clicked = ui
-                                .selectable_config(&entry.label)
-                                .selected(selected)
-                                .build();
-                            let hovered = ui.is_item_hovered();
-                            item_tip(
-                                ui,
-                                self.settings.tutorial_tips,
-                                "",
-                                if entry.is_directory {
-                                    "Click to highlight; double-click to open this folder."
+            .begin()
+        {
+            ui.set_window_size_with_cond([640.0, 520.0], Condition::FirstUseEver);
+            ui.text(picker.target.title());
+            ui.separator();
+            if ui.button_with_size("##file_picker_refresh", [ui.frame_height(); 2]) {
+                navigate = Some(picker.directory.clone());
+            }
+            draw_file_picker_refresh_icon(ui, &self.settings.palette);
+            item_tip(
+                ui,
+                self.settings.tutorial_tips,
+                "Refresh current folder",
+                "Rescan this folder if a file was added outside H5Jive.",
+            );
+            ui.same_line_with_spacing(0.0, PANEL_GAP);
+            ui.align_text_to_frame_padding();
+            ui.text_wrapped(picker.directory.display().to_string());
+            if let Some(error) = &picker.error {
+                ui.text_wrapped(error);
+            }
+            ui.separator();
+            ui.child_window("##file_picker_entries")
+                .size([
+                    0.0,
+                    if picker.target.is_save() {
+                        -120.0
+                    } else {
+                        -42.0
+                    },
+                ])
+                .build(ui, || {
+                    for entry in &picker.entries {
+                        let selected = picker.selected.as_ref() == Some(&entry.path);
+                        let icon_position = ui.cursor_screen_pos();
+                        ui.dummy([17.0, ui.text_line_height()]);
+                        draw_file_picker_icon(
+                            ui,
+                            icon_position,
+                            entry.is_directory,
+                            &self.settings.palette,
+                        );
+                        ui.same_line_with_spacing(0.0, 3.0);
+                        let clicked = ui
+                            .selectable_config(&entry.label)
+                            .selected(selected)
+                            .build();
+                        let hovered = ui.is_item_hovered();
+                        item_tip(
+                            ui,
+                            self.settings.tutorial_tips,
+                            "",
+                            if entry.is_directory {
+                                "Click to highlight; double-click to open this folder."
+                            } else {
+                                "Click to highlight; double-click to open this file."
+                            },
+                        );
+                        if clicked {
+                            picker.selected = Some(entry.path.clone());
+                        }
+                        if hovered && ui.is_mouse_double_clicked(dear_app::imgui::MouseButton::Left)
+                        {
+                            if entry.is_directory {
+                                navigate = Some(entry.path.clone());
+                            } else {
+                                if picker.target.is_save() {
+                                    picker.filename = entry.label.clone();
                                 } else {
-                                    "Click to highlight; double-click to open this file."
-                                },
-                            );
-                            if clicked {
-                                picker.selected = Some(entry.path.clone());
-                            }
-                            if hovered
-                                && ui.is_mouse_double_clicked(dear_app::imgui::MouseButton::Left)
-                            {
-                                if entry.is_directory {
-                                    navigate = Some(entry.path.clone());
-                                } else {
-                                    chosen = Some((picker.slot, entry.path.clone()));
+                                    chosen = Some((picker.target, entry.path.clone()));
+                                    ui.close_current_popup();
                                 }
                             }
                         }
-                    });
-            });
+                    }
+                });
+            if picker.target.is_save() {
+                ui.separator();
+                ui.text("File name");
+                ui.set_next_item_width(ui.content_region_avail()[0].max(120.0));
+                ui.input_text("##picker_save_name", &mut picker.filename)
+                    .build();
+                if ui.button("Use path") {
+                    let name = picker.filename.trim();
+                    if name.is_empty()
+                        || name == "."
+                        || name == ".."
+                        || name.contains('/')
+                        || name.contains('\\')
+                    {
+                        picker.error = Some("Enter a filename without folder separators".into());
+                    } else {
+                        let path = picker.directory.join(name);
+                        if picker.target.accepts(&path) {
+                            chosen = Some((picker.target, path));
+                            ui.close_current_popup();
+                        } else {
+                            picker.error =
+                                Some("Choose a filename with the expected extension".into());
+                        }
+                    }
+                }
+                ui.same_line();
+                if ui.button("Cancel##picker_save") {
+                    cancel = true;
+                    ui.close_current_popup();
+                }
+            } else {
+                ui.separator();
+                if ui.button("Cancel##picker_open") {
+                    cancel = true;
+                    ui.close_current_popup();
+                }
+            }
+        } else if !ui.is_popup_open(POPUP) {
+            picker.needs_open = true;
+        }
         if let Some(directory) = navigate {
-            self.file_picker = Some(make_file_picker_state(picker.slot, directory));
-        } else if let Some((slot, path)) = chosen {
-            self.file_path_inputs[slot] = path.display().to_string();
+            let mut next =
+                make_file_picker_state(picker.target, directory, picker.filename.clone());
+            next.needs_open = false;
+            self.file_picker = Some(next);
+        } else if let Some((target, path)) = chosen {
             self.file_picker = None;
-            self.load_file_slot(slot);
-        } else if !opened {
+            match target {
+                FilePickerTarget::Input(slot) => {
+                    self.file_path_inputs[slot] = path.display().to_string();
+                    self.load_file_slot(slot);
+                }
+                FilePickerTarget::ViewExport => {
+                    if let Some(dialog) = self.export_dialog.as_mut() {
+                        dialog.path = path.display().to_string();
+                    }
+                }
+                FilePickerTarget::ManipulationOutput => self
+                    .plugins
+                    .set_picker_path(target, path.display().to_string()),
+                FilePickerTarget::SubsetOutput => self
+                    .plugins
+                    .set_picker_path(target, path.display().to_string()),
+            }
+        } else if !opened || cancel {
             self.file_picker = None;
         }
     }

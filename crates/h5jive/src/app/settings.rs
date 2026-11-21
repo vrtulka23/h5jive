@@ -461,6 +461,8 @@ pub(super) struct Settings {
     pub(super) value_comparison_max_cells: usize,
     pub(super) dataset_manipulation_enabled: bool,
     pub(super) dataset_manipulation_chunk_elements: usize,
+    pub(super) spatiotemporal_subset_enabled: bool,
+    pub(super) spatiotemporal_subset_preview_max_points: usize,
     pub(super) dataset_rules: Vec<GeolocationRule>,
     pub(super) dataset_sources: Vec<DatasetSource>,
     pub(super) profiles: Vec<ThemeProfile>,
@@ -628,6 +630,10 @@ impl Settings {
             dataset_manipulation_enabled: values.boolean("plugins.dataset_manipulation_enabled")?,
             dataset_manipulation_chunk_elements: values
                 .count("plugins.dataset_manipulation.chunk_elements")?,
+            spatiotemporal_subset_enabled: values
+                .boolean("plugins.spatiotemporal_subset_enabled")?,
+            spatiotemporal_subset_preview_max_points: values
+                .count("plugins.spatiotemporal_subset.preview_max_points")?,
             dataset_rules: read_dataset_rules(&dip)?,
             dataset_sources: read_dataset_sources(&dip, project.parent().unwrap())?,
             profiles,
