@@ -14,9 +14,13 @@ mod file_operations;
 mod geolocation;
 mod statistics;
 mod subset;
-pub use file_operations::{same_file, WritableFile};
+pub use file_operations::{
+    copy_hdf5_object, dataset_path_parts, same_file, Hdf5ObjectKind, StagedOutput, WritableFile,
+};
 pub use geolocation::{
-    Geolocation, GeolocationRule, ScanDirection, ScanDirectionClass, ScanDirectionRule, ScanFilter,
+    geographic_coordinate_role, select_geographic_axes, CoordinateCandidate, CoordinateRole,
+    GeographicAxes, Geolocation, GeolocationRule, ScanDirection, ScanDirectionClass,
+    ScanDirectionRule, ScanFilter,
 };
 pub use statistics::{DatasetDistribution, DatasetStatistics};
 pub use subset::{

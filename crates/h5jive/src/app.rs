@@ -1,5 +1,7 @@
+mod background_job;
 mod data_toolkit;
 mod dataset_browser;
+mod dataset_picker;
 mod details;
 mod export;
 mod file_drop;
@@ -21,7 +23,9 @@ mod views;
 mod volume_raycast;
 
 use crate::core::*;
+use background_job::*;
 use dataset_browser::*;
+use dataset_picker::*;
 use export::*;
 use file_drop::*;
 use file_path_field::*;
@@ -138,9 +142,9 @@ struct App {
     details_key: Option<Selection>,
     details_default_pending: bool,
     statistics_cache: Option<Result<DatasetStatistics, String>>,
-    statistics_job: Option<mpsc::Receiver<Result<DatasetStatistics, String>>>,
+    statistics_job: BackgroundJob<Selection, DatasetStatistics>,
     distribution_cache: Option<Result<DatasetDistribution, String>>,
-    distribution_job: Option<mpsc::Receiver<Result<DatasetDistribution, String>>>,
+    distribution_job: BackgroundJob<Selection, DatasetDistribution>,
     attributes_cache: Option<Result<Vec<AttributeValue>, String>>,
     coordinates_cache: Option<Result<Vec<CoordinateAxis>, String>>,
     coordinate_value_cache: HashMap<(usize, usize), Option<String>>,
@@ -501,9 +505,9 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
         details_key: None,
         details_default_pending: true,
         statistics_cache: None,
-        statistics_job: None,
+        statistics_job: BackgroundJob::default(),
         distribution_cache: None,
-        distribution_job: None,
+        distribution_job: BackgroundJob::default(),
         attributes_cache: None,
         coordinates_cache: None,
         coordinate_value_cache: HashMap::new(),

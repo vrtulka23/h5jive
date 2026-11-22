@@ -46,13 +46,13 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y build-essential clang cmake libclang-dev pkg-config \
-            libhdf5-dev libxcb1-dev libxrandr-dev libdbus-1-dev libx11-dev \
+            libhdf5-dev libnetcdf-dev libxcb1-dev libxrandr-dev libdbus-1-dev libx11-dev \
             libwayland-dev libegl-dev libxkbcommon-dev libxkbcommon-x11-dev \
             libgl1-mesa-dev libvulkan-dev
 
       - name: Install macOS build dependencies
         if: runner.os == 'macOS'
-        run: brew install hdf5 pkg-config llvm
+        run: brew install hdf5 netcdf pkg-config llvm
 
       - uses: msys2/setup-msys2@v2
         if: runner.os == 'Windows'
@@ -63,6 +63,7 @@ jobs:
           install: >-
             mingw-w64-ucrt-x86_64-toolchain
             mingw-w64-ucrt-x86_64-hdf5
+            mingw-w64-ucrt-x86_64-netcdf
             mingw-w64-ucrt-x86_64-cmake
             mingw-w64-ucrt-x86_64-ninja
             mingw-w64-ucrt-x86_64-clang

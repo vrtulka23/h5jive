@@ -1,5 +1,6 @@
 use super::*;
 use dear_app::imgui::MouseButton;
+use h5jive_data::{copy_hdf5_object, Hdf5ObjectKind};
 use std::collections::{BTreeMap, BTreeSet};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -145,16 +146,20 @@ fn copy_missing(
                 destination.create_group(parent_path)
             }
             .map_err(|e| format!("{}: destination parent: {e}", item.path))?;
-            let copy_result = match item.kind {
-                PathKind::Group => source.group(&item.path).and_then(|group| {
-                    group.copy_to_with_props(&parent, name, Some(&copy_properties), None)
-                }),
-                PathKind::Dataset { .. } => source.dataset(&item.path).and_then(|dataset| {
-                    dataset.copy_to_with_props(&parent, name, Some(&copy_properties), None)
-                }),
+            let kind = match item.kind {
+                PathKind::Group => Hdf5ObjectKind::Group,
+                PathKind::Dataset { .. } => Hdf5ObjectKind::Dataset,
                 PathKind::Other => continue,
             };
-            copy_result.map_err(|e| format!("{}: {e}", item.path))?;
+            copy_hdf5_object(
+                &source,
+                &item.path,
+                &parent,
+                name,
+                kind,
+                Some(&copy_properties),
+            )
+            .map_err(|e| format!("{}: {e}", item.path))?;
             copied += 1;
         }
         destination.flush().map_err(|e| e.to_string())?;
@@ -202,12 +207,22 @@ fn replace_existing(
         let staged = replacement_name(&parent, "stage");
         let backup = replacement_name(&parent, "previous");
         let copied = match item.kind {
-            PathKind::Group => source.group(&item.path).and_then(|group| {
-                group.copy_to_with_props(&parent, &staged, Some(&copy_properties), None)
-            }),
-            PathKind::Dataset { .. } => source.dataset(&item.path).and_then(|dataset| {
-                dataset.copy_to_with_props(&parent, &staged, Some(&copy_properties), None)
-            }),
+            PathKind::Group => copy_hdf5_object(
+                &source,
+                &item.path,
+                &parent,
+                &staged,
+                Hdf5ObjectKind::Group,
+                Some(&copy_properties),
+            ),
+            PathKind::Dataset { .. } => copy_hdf5_object(
+                &source,
+                &item.path,
+                &parent,
+                &staged,
+                Hdf5ObjectKind::Dataset,
+                Some(&copy_properties),
+            ),
             PathKind::Other => return Err("This HDF5 object type cannot be replaced".into()),
         };
         if let Err(error) = copied {
@@ -693,7 +708,7 @@ fn compare(a: &File, b: &File, show_groups: bool) -> Vec<Row> {
 #[derive(Default)]
 pub(super) struct State {
     rows: Option<Vec<Row>>,
-    job: Option<mpsc::Receiver<Result<Vec<Row>, String>>>,
+    job: BackgroundJob<(), Vec<Row>>,
     error: Option<String>,
     filter: Option<Status>,
     expanded: BTreeSet<String>,
@@ -703,7 +718,7 @@ pub(super) struct State {
     pending_resolution: Option<Row>,
     show_resolution_prompt: bool,
     sync_request: Option<SyncRequest>,
-    sync_job: Option<mpsc::Receiver<SyncOutcome>>,
+    sync_job: BackgroundJob<(), SyncOutcome>,
     sync_message: Option<String>,
     reload: Option<(usize, PathBuf)>,
 }
@@ -711,7 +726,7 @@ pub(super) struct State {
 impl State {
     pub fn invalidate(&mut self) {
         self.rows = None;
-        self.job = None;
+        self.job.cancel();
         self.error = None;
         self.filter = None;
         self.expanded.clear();
@@ -725,7 +740,7 @@ impl State {
     }
 
     pub fn is_busy(&self) -> bool {
-        self.job.is_some() || self.sync_job.is_some()
+        self.job.is_busy() || self.sync_job.is_busy()
     }
 
     pub fn take_redraw(&mut self) -> bool {
@@ -741,7 +756,7 @@ impl State {
     }
 
     pub fn is_syncing(&self) -> bool {
-        self.sync_job.is_some()
+        self.sync_job.is_busy()
     }
 
     pub fn start_requested_sync(&mut self, paths: &[PathBuf]) {
@@ -751,51 +766,29 @@ impl State {
     }
 
     pub(super) fn poll(&mut self) {
-        if let Some(job) = &self.sync_job {
-            match job.try_recv() {
+        if let Some((_, result)) = self
+            .sync_job
+            .poll("Synchronization worker stopped unexpectedly")
+        {
+            self.sync_message = Some(match result {
                 Ok(outcome) => {
-                    let noun = if outcome.copied == 1 {
-                        "object"
-                    } else {
-                        "objects"
-                    };
-                    self.sync_message = Some(match outcome.error {
-                        Some(error) => format!(
-                            "{} {} {noun}; synchronization stopped: {error}",
-                            outcome.action, outcome.copied
-                        ),
-                        None => format!("{} {} {noun}.", outcome.action, outcome.copied),
-                    });
+                    let noun = if outcome.copied == 1 { "object" } else { "objects" };
                     self.reload = Some((outcome.destination, outcome.path));
-                    self.sync_job = None;
-                    self.needs_redraw = true;
+                    match outcome.error {
+                        Some(error) => format!("{} {} {noun}; synchronization stopped: {error}", outcome.action, outcome.copied),
+                        None => format!("{} {} {noun}.", outcome.action, outcome.copied),
+                    }
                 }
-                Err(mpsc::TryRecvError::Disconnected) => {
-                    self.sync_message = Some("Synchronization worker stopped unexpectedly. Reload both files before trying again.".into());
-                    self.sync_job = None;
-                    self.needs_redraw = true;
-                }
-                Err(mpsc::TryRecvError::Empty) => {}
-            }
+                Err(_) => "Synchronization worker stopped unexpectedly. Reload both files before trying again.".into(),
+            });
+            self.needs_redraw = true;
         }
-        let Some(job) = &self.job else { return };
-        match job.try_recv() {
-            Ok(Ok(rows)) => {
-                self.rows = Some(rows);
-                self.job = None;
-                self.needs_redraw = true;
+        if let Some((_, result)) = self.job.poll("Comparison worker stopped unexpectedly") {
+            match result {
+                Ok(rows) => self.rows = Some(rows),
+                Err(error) => self.error = Some(error),
             }
-            Ok(Err(error)) => {
-                self.error = Some(error);
-                self.job = None;
-                self.needs_redraw = true;
-            }
-            Err(mpsc::TryRecvError::Disconnected) => {
-                self.error = Some("Comparison worker stopped unexpectedly".into());
-                self.job = None;
-                self.needs_redraw = true;
-            }
-            Err(mpsc::TryRecvError::Empty) => {}
+            self.needs_redraw = true;
         }
     }
 
@@ -806,16 +799,11 @@ impl State {
         let Some(b_path) = paths.get(1).cloned() else {
             return;
         };
-        let (sender, receiver) = mpsc::channel();
-        thread::spawn(move || {
-            let result = (|| {
-                let a = File::open_with_options(&a_path, options).map_err(|e| e.to_string())?;
-                let b = File::open_with_options(&b_path, options).map_err(|e| e.to_string())?;
-                Ok(compare(&a, &b, show_groups))
-            })();
-            let _ = sender.send(result);
+        self.job.start((), move |_| {
+            let a = File::open_with_options(&a_path, options).map_err(|e| e.to_string())?;
+            let b = File::open_with_options(&b_path, options).map_err(|e| e.to_string())?;
+            Ok(compare(&a, &b, show_groups))
         });
-        self.job = Some(receiver);
     }
 
     fn start_sync(&mut self, request: SyncRequest, paths: &[PathBuf]) {
@@ -823,8 +811,7 @@ impl State {
         let (source, destination) = direction.slots();
         let source_path = paths[source].clone();
         let destination_path = paths[destination].clone();
-        let (sender, receiver) = mpsc::channel();
-        thread::spawn(move || {
+        self.sync_job.start((), move |_| {
             let (copied, error, action) = match request {
                 SyncRequest::Missing(_, plan) => {
                     let (copied, error) = copy_missing(&source_path, &destination_path, &plan);
@@ -835,15 +822,14 @@ impl State {
                     (copied, error, "Replaced")
                 }
             };
-            let _ = sender.send(SyncOutcome {
+            Ok(SyncOutcome {
                 destination,
                 path: destination_path,
                 copied,
                 error,
                 action,
-            });
+            })
         });
-        self.sync_job = Some(receiver);
         self.sync_message = None;
         self.pending_sync = None;
         self.pending_resolution = None;
@@ -865,7 +851,7 @@ pub(super) fn draw(lab: &mut PluginLab, ui: &Ui, context: PluginContext<'_>) -> 
         return None;
     };
     if lab.comparison.rows.is_none()
-        && lab.comparison.job.is_none()
+        && !lab.comparison.job.is_busy()
         && lab.comparison.error.is_none()
     {
         lab.comparison.start(
@@ -968,7 +954,7 @@ pub(super) fn draw(lab: &mut PluginLab, ui: &Ui, context: PluginContext<'_>) -> 
             "Filter the path table by this comparison status.",
         );
     }
-    if !same_file && lab.comparison.sync_job.is_none() {
+    if !same_file && !lab.comparison.sync_job.is_busy() {
         for (index, direction) in [SyncDirection::AToB, SyncDirection::BToA]
             .into_iter()
             .enumerate()
@@ -1000,7 +986,7 @@ pub(super) fn draw(lab: &mut PluginLab, ui: &Ui, context: PluginContext<'_>) -> 
     ui.spacing();
     if same_file {
         ui.text_wrapped("Synchronization requires two different files.");
-    } else if lab.comparison.sync_job.is_some() {
+    } else if lab.comparison.sync_job.is_busy() {
         ui.text("Copying missing objects...");
     }
     if let Some(message) = &lab.comparison.sync_message {
@@ -1075,7 +1061,7 @@ pub(super) fn draw(lab: &mut PluginLab, ui: &Ui, context: PluginContext<'_>) -> 
                         center_status_cell(ui, STATUS_ICON_SIZE[0]);
                         let status_clicked =
                             ui.invisible_button(format!("##status_{index}"), STATUS_ICON_SIZE);
-                        if status_clicked && lab.comparison.sync_job.is_none() && !same_file {
+                        if status_clicked && !lab.comparison.sync_job.is_busy() && !same_file {
                             if row.status == Status::Different {
                                 lab.comparison.pending_resolution = Some(row.clone());
                                 lab.comparison.show_resolution_prompt = true;

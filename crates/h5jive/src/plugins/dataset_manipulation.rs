@@ -1,15 +1,11 @@
 use super::*;
+use h5jive_data::{copy_hdf5_object, dataset_path_parts, Hdf5ObjectKind, StagedOutput};
 use hdf5_metno::{
     types::{FloatSize, IntSize, TypeDescriptor},
     Dataset, Hyperslab, SliceOrIndex,
 };
 use ndarray::{ArrayD, IxDyn};
-use std::{
-    path::{Path, PathBuf},
-    sync::mpsc,
-    thread,
-    time::{SystemTime, UNIX_EPOCH},
-};
+use std::path::PathBuf;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 enum Operation {
@@ -48,13 +44,6 @@ impl AxisRange {
 }
 
 #[derive(Clone)]
-struct DatasetChoice {
-    file: usize,
-    path: String,
-    shape: Vec<usize>,
-}
-
-#[derive(Clone)]
 struct JobSpec {
     left_file: PathBuf,
     left_path: String,
@@ -80,7 +69,7 @@ pub(super) struct State {
     ranges: Vec<[String; 3]>,
     output_path: String,
     pub(super) new_file: String,
-    job: Option<(Destination, mpsc::Receiver<Result<String, String>>)>,
+    job: BackgroundJob<Destination, String>,
     status: Option<Result<String, String>>,
     reload: bool,
 }
@@ -100,7 +89,7 @@ impl Default for State {
             ranges: Vec::new(),
             output_path: "/result".into(),
             new_file: String::new(),
-            job: None,
+            job: BackgroundJob::default(),
             status: None,
             reload: false,
         }
@@ -123,24 +112,12 @@ impl State {
     }
     pub fn is_busy(&mut self) -> bool {
         let mut updated = false;
-        if let Some((destination, receiver)) = &self.job {
-            match receiver.try_recv() {
-                Ok(result) => {
-                    self.reload = *destination != Destination::NewFile;
-                    self.status = Some(result);
-                    self.job = None;
-                    updated = true;
-                }
-                Err(mpsc::TryRecvError::Disconnected) => {
-                    self.status = Some(Err("Dataset operation worker stopped".into()));
-                    self.reload = *destination != Destination::NewFile;
-                    self.job = None;
-                    updated = true;
-                }
-                Err(mpsc::TryRecvError::Empty) => {}
-            }
+        if let Some((destination, result)) = self.job.poll("Dataset operation worker stopped") {
+            self.reload = destination != Destination::NewFile;
+            self.status = Some(result);
+            updated = true;
         }
-        self.job.is_some() || updated
+        self.job.is_busy() || updated
     }
     pub fn take_reload(&mut self) -> bool {
         std::mem::take(&mut self.reload)
@@ -421,41 +398,13 @@ fn calculate(
         .map_err(|e| e.to_string())
 }
 
-fn validate_output_path(path: &str) -> Result<(&str, &str), String> {
-    let (parent, name) = path
-        .rsplit_once('/')
-        .ok_or("Use an absolute dataset path, such as /result")?;
-    if !path.starts_with('/')
-        || name.is_empty()
-        || path.contains("//")
-        || path.split('/').any(|part| part == "." || part == "..")
-    {
-        return Err("Use an absolute, nonempty dataset path without . or ..".into());
-    }
-    Ok((if parent.is_empty() { "/" } else { parent }, name))
-}
-
-fn temporary_path(destination: &Path) -> Result<PathBuf, String> {
-    let parent = destination
-        .parent()
-        .filter(|path| !path.as_os_str().is_empty())
-        .unwrap_or(Path::new("."));
-    let stamp = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_err(|e| e.to_string())?
-        .as_nanos();
-    Ok(parent.join(format!(
-        ".h5jive-operation-{}-{stamp}.hdf5",
-        std::process::id()
-    )))
-}
-
 fn run(spec: JobSpec) -> Result<String, String> {
-    let (parent_path, name) = validate_output_path(&spec.output_path)?;
+    let (parent_path, name) = dataset_path_parts(&spec.output_path).map_err(|e| e.to_string())?;
     if spec.destination == Destination::NewFile && spec.destination_file.exists() {
         return Err("Output file already exists".into());
     }
-    let stage_path = temporary_path(&spec.destination_file)?;
+    let staged_output = StagedOutput::new(&spec.destination_file, "operation", "hdf5")
+        .map_err(|e| e.to_string())?;
     let result = (|| -> Result<String, String> {
         let source_file = hdf5_metno::File::open(&spec.left_file)
             .map_err(|e| format!("The source must be HDF5 or NetCDF-4: {e}"))?;
@@ -517,7 +466,7 @@ fn run(spec: JobSpec) -> Result<String, String> {
             spec.operation,
             left_fill.is_some() || right_fill.is_some(),
         );
-        let stage = hdf5_metno::File::create(&stage_path).map_err(|e| e.to_string())?;
+        let stage = hdf5_metno::File::create(staged_output.path()).map_err(|e| e.to_string())?;
         let group = if parent_path == "/" {
             stage.group("/")
         } else {
@@ -575,17 +524,16 @@ fn run(spec: JobSpec) -> Result<String, String> {
         drop(left);
         drop(source_file);
         if spec.destination == Destination::NewFile {
-            std::fs::hard_link(&stage_path, &spec.destination_file).map_err(|e| e.to_string())?;
+            staged_output
+                .publish_new(&spec.destination_file)
+                .map_err(|e| e.to_string())?;
         } else {
             let destination =
                 WritableFile::open(&spec.destination_file).map_err(|error| error.to_string())?;
             if destination.link_exists(&spec.output_path) {
                 return Err("Output dataset already exists".into());
             }
-            let stage = hdf5_metno::File::open(&stage_path).map_err(|e| e.to_string())?;
-            let source = stage
-                .dataset(&spec.output_path)
-                .map_err(|e| e.to_string())?;
+            let stage = hdf5_metno::File::open(staged_output.path()).map_err(|e| e.to_string())?;
             let parent = if parent_path == "/" {
                 destination.group("/")
             } else if destination.link_exists(parent_path) {
@@ -594,7 +542,15 @@ fn run(spec: JobSpec) -> Result<String, String> {
                 destination.create_group(parent_path)
             }
             .map_err(|e| e.to_string())?;
-            source.copy_to(&parent, name).map_err(|e| e.to_string())?;
+            copy_hdf5_object(
+                &stage,
+                &spec.output_path,
+                &parent,
+                name,
+                Hdf5ObjectKind::Dataset,
+                None,
+            )
+            .map_err(|e| e.to_string())?;
             destination.flush().map_err(|e| e.to_string())?;
         }
         Ok(format!(
@@ -603,35 +559,7 @@ fn run(spec: JobSpec) -> Result<String, String> {
             spec.destination_file.display()
         ))
     })();
-    let _ = std::fs::remove_file(&stage_path);
     result
-}
-
-fn collect_choices(files: &[File]) -> Vec<DatasetChoice> {
-    fn visit(file: usize, entry: &Entry, choices: &mut Vec<DatasetChoice>) {
-        if let Kind::Dataset {
-            shape,
-            numeric: true,
-        } = &entry.kind
-        {
-            if !shape.is_empty() && shape.iter().all(|&length| length > 0) {
-                choices.push(DatasetChoice {
-                    file,
-                    path: entry.path.clone(),
-                    shape: shape.clone(),
-                });
-            }
-        }
-        for child in &entry.children {
-            visit(file, child, choices);
-        }
-    }
-    let mut choices = Vec::new();
-    for (file, source) in files.iter().take(2).enumerate() {
-        visit(file, &source.tree, &mut choices);
-    }
-    choices.sort_by(|a, b| (a.file, &a.path).cmp(&(b.file, &b.path)));
-    choices
 }
 
 fn dataset_picker(
@@ -644,68 +572,26 @@ fn dataset_picker(
     shape: Option<&[usize]>,
     tutorial_tips: bool,
 ) -> bool {
-    ui.text(title);
-    let choice = &choices[*selected];
-    let preview = format!(
-        "{} · {}  {:?}",
-        if choice.file == 0 { "A" } else { "B" },
-        choice.path,
-        choice.shape
-    );
-    ui.set_next_item_width(ui.content_region_avail()[0].max(1.0));
-    let combo = ui.begin_combo(format!("##manipulation_{id}"), &preview);
-    item_tip(
+    let visible: Vec<_> = choices
+        .iter()
+        .filter(|choice| shape.is_none_or(|required| choice.shape == required))
+        .collect();
+    let picked = dataset_choice_picker(
         ui,
+        &format!("manipulation_{id}"),
+        title,
+        &visible,
+        choices.get(*selected),
+        search,
         tutorial_tips,
-        &preview,
-        "Choose a numeric dataset from file A or B.",
     );
-    let mut changed = false;
-    if let Some(_combo) = combo {
-        ui.set_next_item_width(ui.content_region_avail()[0].max(1.0));
-        ui.input_text(format!("Search##manipulation_{id}"), search)
-            .build();
-        let query = search.trim().to_lowercase();
-        let visible = choices
-            .iter()
-            .enumerate()
-            .filter(|(_, choice)| {
-                shape.is_none_or(|required| choice.shape == required)
-                    && (query.is_empty() || choice.path.to_lowercase().contains(&query))
-            })
-            .map(|(index, _)| index)
-            .collect::<Vec<_>>();
-        ui.text_disabled(format!("{} matching datasets", visible.len()));
-        ui.child_window(format!("manipulation_options_{id}"))
-            .size([0.0, 220.0])
-            .build(ui, || {
-                if visible.is_empty() {
-                    ui.text_disabled("No datasets match this search.");
-                }
-                let mut clipper = ListClipper::new(visible.len()).begin(ui);
-                while clipper.step() {
-                    for position in clipper.display_start()..clipper.display_end() {
-                        let index = visible[position];
-                        let choice = &choices[index];
-                        let label = format!(
-                            "{} · {}  {:?}##manipulation_{id}_{index}",
-                            if choice.file == 0 { "A" } else { "B" },
-                            choice.path,
-                            choice.shape
-                        );
-                        if ui
-                            .selectable_config(label)
-                            .selected(*selected == index)
-                            .build()
-                        {
-                            *selected = index;
-                            changed = true;
-                        }
-                    }
-                }
-            });
+    if let Some(index) = picked.and_then(|choice| choices.iter().position(|item| *item == choice)) {
+        let changed = *selected != index;
+        *selected = index;
+        changed
+    } else {
+        false
     }
-    changed
 }
 
 pub(super) fn draw_icon(draw: &DrawListMut<'_>, min: [f32; 2], max: [f32; 2], color: [f32; 4]) {
@@ -872,7 +758,7 @@ fn segmented_control<T: Copy + PartialEq>(
 pub(super) fn draw(lab: &mut PluginLab, ui: &Ui, context: PluginContext<'_>) -> Option<Selection> {
     let state = &mut lab.dataset_manipulation;
     if state.choices.is_empty() {
-        state.choices = collect_choices(context.files);
+        state.choices = numeric_datasets(context.files, 1);
         if let Some((file, path)) = state.restore_left.take() {
             if let Some(index) = state
                 .choices
@@ -1082,7 +968,7 @@ pub(super) fn draw(lab: &mut PluginLab, ui: &Ui, context: PluginContext<'_>) -> 
             "Use an absolute path such as /processed/slice. Existing datasets are never replaced.",
         );
         ui.text_disabled("Source attributes are not copied to the result.");
-        if state.job.is_some() {
+        if state.job.is_busy() {
             ui.text("Writing dataset...");
         }
         if let Some(status) = &state.status {
@@ -1091,7 +977,7 @@ pub(super) fn draw(lab: &mut PluginLab, ui: &Ui, context: PluginContext<'_>) -> 
                 Err(error) => ui.text_wrapped(format!("Could not save dataset: {error}")),
             }
         }
-        let _disabled = ui.begin_disabled_with_cond(state.job.is_some());
+        let _disabled = ui.begin_disabled_with_cond(state.job.is_busy());
         if ui.button("Create dataset") {
             let ranges = if state.operation == Operation::Slice {
                 state
@@ -1123,7 +1009,7 @@ pub(super) fn draw(lab: &mut PluginLab, ui: &Ui, context: PluginContext<'_>) -> 
                 if state.destination == Destination::NewFile && state.new_file.trim().is_empty() {
                     return Err("Enter a new output filename".into());
                 }
-                validate_output_path(state.output_path.trim())?;
+                dataset_path_parts(state.output_path.trim()).map_err(|e| e.to_string())?;
                 let right = if state.operation == Operation::Slice {
                     None
                 } else {
@@ -1167,11 +1053,7 @@ pub(super) fn draw(lab: &mut PluginLab, ui: &Ui, context: PluginContext<'_>) -> 
                     match release {
                         Ok(()) => {
                             let spec_destination = spec.destination;
-                            let (sender, receiver) = mpsc::channel();
-                            thread::spawn(move || {
-                                let _ = sender.send(run(spec));
-                            });
-                            state.job = Some((spec_destination, receiver));
+                            state.job.start(spec_destination, move |_| run(spec));
                             state.status = None;
                         }
                         Err(error) => state.status = Some(Err(error)),
@@ -1188,6 +1070,10 @@ pub(super) fn draw(lab: &mut PluginLab, ui: &Ui, context: PluginContext<'_>) -> 
 mod tests {
     use super::*;
     use dear_app::imgui::{Condition, Context};
+    use std::{
+        path::Path,
+        time::{SystemTime, UNIX_EPOCH},
+    };
 
     fn fixture() -> (PathBuf, PathBuf, PathBuf) {
         let stamp = SystemTime::now()

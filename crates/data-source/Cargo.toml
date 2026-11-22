@@ -1,6 +1,6 @@
 [package]
 name = "h5jive-data"
-version = "0.1.0"
+version.workspace = true
 edition.workspace = true
 license.workspace = true
 description = "HDF5 and NetCDF data access and export for H5Jive"
@@ -8,6 +8,6 @@ description = "HDF5 and NetCDF data access and export for H5Jive"
 [dependencies]
 hdf5-metno = "0.15"
 netcdf-reader = "0.9"
-netcdf = { version = "0.12.1", features = ["static"] }
+netcdf = "0.12.1"
 ndarray = "0.17"
 

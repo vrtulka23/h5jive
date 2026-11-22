@@ -1,5 +1,8 @@
 //! Reusable bounded NetCDF geographic inspection, coverage, and export.
-use super::{File, GeolocationRule};
+use super::{
+    geographic_coordinate_role, select_geographic_axes, CoordinateCandidate, File, GeolocationRule,
+    StagedOutput,
+};
 use netcdf::{self, AttributeValue as Attr, Variable};
 use std::path::{Path, PathBuf};
 
@@ -135,23 +138,12 @@ fn all_variables(file: &netcdf::File) -> Result<Vec<String>, String> {
     }
     Ok(paths)
 }
-fn coordinate_kind(path: &str, v: &Variable<'_>) -> Option<bool> {
-    let name = path.rsplit('/').next().unwrap_or(path).to_ascii_lowercase();
-    let standard = attr_string(v, "standard_name").to_ascii_lowercase();
-    let units = attr_string(v, "units").to_ascii_lowercase();
-    if standard == "latitude"
-        || matches!(name.as_str(), "lat" | "latitude" | "nav_lat")
-        || units.contains("degrees_north")
-    {
-        Some(true)
-    } else if standard == "longitude"
-        || matches!(name.as_str(), "lon" | "longitude" | "nav_lon")
-        || units.contains("degrees_east")
-    {
-        Some(false)
-    } else {
-        None
-    }
+fn coordinate_role(path: &str, v: &Variable<'_>) -> Option<super::CoordinateRole> {
+    geographic_coordinate_role(
+        path,
+        &attr_string(v, "standard_name"),
+        &attr_string(v, "units"),
+    )
 }
 /// Find numeric fields with regular latitude/longitude axes or native 2D swath coordinates.
 pub fn inspect_subset_product(path: &Path) -> Result<Vec<SubsetVariable>, String> {
@@ -171,12 +163,10 @@ pub fn inspect_subset_product_with_rules(
         .filter_map(|path| {
             let v = file.variable(path)?;
             numeric(&v).then(|| {
-                coordinate_kind(path, &v).map(|lat| {
-                    (
-                        path.clone(),
-                        lat,
-                        v.dimensions().iter().map(|d| d.len()).collect::<Vec<_>>(),
-                    )
+                coordinate_role(path, &v).map(|role| CoordinateCandidate {
+                    path: path.clone(),
+                    role,
+                    shape: v.dimensions().iter().map(|d| d.len()).collect(),
                 })
             })?
         })
@@ -186,57 +176,43 @@ pub fn inspect_subset_product_with_rules(
         let Some(v) = file.variable(path) else {
             continue;
         };
-        if !numeric(&v) || coordinate_kind(path, &v).is_some() {
+        if !numeric(&v) || coordinate_role(path, &v).is_some() {
             continue;
         }
         let shape = v.dimensions().iter().map(|d| d.len()).collect::<Vec<_>>();
         if !(2..=3).contains(&shape.len()) || shape.iter().any(|&x| x == 0) {
             continue;
         }
-        let rows = shape[shape.len() - 2];
-        let cols = shape[shape.len() - 1];
-        let mut pair: Option<(String, String, bool, bool)> = None;
-        if let Some(reader) = &reader {
+        let preferred = reader.as_ref().and_then(|reader| {
             let dataset_path = format!("/{}", path.trim_start_matches('/'));
-            if let Ok(Some(geo)) = reader.geolocation_with_rules(&dataset_path, rules) {
-                let latitude = geo.latitude.trim_start_matches('/').to_owned();
-                let longitude = geo.longitude.trim_start_matches('/').to_owned();
-                if let (Some(lat), Some(lon)) =
-                    (file.variable(&latitude), file.variable(&longitude))
-                {
-                    let lat_shape = lat.dimensions().iter().map(|d| d.len()).collect::<Vec<_>>();
-                    let lon_shape = lon.dimensions().iter().map(|d| d.len()).collect::<Vec<_>>();
-                    if lat_shape.as_slice() == [rows, cols] && lon_shape.as_slice() == [rows, cols]
-                    {
-                        pair = Some((latitude, longitude, false, true));
-                    }
-                }
+            reader
+                .geolocation_with_rules(&dataset_path, rules)
+                .ok()
+                .flatten()
+        });
+        let preferred_candidates = preferred.as_ref().and_then(|geo| {
+            let latitude = geo.latitude.trim_start_matches('/');
+            let longitude = geo.longitude.trim_start_matches('/');
+            let lat = file.variable(latitude)?;
+            let lon = file.variable(longitude)?;
+            if !numeric(&lat) || !numeric(&lon) {
+                return None;
             }
-        }
-        for (lat_path, is_lat, lat_shape) in &coords {
-            if !is_lat {
-                continue;
-            }
-            for (lon_path, is_lon, lon_shape) in &coords {
-                if *is_lon {
-                    continue;
-                }
-                let grid = lat_shape.as_slice() == [rows] && lon_shape.as_slice() == [cols];
-                let swath =
-                    lat_shape.as_slice() == [rows, cols] && lon_shape.as_slice() == [rows, cols];
-                if grid || swath {
-                    let parent = path.rsplit_once('/').map_or("", |(p, _)| p);
-                    let shared = lat_path.starts_with(parent) && lon_path.starts_with(parent);
-                    if pair
-                        .as_ref()
-                        .is_none_or(|(_, _, _, old_shared)| shared && !*old_shared)
-                    {
-                        pair = Some((lat_path.clone(), lon_path.clone(), grid, shared));
-                    }
-                }
-            }
-        }
-        if let Some((latitude, longitude, regular_grid, _)) = pair {
+            Some((
+                CoordinateCandidate {
+                    path: latitude.to_owned(),
+                    role: super::CoordinateRole::Latitude,
+                    shape: lat.dimensions().iter().map(|d| d.len()).collect(),
+                },
+                CoordinateCandidate {
+                    path: longitude.to_owned(),
+                    role: super::CoordinateRole::Longitude,
+                    shape: lon.dimensions().iter().map(|d| d.len()).collect(),
+                },
+            ))
+        });
+        let preferred = preferred_candidates.as_ref().map(|(lat, lon)| (lat, lon));
+        if let Some(axes) = select_geographic_axes(path, &shape, preferred, &coords) {
             let time = if shape.len() == 3 {
                 let dim = v.dimensions()[0].name();
                 paths
@@ -254,9 +230,9 @@ pub fn inspect_subset_product_with_rules(
             candidates.push(SubsetVariable {
                 path: path.clone(),
                 shape,
-                latitude,
-                longitude,
-                regular_grid,
+                latitude: axes.latitude,
+                longitude: axes.longitude,
+                regular_grid: axes.regular_grid,
                 time,
             });
         }
@@ -887,21 +863,9 @@ pub fn export_subset(request: &SubsetRequest) -> Result<String, String> {
     if request.output.exists() {
         return Err("Output file already exists".into());
     }
-    let parent = request
-        .output
-        .parent()
-        .filter(|p| !p.as_os_str().is_empty())
-        .unwrap_or(Path::new("."));
-    if !parent.is_dir() {
-        return Err("Output directory does not exist".into());
-    }
-    let stamp = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_err(err)?
-        .as_nanos();
-    let temporary = parent.join(format!(".h5jive-subset-{}-{stamp}.nc", std::process::id()));
+    let staged_output = StagedOutput::new(&request.output, "subset", "nc").map_err(err)?;
     let result = (|| {
-        let mut out = netcdf::create(&temporary).map_err(err)?;
+        let mut out = netcdf::create(staged_output.path()).map_err(err)?;
         out.add_attribute("Conventions", "CF-1.10").map_err(err)?;
         out.add_attribute("history", "Subset exported by H5Jive")
             .map_err(err)?;
@@ -958,13 +922,12 @@ pub fn export_subset(request: &SubsetRequest) -> Result<String, String> {
             return Err("No selected product has values inside the bounds and time range".into());
         }
         out.close().map_err(err)?;
-        std::fs::hard_link(&temporary, &request.output).map_err(err)?;
+        staged_output.publish_new(&request.output).map_err(err)?;
         Ok(format!(
             "Exported {used} products to {}",
             request.output.display()
         ))
     })();
-    let _ = std::fs::remove_file(&temporary);
     result
 }
 

@@ -16,7 +16,7 @@ ditto LICENSE "$resources/LICENSE"
 
 sips -s format icns website/public/h5jive.png --out "$resources/H5Jive.icns" >/dev/null
 
-version=$(sed -n 's/^version = "\([^"]*\)"/\1/p' crates/h5jive/Cargo.toml | head -n 1)
+version=$(sed -n 's/^version = "\([^"]*\)"/\1/p' Cargo.toml | head -n 1)
 cat > "$app/Contents/Info.plist" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">

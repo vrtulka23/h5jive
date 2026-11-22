@@ -601,8 +601,8 @@ impl App {
         for (active, label) in [
             (self.heatmap_overview_job.is_some(), "2D image"),
             (self.heatmap_range_job.is_some(), "2D range"),
-            (self.statistics_job.is_some(), "stats"),
-            (self.distribution_job.is_some(), "distribution"),
+            (self.statistics_job.is_busy(), "stats"),
+            (self.distribution_job.is_busy(), "distribution"),
         ] {
             if active {
                 tasks.push(label);

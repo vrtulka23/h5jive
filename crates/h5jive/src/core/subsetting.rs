@@ -2,6 +2,65 @@
 use super::Product;
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(crate) struct ProductAvailability {
+    pub(crate) dates: Option<(String, String)>,
+    pub(crate) orbits: Option<(String, String)>,
+}
+
+impl ProductAvailability {
+    pub(crate) fn from_products(products: &[Product]) -> Self {
+        let mut earliest_date: Option<(String, String)> = None;
+        let mut latest_date: Option<(String, String)> = None;
+        let mut first_orbit: Option<&str> = None;
+        let mut last_orbit: Option<&str> = None;
+        for product in products {
+            if !product.year.is_empty() {
+                let mut label = product.year.clone();
+                if !product.month.is_empty() {
+                    label.push('-');
+                    label.push_str(&product.month);
+                    if !product.day.is_empty() {
+                        label.push('-');
+                        label.push_str(&product.day);
+                    }
+                }
+                let digits = format!("{}{}{}", product.year, product.month, product.day);
+                let first = format!("{digits:0<8}");
+                let last = format!("{digits:9<8}");
+                if earliest_date.as_ref().is_none_or(|(key, _)| first < *key) {
+                    earliest_date = Some((first, label.clone()));
+                }
+                if latest_date.as_ref().is_none_or(|(key, _)| last > *key) {
+                    latest_date = Some((last, label));
+                }
+            }
+            if !product.orbit.is_empty() {
+                let orbit = product.orbit.as_str();
+                let compare =
+                    |left: &str, right: &str| match (left.parse::<u64>(), right.parse::<u64>()) {
+                        (Ok(left), Ok(right)) => left.cmp(&right),
+                        _ => left.cmp(right),
+                    };
+                if first_orbit.is_none_or(|first| compare(orbit, first).is_lt()) {
+                    first_orbit = Some(orbit);
+                }
+                if last_orbit.is_none_or(|last| compare(orbit, last).is_gt()) {
+                    last_orbit = Some(orbit);
+                }
+            }
+        }
+        Self {
+            dates: earliest_date
+                .zip(latest_date)
+                .map(|(first, last)| (first.1, last.1)),
+            orbits: first_orbit
+                .zip(last_orbit)
+                .map(|(first, last)| (first.into(), last.into())),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(crate) struct ProductRange {
     pub from_date: String,
     pub through_date: String,
@@ -55,6 +114,31 @@ impl ProductRange {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn available_bounds_use_indexed_dates_and_numeric_orbit_order() {
+        let product = |year: &str, month: &str, day: &str, orbit: &str| Product {
+            filename: String::new(),
+            relative_path: String::new(),
+            year: year.into(),
+            month: month.into(),
+            day: day.into(),
+            orbit: orbit.into(),
+            size: 0,
+        };
+        let bounds = ProductAvailability::from_products(&[
+            product("2024", "02", "07", "9"),
+            product("2023", "12", "31", "010"),
+            product("2025", "", "", ""),
+            product("", "", "", "100"),
+        ]);
+        assert_eq!(bounds.dates, Some(("2023-12-31".into(), "2025".into())));
+        assert_eq!(bounds.orbits, Some(("9".into(), "100".into())));
+        assert_eq!(
+            ProductAvailability::from_products(&[]),
+            ProductAvailability::default()
+        );
+    }
 
     #[test]
     fn selects_date_and_orbit_ranges() {

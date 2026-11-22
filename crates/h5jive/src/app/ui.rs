@@ -17,6 +17,23 @@ pub(super) fn plot_heatmap_grid(
         .plot(plot_ui);
 }
 
+/// Cover a filtered heatmap cell through its outer pixels so the underlying
+/// ImPlot rectangle cannot leave a colored seam at fractional pixel edges.
+pub(super) fn cover_heatmap_cell(
+    draw: &DrawListMut<'_>,
+    first: [f32; 2],
+    last: [f32; 2],
+    color: [f32; 4],
+) {
+    draw.add_rect(
+        [first[0].floor(), first[1].floor()],
+        [last[0].ceil(), last[1].ceil()],
+        color,
+    )
+    .filled(true)
+    .build();
+}
+
 pub(super) fn control_action_width(ui: &Ui, settings: &Settings) -> f32 {
     settings
         .update_button_width

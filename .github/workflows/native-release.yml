@@ -100,8 +100,9 @@ jobs:
             -DHDF5_INSTALL_LIB_DIR=lib \
             -DBUILD_SHARED_LIBS=ON -DBUILD_STATIC_LIBS=OFF \
             -DBUILD_TESTING=OFF -DHDF5_BUILD_TOOLS=OFF \
-            -DHDF5_BUILD_CPP_LIB=OFF -DHDF5_BUILD_HL_LIB=OFF \
+            -DHDF5_BUILD_CPP_LIB=OFF -DHDF5_BUILD_HL_LIB=ON \
             -DHDF5_ENABLE_THREADSAFE=ON \
+            -DHDF5_ALLOW_UNSUPPORTED=ON \
             -DHDF5_ENABLE_Z_LIB_SUPPORT=ON -DHDF5_ENABLE_SZIP_SUPPORT=ON \
             -DHDF5_ENABLE_ROS3_VFD=OFF
           cmake --build "$RUNNER_TEMP/hdf5-build" --parallel 4
@@ -115,9 +116,43 @@ jobs:
           echo "SNT3_HDF5_LIB_DIR=$hdf5_prefix/lib" >> "$GITHUB_ENV"
           echo "PKG_CONFIG_PATH=$hdf5_prefix/lib/pkgconfig" >> "$GITHUB_ENV"
 
+      - name: Build Linux NetCDF against bundled HDF5
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          netcdf_version=4.9.3
+          netcdf_sha256=990f46d49525d6ab5dc4249f8684c6deeaf54de6fec63a187e9fb382cc0ffdff
+          netcdf_archive="$RUNNER_TEMP/netcdf-c-$netcdf_version.tar.gz"
+          netcdf_prefix="$RUNNER_TEMP/netcdf-local"
+          curl -fsSLo "$netcdf_archive" \
+            "https://github.com/Unidata/netcdf-c/archive/refs/tags/v$netcdf_version.tar.gz"
+          printf '%s  %s\n' "$netcdf_sha256" "$netcdf_archive" | sha256sum --check
+          tar -xzf "$netcdf_archive" -C "$RUNNER_TEMP"
+          cmake -S "$RUNNER_TEMP/netcdf-c-$netcdf_version" -B "$RUNNER_TEMP/netcdf-build" \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_PREFIX="$netcdf_prefix" \
+            -DCMAKE_PREFIX_PATH="$HDF5_DIR" \
+            -DBUILD_SHARED_LIBS=ON \
+            -DNETCDF_ENABLE_HDF5=ON \
+            -DNETCDF_ENABLE_REMOTE_FUNCTIONALITY=OFF \
+            -DNETCDF_ENABLE_NCZARR=OFF \
+            -DNETCDF_ENABLE_LIBXML2=OFF \
+            -DNETCDF_ENABLE_TESTS=OFF \
+            -DNETCDF_BUILD_UTILITIES=OFF \
+            -DHDF5_ROOT="$HDF5_DIR" \
+            -DHDF5_USE_STATIC_LIBRARIES=OFF
+          cmake --build "$RUNNER_TEMP/netcdf-build" --parallel 4
+          cmake --install "$RUNNER_TEMP/netcdf-build"
+          if readelf -d "$netcdf_prefix/lib/libnetcdf.so" | grep -F 'libhdf5_serial'; then
+            echo 'NetCDF must use the bundled HDF5 build' >&2
+            exit 1
+          fi
+          echo "NETCDF_DIR=$netcdf_prefix" >> "$GITHUB_ENV"
+          echo "LD_LIBRARY_PATH=$netcdf_prefix/lib:$SNT3_HDF5_LIB_DIR" >> "$GITHUB_ENV"
+
       - name: Install macOS build dependencies
         if: runner.os == 'macOS'
-        run: brew install hdf5 pkg-config llvm dylibbundler
+        run: brew install hdf5 netcdf pkg-config llvm dylibbundler
 
       - uses: msys2/setup-msys2@v2
         if: runner.os == 'Windows'
@@ -128,6 +163,7 @@ jobs:
           install: >-
             mingw-w64-ucrt-x86_64-toolchain
             mingw-w64-ucrt-x86_64-hdf5
+            mingw-w64-ucrt-x86_64-netcdf
             mingw-w64-ucrt-x86_64-cmake
             mingw-w64-ucrt-x86_64-ninja
             mingw-w64-ucrt-x86_64-clang
@@ -183,9 +219,10 @@ jobs:
           printf '# Local settings overrides\n' > bundle/settings/overrides.dip
           cp README.md LICENSE bundle/
           cp "$RUNNER_TEMP/hdf5-1.10.11/COPYING" bundle/lib/HDF5-LICENSE
-          # Resolve the custom HDF5 build before copying it and its compression helpers.
-          LD_LIBRARY_PATH="$SNT3_HDF5_LIB_DIR${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" ldd bundle/h5jive \
-            | awk '/=> \/.*lib(hdf5[^.]*|sz|aec|z)\.so/ {print $3}' | while read -r library; do
+          cp "$RUNNER_TEMP/netcdf-c-4.9.3/COPYRIGHT" bundle/lib/NetCDF-LICENSE
+          # Copy NetCDF, HDF5, and their compression dependencies from the release build.
+          ldd bundle/h5jive \
+            | awk '/=> \/.*lib(netcdf|hdf5[^.]*|sz|aec|z)\.so/ {print $3}' | while read -r library; do
             cp -L "$library" bundle/lib/
           done
           patchelf --set-rpath '$ORIGIN/lib' bundle/h5jive
@@ -193,6 +230,7 @@ jobs:
             [ -e "$library" ] && patchelf --set-rpath '$ORIGIN' "$library"
           done
           ldd bundle/h5jive | awk '/libhdf5/ && !/bundle\/lib/ {print "HDF5 library is not bundled: " $0 > "/dev/stderr"; exit 1}'
+          ldd bundle/h5jive | awk '/libnetcdf/ && !/bundle\/lib/ {print "NetCDF library is not bundled: " $0 > "/dev/stderr"; exit 1}'
           if readelf -d bundle/lib/libhdf5.so* | grep -F 'libcurl.so'; then
             echo 'Linux release must not require a host libcurl for HDF5' >&2
             exit 1
@@ -250,7 +288,7 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          $version = (Select-String -Path crates/h5jive/Cargo.toml -Pattern '^version = "([^"]+)"' | Select-Object -First 1).Matches.Groups[1].Value
+          $version = (Select-String -Path Cargo.toml -Pattern '^version = "([^"]+)"' | Select-Object -First 1).Matches.Groups[1].Value
           $env:H5JIVE_VERSION = $version
           & 'C:\Program Files (x86)\Inno Setup 6\ISCC.exe' '.github\scripts\h5jive.iss'
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

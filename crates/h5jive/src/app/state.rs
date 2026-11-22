@@ -15,24 +15,6 @@ pub(super) fn poll_job<T>(receiver: &Receiver<T>) -> JobPoll<T> {
     }
 }
 
-pub(super) fn finish_result_job<T>(
-    job: &mut Option<Receiver<Result<T, String>>>,
-    cache: &mut Option<Result<T, String>>,
-    stopped_message: &'static str,
-) {
-    match job.as_ref().map(poll_job) {
-        Some(JobPoll::Ready(result)) => {
-            *cache = Some(result);
-            *job = None;
-        }
-        Some(JobPoll::Disconnected) => {
-            *cache = Some(Err(stopped_message.into()));
-            *job = None;
-        }
-        Some(JobPoll::Pending) | None => {}
-    }
-}
-
 pub(super) fn finish_keyed_result_job<K: Clone, T>(
     job: &mut Option<(K, Receiver<Result<T, String>>)>,
     cache: &mut Option<(K, Result<T, String>)>,

@@ -1,16 +1,5 @@
 use super::*;
-use std::sync::{
-    atomic::{AtomicU64, Ordering},
-    mpsc, Arc,
-};
-use std::thread;
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-struct DatasetChoice {
-    file: usize,
-    path: String,
-    shape: Vec<usize>,
-}
+use std::sync::Arc;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 enum Operation {
@@ -90,8 +79,7 @@ pub(super) struct State {
     operation: Operation,
     visibility: ValueVisibility,
     preview: Option<(PreviewKey, Result<Preview, String>)>,
-    job: Option<(PreviewKey, mpsc::Receiver<Result<Preview, String>>)>,
-    generation: Arc<AtomicU64>,
+    job: BackgroundJob<PreviewKey, Preview>,
     needs_redraw: bool,
 }
 
@@ -107,14 +95,13 @@ impl State {
     }
 
     fn invalidate_preview(&mut self) {
-        self.generation.fetch_add(1, Ordering::Relaxed);
+        self.job.cancel();
         self.preview = None;
-        self.job = None;
         self.needs_redraw = true;
     }
 
     pub fn is_busy(&self) -> bool {
-        self.job.is_some()
+        self.job.is_busy()
     }
 
     pub fn take_redraw(&mut self) -> bool {
@@ -122,18 +109,13 @@ impl State {
     }
 
     pub fn poll(&mut self) {
-        let Some((key, receiver)) = &self.job else {
+        let Some((key, result)) = self
+            .job
+            .poll("Value comparison worker stopped unexpectedly")
+        else {
             return;
         };
-        let result = match receiver.try_recv() {
-            Ok(result) => result,
-            Err(mpsc::TryRecvError::Empty) => return,
-            Err(mpsc::TryRecvError::Disconnected) => {
-                Err("Value comparison worker stopped unexpectedly".into())
-            }
-        };
-        self.preview = Some((key.clone(), result));
-        self.job = None;
+        self.preview = Some((key, result));
         self.needs_redraw = true;
     }
 
@@ -145,62 +127,11 @@ impl State {
             return;
         };
         let (left_path, right_path) = (left_path.clone(), right_path.clone());
-        let generation = Arc::clone(&self.generation);
-        let expected = generation.load(Ordering::Relaxed);
         let worker_key = key.clone();
-        let (sender, receiver) = mpsc::channel();
-        thread::spawn(move || {
-            let cancelled = || generation.load(Ordering::Relaxed) != expected;
-            let result = load_preview(&left_path, &right_path, &worker_key, &cancelled);
-            if !cancelled() {
-                let _ = sender.send(result);
-            }
+        self.job.start(key, move |cancelled| {
+            load_preview(&left_path, &right_path, &worker_key, cancelled)
         });
-        self.job = Some((key, receiver));
     }
-}
-
-fn collect_choices(files: &[File]) -> Vec<DatasetChoice> {
-    fn visit(file: usize, entry: &Entry, choices: &mut Vec<DatasetChoice>) {
-        if let Kind::Dataset {
-            shape,
-            numeric: true,
-        } = &entry.kind
-        {
-            if shape.len() >= 2 && shape.iter().all(|&length| length > 0) {
-                choices.push(DatasetChoice {
-                    file,
-                    path: entry.path.clone(),
-                    shape: shape.clone(),
-                });
-            }
-        }
-        for child in &entry.children {
-            visit(file, child, choices);
-        }
-    }
-    let mut choices = Vec::new();
-    for (file, source) in files.iter().take(2).enumerate() {
-        visit(file, &source.tree, &mut choices);
-    }
-    choices.sort_by(|a, b| (a.file, &a.path).cmp(&(b.file, &b.path)));
-    choices
-}
-
-fn compatible<'a>(choices: &'a [DatasetChoice], first: &DatasetChoice) -> Vec<&'a DatasetChoice> {
-    let mut matches = choices
-        .iter()
-        .filter(|choice| choice.shape == first.shape)
-        .collect::<Vec<_>>();
-    matches.sort_by_key(|choice| {
-        (
-            choice.path != first.path,
-            choice.file == first.file,
-            choice.file,
-            &choice.path,
-        )
-    });
-    matches
 }
 
 fn default_pair(
@@ -229,7 +160,7 @@ fn default_pair(
     let Some(left) = state.left.clone() else {
         return;
     };
-    let candidates = compatible(choices, &left);
+    let candidates = compatible_datasets(choices, &left);
     if state
         .right
         .as_ref()
@@ -429,79 +360,6 @@ pub(super) fn draw_icon(draw: &DrawListMut<'_>, min: [f32; 2], max: [f32; 2], co
         .build();
 }
 
-fn picker(
-    ui: &Ui,
-    id: &str,
-    title: &str,
-    choices: &[&DatasetChoice],
-    selected: Option<&DatasetChoice>,
-    search: &mut String,
-) -> Option<DatasetChoice> {
-    ui.text(title);
-    let preview = selected.map_or_else(
-        || "Select a dataset".to_owned(),
-        |choice| {
-            format!(
-                "{} · {}  {:?}",
-                if choice.file == 0 { "A" } else { "B" },
-                choice.path,
-                choice.shape
-            )
-        },
-    );
-    ui.set_next_item_width(ui.content_region_avail()[0].max(1.0));
-    let mut picked = None;
-    let combo = ui.begin_combo(format!("##dataset_select_{id}"), &preview);
-    if ui.is_item_hovered() {
-        item_plain_tip(ui, &preview);
-    }
-    if let Some(_combo) = combo {
-        ui.set_next_item_width(ui.content_region_avail()[0].max(1.0));
-        ui.input_text(format!("Search##{id}"), search).build();
-        let query = search.trim().to_lowercase();
-        let visible = choices
-            .iter()
-            .filter(|choice| {
-                query.is_empty()
-                    || choice.path.to_lowercase().contains(&query)
-                    || (if choice.file == 0 { "a" } else { "b" }).contains(&query)
-            })
-            .copied()
-            .collect::<Vec<_>>();
-        ui.text_disabled(format!("{} compatible datasets", visible.len()));
-        ui.child_window(format!("options##{id}"))
-            .size([0.0, 220.0])
-            .build(ui, || {
-                if visible.is_empty() {
-                    ui.text_disabled("No datasets match this search.");
-                }
-                let mut clipper = ListClipper::new(visible.len()).begin(ui);
-                while clipper.step() {
-                    for index in clipper.display_start()..clipper.display_end() {
-                        let choice = visible[index];
-                        let file = if choice.file == 0 { "A" } else { "B" };
-                        let label =
-                            format!("{file} · {}  {:?}##{id}_{index}", choice.path, choice.shape);
-                        if ui
-                            .selectable_config(label)
-                            .selected(selected == Some(choice))
-                            .build()
-                        {
-                            picked = Some(choice.clone());
-                        }
-                        if ui.is_item_hovered() {
-                            item_plain_tip(
-                                ui,
-                                &format!("File {file}: {}\nShape {:?}", choice.path, choice.shape),
-                            );
-                        }
-                    }
-                }
-            });
-    }
-    picked
-}
-
 fn draw_preview(
     ui: &Ui,
     plot_ui: &PlotUi<'_>,
@@ -597,7 +455,7 @@ fn draw_preview(
                         XAxis::X1,
                         YAxis::Y1,
                     );
-                    draw.add_rect(first, last, color).filled(true).build();
+                    cover_heatmap_cell(&draw, first, last, color);
                 }
             }
         }
@@ -654,7 +512,7 @@ pub(super) fn draw(
     let choices = Arc::clone(
         state
             .choices
-            .get_or_insert_with(|| Arc::new(collect_choices(context.files))),
+            .get_or_insert_with(|| Arc::new(numeric_datasets(context.files, 2))),
     );
     if choices.is_empty() {
         ui.text_wrapped("Load a file with a numeric dataset of at least two dimensions.");
@@ -675,13 +533,14 @@ pub(super) fn draw(
         .size([left_width, 0.0])
         .child_flags(ChildFlags::AUTO_RESIZE_Y | ChildFlags::ALWAYS_AUTO_RESIZE)
         .build(ui, || {
-            let new_left = picker(
+            let new_left = dataset_choice_picker(
                 ui,
                 "left",
                 "Left dataset · A or B",
                 &all,
                 state.left.as_ref(),
                 &mut state.left_search,
+                context.settings.tutorial_tips,
             );
             if let Some(left) = new_left {
                 state.left = Some(left);
@@ -697,14 +556,15 @@ pub(super) fn draw(
                 );
             }
             let left = state.left.as_ref().unwrap();
-            let candidates = compatible(&choices, left);
-            let new_right = picker(
+            let candidates = compatible_datasets(&choices, left);
+            let new_right = dataset_choice_picker(
                 ui,
                 "right",
                 "Right dataset · matching shape",
                 &candidates,
                 state.right.as_ref(),
                 &mut state.right_search,
+                context.settings.tutorial_tips,
             );
             if let Some(right) = new_right {
                 state.right = Some(right);
@@ -825,10 +685,7 @@ pub(super) fn draw(
         .preview
         .as_ref()
         .is_none_or(|(cached, _)| cached != &key)
-        && state
-            .job
-            .as_ref()
-            .is_none_or(|(running, _)| running != &key)
+        && state.job.key().is_none_or(|running| running != &key)
     {
         state.invalidate_preview();
         state.start(context.file_paths, key.clone());
@@ -886,12 +743,12 @@ mod tests {
     #[test]
     fn matching_picker_offers_cross_file_and_same_file_pairs_only() {
         let (_, files) = demos();
-        let choices = collect_choices(&files);
+        let choices = numeric_datasets(&files, 2);
         let first = choices
             .iter()
             .find(|choice| choice.file == 0 && choice.path == "/field/plane")
             .unwrap();
-        let matching = compatible(&choices, first);
+        let matching = compatible_datasets(&choices, first);
         assert!(matching
             .iter()
             .any(|choice| choice.file == 1 && choice.path == "/field/plane"));
@@ -905,7 +762,7 @@ mod tests {
             .iter()
             .find(|choice| choice.file == 0 && choice.path == "/field/other_shape")
             .unwrap();
-        assert!(!compatible(&choices, other)
+        assert!(!compatible_datasets(&choices, other)
             .iter()
             .any(|choice| choice.file == 1 && choice.path == "/field/other_shape"));
     }
@@ -913,7 +770,7 @@ mod tests {
     #[test]
     fn demo_preview_compares_same_positions_and_pinned_planes() {
         let (paths, files) = demos();
-        let choices = collect_choices(&files);
+        let choices = numeric_datasets(&files, 2);
         let pick = |file, path| {
             choices
                 .iter()
@@ -1026,7 +883,7 @@ mod tests {
     #[test]
     fn plugin_heatmap_renders_with_its_own_state() {
         let (paths, mut files) = demos();
-        let choices = collect_choices(&files);
+        let choices = numeric_datasets(&files, 2);
         let left = choices
             .iter()
             .find(|choice| choice.file == 0 && choice.path == "/field/plane")

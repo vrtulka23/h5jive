@@ -21,9 +21,9 @@ impl App {
     pub(super) fn clear_selection_details(&mut self) {
         self.details_default_pending = true;
         self.statistics_cache = None;
-        self.statistics_job = None;
+        self.statistics_job.cancel();
         self.distribution_cache = None;
-        self.distribution_job = None;
+        self.distribution_job.cancel();
         self.attributes_cache = None;
         self.coordinates_cache = None;
         self.coordinate_value_cache.clear();

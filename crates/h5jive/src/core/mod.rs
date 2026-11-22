@@ -2,7 +2,9 @@
 use h5jive_data::{AttributeValue, File, Geolocation, OpenOptions, Region, ScanDirectionClass};
 
 mod data_toolkit;
+mod dataset_catalog;
 mod dataset_index;
+mod geographic_projection;
 mod geospatial;
 mod heatmap;
 mod map_plane_cache;
@@ -16,7 +18,9 @@ mod value_visibility;
 mod volume;
 
 pub(crate) use data_toolkit::*;
+pub(crate) use dataset_catalog::*;
 pub(crate) use dataset_index::*;
+pub(crate) use geographic_projection::*;
 pub(crate) use geospatial::*;
 pub(crate) use heatmap::*;
 pub(crate) use map_plane_cache::*;

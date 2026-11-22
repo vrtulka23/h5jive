@@ -428,24 +428,21 @@ impl App {
     }
 
     pub(super) fn poll_statistics(&mut self, selection: &Selection) {
-        finish_result_job(
-            &mut self.statistics_job,
-            &mut self.statistics_cache,
-            "Statistics worker stopped",
-        );
-        if self.statistics_cache.is_none() && self.statistics_job.is_none() {
+        if let Some((key, result)) = self.statistics_job.poll("Statistics worker stopped") {
+            if &key == selection {
+                self.statistics_cache = Some(result);
+            }
+        }
+        if self.statistics_cache.is_none() && !self.statistics_job.is_busy() {
             let file_path = self.file_paths[selection.file].clone();
             let dataset_path = selection.path.clone();
             let sample_limit = self.settings.statistics_sample_values;
-            let (sender, receiver) = mpsc::channel();
-            thread::spawn(move || {
-                let result = open_dataset_reader(&file_path).and_then(|file| {
+            self.statistics_job.start(selection.clone(), move |_| {
+                open_dataset_reader(&file_path).and_then(|file| {
                     file.statistics(&dataset_path, sample_limit)
                         .map_err(|err| err.to_string())
-                });
-                let _ = sender.send(result);
+                })
             });
-            self.statistics_job = Some(receiver);
         }
     }
 
@@ -454,25 +451,22 @@ impl App {
         selection: &Selection,
         statistics: &DatasetStatistics,
     ) {
-        finish_result_job(
-            &mut self.distribution_job,
-            &mut self.distribution_cache,
-            "Distribution worker stopped",
-        );
-        if self.distribution_cache.is_none() && self.distribution_job.is_none() {
+        if let Some((key, result)) = self.distribution_job.poll("Distribution worker stopped") {
+            if &key == selection {
+                self.distribution_cache = Some(result);
+            }
+        }
+        if self.distribution_cache.is_none() && !self.distribution_job.is_busy() {
             let file_path = self.file_paths[selection.file].clone();
             let dataset_path = selection.path.clone();
             let statistics = statistics.clone();
             let bin_count = self.settings.histogram_bins;
-            let (sender, receiver) = mpsc::channel();
-            thread::spawn(move || {
-                let result = open_dataset_reader(&file_path).and_then(|file| {
+            self.distribution_job.start(selection.clone(), move |_| {
+                open_dataset_reader(&file_path).and_then(|file| {
                     file.distribution(&dataset_path, &statistics, bin_count)
                         .map_err(|err| err.to_string())
-                });
-                let _ = sender.send(result);
+                })
             });
-            self.distribution_job = Some(receiver);
         }
     }
 

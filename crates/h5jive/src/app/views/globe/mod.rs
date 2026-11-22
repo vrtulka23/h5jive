@@ -2,11 +2,7 @@ use super::super::*;
 use super::world_map::geospatial_point_budget;
 use super::{coastlines, draw_geo_controls, observation_color, pixel_hover_distance};
 
-#[derive(Clone, Copy)]
-struct Projected {
-    point: [f32; 2],
-    depth: f32,
-}
+type Projected = GlobePoint;
 
 #[derive(Clone, Copy)]
 struct TextureVertex {
@@ -85,23 +81,13 @@ fn draw_visible_texture_patch(
 }
 
 fn project(lon: f32, lat: f32, center: [f32; 2], radius: f32, yaw: f32, pitch: f32) -> Projected {
-    let lon = lon.to_radians();
-    let lat = lat.to_radians();
-    let (sl, cl) = (lon.sin(), lon.cos());
-    let (sp, cp) = (lat.sin(), lat.cos());
-    let x = cp * sl;
-    let y = sp;
-    let z = cp * cl;
-    let (sy, cy) = yaw.sin_cos();
-    let (sx, cx) = pitch.sin_cos();
-    let x = cy * x + sy * z;
-    let z = -sy * (cp * sl) + cy * z;
-    let y2 = cx * y - sx * z;
-    let z2 = sx * y + cx * z;
-    Projected {
-        point: [center[0] + x * radius, center[1] - y2 * radius],
-        depth: z2,
+    GlobeProjection {
+        center,
+        radius,
+        yaw,
+        pitch,
     }
+    .project(lon, lat)
 }
 
 const AUTO_CENTER_DURATION: Duration = Duration::from_millis(500);

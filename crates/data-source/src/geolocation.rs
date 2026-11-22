@@ -10,6 +10,122 @@ pub struct Geolocation {
     pub scan_direction: Option<ScanDirection>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CoordinateRole {
+    Latitude,
+    Longitude,
+}
+
+#[derive(Debug, Clone)]
+pub struct CoordinateCandidate {
+    pub path: String,
+    pub role: CoordinateRole,
+    pub shape: Vec<usize>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GeographicAxes {
+    pub latitude: String,
+    pub longitude: String,
+    pub regular_grid: bool,
+}
+
+/// Classify a coordinate using CF metadata and common variable names.
+pub fn geographic_coordinate_role(
+    name: &str,
+    standard_name: &str,
+    units: &str,
+) -> Option<CoordinateRole> {
+    let basename = name.rsplit('/').next().unwrap_or(name).to_ascii_lowercase();
+    let standard_name = standard_name.to_ascii_lowercase();
+    let units = units.to_ascii_lowercase();
+    if matches!(basename.as_str(), "lat" | "latitude" | "nav_lat")
+        || basename.contains("latitude")
+        || standard_name == "latitude"
+        || units.contains("degrees_north")
+    {
+        Some(CoordinateRole::Latitude)
+    } else if matches!(basename.as_str(), "lon" | "longitude" | "nav_lon")
+        || basename.contains("longitude")
+        || standard_name == "longitude"
+        || units.contains("degrees_east")
+    {
+        Some(CoordinateRole::Longitude)
+    } else {
+        None
+    }
+}
+
+/// Match 1D regular axes or 2D swath coordinates to an observation shape.
+pub fn select_geographic_axes(
+    path: &str,
+    shape: &[usize],
+    preferred: Option<(&CoordinateCandidate, &CoordinateCandidate)>,
+    candidates: &[CoordinateCandidate],
+) -> Option<GeographicAxes> {
+    if shape.len() < 2 {
+        return None;
+    }
+    let rows = shape[shape.len() - 2];
+    let columns = shape[shape.len() - 1];
+    let valid = |latitude: &[usize], longitude: &[usize]| {
+        if latitude == [rows] && longitude == [columns] {
+            Some(true)
+        } else if latitude == [rows, columns] && longitude == [rows, columns] {
+            Some(false)
+        } else {
+            None
+        }
+    };
+    let preferred_axes = preferred.and_then(|(latitude, longitude)| {
+        Some(GeographicAxes {
+            latitude: latitude.path.clone(),
+            longitude: longitude.path.clone(),
+            regular_grid: valid(&latitude.shape, &longitude.shape)?,
+        })
+    });
+    if preferred_axes.is_some() {
+        return preferred_axes;
+    }
+    let mut selected: Option<(GeographicAxes, bool)> = None;
+    for latitude in candidates
+        .iter()
+        .filter(|c| c.role == CoordinateRole::Latitude)
+    {
+        for longitude in candidates
+            .iter()
+            .filter(|c| c.role == CoordinateRole::Longitude)
+        {
+            let Some(regular_grid) = valid(&latitude.shape, &longitude.shape) else {
+                continue;
+            };
+            let parent = path.rsplit_once('/').map_or("", |(parent, _)| parent);
+            let in_scope = |coordinate: &str| {
+                if parent.is_empty() {
+                    !coordinate.contains('/')
+                } else {
+                    coordinate.starts_with(&format!("{parent}/"))
+                }
+            };
+            let shared = in_scope(&latitude.path) && in_scope(&longitude.path);
+            if selected
+                .as_ref()
+                .is_none_or(|(_, previous_shared)| shared && !previous_shared)
+            {
+                selected = Some((
+                    GeographicAxes {
+                        latitude: latitude.path.clone(),
+                        longitude: longitude.path.clone(),
+                        regular_grid,
+                    },
+                    shared,
+                ));
+            }
+        }
+    }
+    selected.map(|(axes, _)| axes)
+}
+
 /// One per-pixel variable that distinguishes forward and backward scans.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ScanDirection {
@@ -335,7 +451,6 @@ fn compatible_shape(coordinate: &[usize], values: &[usize]) -> bool {
 }
 
 fn coordinate_role<'a>(name: &str, attributes: &[AttributeValue]) -> Option<&'a str> {
-    let basename = name.rsplit('/').next().unwrap_or(name).to_ascii_lowercase();
     let standard_name = attributes
         .iter()
         .find(|attribute| attribute.name == "standard_name")
@@ -344,30 +459,61 @@ fn coordinate_role<'a>(name: &str, attributes: &[AttributeValue]) -> Option<&'a 
         .iter()
         .find(|attribute| attribute.name == "units")
         .map(|attribute| attribute.value.to_ascii_lowercase());
-    if basename == "lat"
-        || basename.contains("latitude")
-        || standard_name.as_deref() == Some("latitude")
-        || units
-            .as_deref()
-            .is_some_and(|value| value.contains("degrees_north"))
-    {
-        Some("latitude")
-    } else if basename == "lon"
-        || basename.contains("longitude")
-        || standard_name.as_deref() == Some("longitude")
-        || units
-            .as_deref()
-            .is_some_and(|value| value.contains("degrees_east"))
-    {
-        Some("longitude")
-    } else {
-        None
+    match geographic_coordinate_role(
+        name,
+        standard_name.as_deref().unwrap_or(""),
+        units.as_deref().unwrap_or(""),
+    ) {
+        Some(CoordinateRole::Latitude) => Some("latitude"),
+        Some(CoordinateRole::Longitude) => Some("longitude"),
+        None => None,
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn configured_swath_coordinates_win_over_regular_axis_names() {
+        let latitude = CoordinateCandidate {
+            path: "navigation/y".into(),
+            role: CoordinateRole::Latitude,
+            shape: vec![3, 4],
+        };
+        let longitude = CoordinateCandidate {
+            path: "navigation/x".into(),
+            role: CoordinateRole::Longitude,
+            shape: vec![3, 4],
+        };
+        let regular = [
+            CoordinateCandidate {
+                path: "lat".into(),
+                role: CoordinateRole::Latitude,
+                shape: vec![3],
+            },
+            CoordinateCandidate {
+                path: "lon".into(),
+                role: CoordinateRole::Longitude,
+                shape: vec![4],
+            },
+        ];
+        let axes = select_geographic_axes(
+            "observations/temperature",
+            &[3, 4],
+            Some((&latitude, &longitude)),
+            &regular,
+        )
+        .unwrap();
+        assert_eq!(axes.latitude, "navigation/y");
+        assert_eq!(axes.longitude, "navigation/x");
+        assert!(!axes.regular_grid);
+        assert!(
+            select_geographic_axes("temperature", &[3, 4], None, &regular)
+                .unwrap()
+                .regular_grid
+        );
+    }
 
     #[test]
     fn auxiliary_coordinates_may_share_all_axes_or_only_spatial_axes() {

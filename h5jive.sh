@@ -7,6 +7,7 @@ cd "$(dirname "$0")"
 usage() {
   cat <<'EOF'
 Usage: ./h5jive.sh [-b|--build] [-r|--run] [--view-VIEW] [--backtrace|--no-backtrace] [-c|--clean] [FILE_A[:/DATASET] [FILE_B[:/DATASET]]]
+       ./h5jive.sh -t|--test
        ./h5jive.sh --website
 
   -b, --build   Build the release viewer; run it if file paths or --run are supplied
@@ -16,6 +17,7 @@ Usage: ./h5jive.sh [-b|--build] [-r|--run] [--view-VIEW] [--backtrace|--no-backt
   --view-VIEW   Open the selected dataset in a specific view (requires :/DATASET)
                 VIEW: data, 1d-profiles, 2d-slice, 3d, world-map, globe
   -c, --clean   Remove Cargo build output and exit
+  -t, --test    Run all workspace tests serially
   --website     Start the local website preview server (Ctrl+C to stop)
   -h, --help    Show this help
 
@@ -28,6 +30,7 @@ EOF
 build=false
 run=false
 clean=false
+run_tests=false
 website=false
 backtrace_override=
 view_override=
@@ -37,6 +40,7 @@ while (($#)); do
     -b|--build) build=true ;;
     -r|--run) run=true ;;
     -c|--clean) clean=true ;;
+    -t|--test) run_tests=true ;;
     --website) website=true ;;
     --backtrace) backtrace_override=1 ;;
     --no-backtrace) backtrace_override=0 ;;
@@ -53,6 +57,15 @@ while (($#)); do
   esac
   shift
 done
+
+if "$run_tests"; then
+  if "$build" || "$run" || "$clean" || "$website" || [[ -n $backtrace_override || -n $view_override ]] || ((${#files[@]} > 0)); then
+    echo "--test cannot be combined with other options or input files." >&2
+    exit 2
+  fi
+  cargo test --locked --workspace -- --test-threads=1
+  exit 0
+fi
 
 if "$website"; then
   if "$build" || "$run" || "$clean" || [[ -n $backtrace_override || -n $view_override ]] || ((${#files[@]} > 0)); then

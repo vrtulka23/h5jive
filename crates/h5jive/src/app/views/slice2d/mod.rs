@@ -112,7 +112,7 @@ fn draw_native_heatmap_tile(
             } else {
                 palette.background
             };
-            draw.add_rect(first, last, color).filled(true).build();
+            cover_heatmap_cell(&draw, first, last, color);
         }
     }
 }
@@ -605,7 +605,7 @@ impl App {
                                 } else {
                                     self.settings.palette.background
                                 };
-                                draw.add_rect(first, last, color).filled(true).build();
+                                cover_heatmap_cell(&draw, first, last, color);
                             }
                         }
                     }

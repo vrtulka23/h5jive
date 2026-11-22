@@ -22,6 +22,23 @@ state. Share stateless data and drawing helpers when behavior overlaps.
    and cache the result; invalidate it when A or B changes. Return a
    `Selection` from the plugin to open a dataset in the Data inspector, where
    the core visualization views remain available.
+   For numeric A/B choices, use `core::numeric_datasets` and
+   `core::compatible_datasets`, then `app::dataset_choice_picker`. Filter the
+   shared catalog for a plugin's required rank or shape instead of walking
+   each file tree and rebuilding a searchable picker.
+   Use `app::BackgroundJob` for keyed worker tasks: start them outside the
+   frame loop, poll results during frames, and cancel stale previews when
+   selection or input changes. Keep write jobs alive until they finish.
+   For map or globe previews, use `core::MapViewport`,
+   `core::GlobeProjection`, and `core::coverage_cells` for geographic geometry.
+   Use `h5jive-data` geolocation discovery and `select_geographic_axes` for
+   coordinate matching; do not add another set of latitude/longitude name
+   and shape rules in a plugin.
+   For file mutations, use `h5jive-data::WritableFile`,
+   `StagedOutput`, `dataset_path_parts`, and `copy_hdf5_object` for write
+   admission, temporary outputs, HDF5 object paths, and object copies. Keep
+   format-specific operations in
+   `h5jive-data`, then call them from a plugin worker.
 3. Add a central `<plugin>_enabled bool` switch in `settings/runtime/plugins.dip` and
    its declaration in `settings/runtime/schemas/viewer.dip`. Put plugin-specific
    options in `settings/runtime/plugins/<plugin>.dip` with a matching schema under
