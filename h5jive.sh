@@ -8,6 +8,7 @@ usage() {
   cat <<'EOF'
 Usage: ./h5jive.sh [-b|--build] [-r|--run] [--view-VIEW] [--backtrace|--no-backtrace] [-c|--clean] [FILE_A[:/DATASET] [FILE_B[:/DATASET]]]
        ./h5jive.sh -t|--test
+       ./h5jive.sh -v|--version
        ./h5jive.sh --website
 
   -b, --build   Build the release viewer; run it if file paths or --run are supplied
@@ -18,6 +19,7 @@ Usage: ./h5jive.sh [-b|--build] [-r|--run] [--view-VIEW] [--backtrace|--no-backt
                 VIEW: data, 1d-profiles, 2d-slice, 3d, world-map, globe
   -c, --clean   Remove Cargo build output and exit
   -t, --test    Run all workspace tests serially
+  -v, --version Show the workspace version
   --website     Start the local website preview server (Ctrl+C to stop)
   -h, --help    Show this help
 
@@ -31,6 +33,7 @@ build=false
 run=false
 clean=false
 run_tests=false
+show_version=false
 website=false
 backtrace_override=
 view_override=
@@ -41,6 +44,7 @@ while (($#)); do
     -r|--run) run=true ;;
     -c|--clean) clean=true ;;
     -t|--test) run_tests=true ;;
+    -v|--version) show_version=true ;;
     --website) website=true ;;
     --backtrace) backtrace_override=1 ;;
     --no-backtrace) backtrace_override=0 ;;
@@ -57,6 +61,20 @@ while (($#)); do
   esac
   shift
 done
+
+if "$show_version"; then
+  if "$build" || "$run" || "$clean" || "$run_tests" || "$website" || [[ -n $backtrace_override || -n $view_override ]] || ((${#files[@]} > 0)); then
+    echo "--version cannot be combined with other options or input files." >&2
+    exit 2
+  fi
+  workspace_version=$(awk -F '"' '/^version = "/ { print $2; exit }' Cargo.toml)
+  if [[ -z $workspace_version ]]; then
+    echo "Workspace version was not found in Cargo.toml." >&2
+    exit 1
+  fi
+  echo "H5Jive v$workspace_version"
+  exit 0
+fi
 
 if "$run_tests"; then
   if "$build" || "$run" || "$clean" || "$website" || [[ -n $backtrace_override || -n $view_override ]] || ((${#files[@]} > 0)); then
