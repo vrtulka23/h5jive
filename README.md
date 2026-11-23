@@ -183,9 +183,7 @@ The guide is built with mdBook; see [docs/README.md](docs/README.md). The
 GitHub release or running the [native release workflow](.github/workflows/native-release.yml)
 for an existing tag creates the platform archives and checksum manifest.
 
-The optional Blue Marble map background is credited to
-[NASA Earth Observatory](https://science.nasa.gov/earth/earth-observatory/blue-marble-next-generation/).
-The default Natural Earth map background uses
+The Natural Earth map background uses
 [public-domain Natural Earth data](https://www.naturalearthdata.com/about/terms-of-use/).
 
 ### Screenshot credit

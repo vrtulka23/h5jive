@@ -420,11 +420,7 @@ impl App {
         let view = self.map_viewport;
         let draw = ui.get_window_draw_list();
         let palette = &self.settings.palette;
-        let ocean = if self.settings.map_background == "ocean" {
-            mix_color(palette.panel, palette.heatmap_low, 0.12)
-        } else {
-            palette.panel
-        };
+        let ocean = palette.panel;
         draw.add_rect(
             cursor,
             [cursor[0] + map_area[0], cursor[1] + map_area[1]],
@@ -437,7 +433,7 @@ impl App {
             [cursor[0] + map_area[0], cursor[1] + map_area[1]],
             true,
         );
-        if let Some(texture) = self.earth_texture_id(&self.settings.map_background) {
+        if let Some(texture) = self.earth_texture_id() {
             // Transform the whole image with the map. As zoom grows it can
             // expand into the padded canvas, which is clipped before controls.
             draw.add_image(

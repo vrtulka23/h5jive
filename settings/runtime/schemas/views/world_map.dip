@@ -1,10 +1,4 @@
 ?descr "Flat geospatial map rendering and navigation."
-background str = "natural_earth"
-  ?descr "Earth image or palette style behind the geolocated observations."
-  !options ["natural_earth", "blue_marble", "ocean", "plain"]
-  !labels ["Natural Earth II map", "NASA Blue Marble with bathymetry", "Ocean tint", "Theme panel"]
-  !condition ({.} == "natural_earth" || {.} == "blue_marble" || {.} == "ocean" || {.} == "plain")
-  !setup
 max_zoom float = 1024.0
   ?descr "Maximum flat map magnification relative to the world view."
   !condition ({.} >= 2 && {.} <= 4096)

@@ -5,11 +5,6 @@ const NATURAL_EARTH_TEXTURE_BMP: &[u8] = include_bytes!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/../../assets/earth_natural_earth_2_relief_water_4096.bmp"
 ));
-const BLUE_MARBLE_TEXTURE_BMP: &[u8] = include_bytes!(concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/../../assets/earth_blue_marble_topo_bathy_4096.bmp"
-));
-
 struct RegisteredEarthTexture {
     _texture: wgpu::Texture,
     _view: wgpu::TextureView,
@@ -18,8 +13,7 @@ struct RegisteredEarthTexture {
 }
 
 pub(super) struct EarthTexture {
-    natural_earth: Option<RegisteredEarthTexture>,
-    blue_marble: Option<RegisteredEarthTexture>,
+    texture: Option<RegisteredEarthTexture>,
     generation: GpuGeneration,
 }
 
@@ -34,27 +28,18 @@ impl App {
         }
         self.earth_texture = None;
         self.earth_texture = Some(EarthTexture {
-            natural_earth: upload_earth_texture(
+            texture: upload_earth_texture(
                 gpu,
                 NATURAL_EARTH_TEXTURE_BMP,
                 "Natural Earth II shaded relief and water",
-            ),
-            blue_marble: upload_earth_texture(
-                gpu,
-                BLUE_MARBLE_TEXTURE_BMP,
-                "NASA Blue Marble topography and bathymetry",
             ),
             generation: gpu.generation(),
         });
     }
 
-    pub(super) fn earth_texture_id(&self, background: &str) -> Option<dear_app::imgui::TextureId> {
+    pub(super) fn earth_texture_id(&self) -> Option<dear_app::imgui::TextureId> {
         let earth = self.earth_texture.as_ref()?;
-        let texture = match background {
-            "natural_earth" => earth.natural_earth.as_ref(),
-            "blue_marble" => earth.blue_marble.as_ref(),
-            _ => None,
-        }?;
+        let texture = earth.texture.as_ref()?;
         let _registration_keeps_view_alive = texture.handle;
         Some(texture.id)
     }

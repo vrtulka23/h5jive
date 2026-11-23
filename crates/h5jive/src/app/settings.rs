@@ -513,8 +513,6 @@ pub(super) struct Settings {
     pub(super) map_max_points: usize,
     pub(super) map_zoom_detail_factor: f32,
     pub(super) map_point_radius: f32,
-    pub(super) map_background: String,
-    pub(super) globe_background: String,
     pub(super) map_show_pics: bool,
     pub(super) map_pinned_default: PinnedDefault,
     pub(super) globe_pinned_default: PinnedDefault,
@@ -704,8 +702,6 @@ impl Settings {
             map_max_points: values.count("views.world_map.max_points")?,
             map_zoom_detail_factor: values.fraction("views.world_map.zoom_detail_factor")?,
             map_point_radius: values.fraction("views.world_map.point_radius")?,
-            map_background: values.string("views.world_map.background")?,
-            globe_background: values.string("views.globe.background")?,
             map_show_pics: values.boolean("views.world_map.show_pics")?,
             map_pinned_default: PinnedDefault::from_key(
                 &values.string("views.world_map.pinned_default")?,

@@ -176,24 +176,55 @@ fn selected_variables(state: &State) -> Vec<SubsetVariable> {
         .filter_map(|(v, &enabled)| enabled.then_some(v.clone()))
         .collect()
 }
-fn editable_bounds(ui: &Ui, state: &mut State) {
+fn editable_bounds(ui: &Ui, state: &mut State, tutorial_tips: bool) {
     ui.text("Spatial bounds (degrees)");
     if let Some(_table) = ui.begin_table("subset_bounds", 4) {
-        for label in ["West", "South", "East", "North"] {
+        for label in ["W", "S", "E", "N"] {
             ui.table_setup_column_stretch_weight(label, TableColumnFlags::NONE, 1.0);
         }
-        ui.table_headers_row();
         ui.table_next_row();
-        for (label, field) in [
-            ("west", &mut state.west),
-            ("south", &mut state.south),
-            ("east", &mut state.east),
-            ("north", &mut state.north),
+        for (short, label, field) in [
+            ("W", "West longitude", &mut state.west),
+            ("S", "South latitude", &mut state.south),
+            ("E", "East longitude", &mut state.east),
+            ("N", "North latitude", &mut state.north),
         ] {
             ui.table_next_column();
+            ui.text(short);
+            ui.same_line();
             ui.set_next_item_width(ui.content_region_avail()[0].max(1.0));
-            ui.input_text(format!("##subset_{label}"), field).build();
+            ui.input_text(format!("##subset_{short}"), field).build();
+            item_tip(
+                ui,
+                tutorial_tips,
+                &format!("{label} in degrees."),
+                &format!("Set the {label} of the geographic area to export."),
+            );
         }
+    }
+}
+fn range_inputs(
+    ui: &Ui,
+    table_id: &str,
+    from_id: &str,
+    through_id: &str,
+    from: &mut String,
+    through: &mut String,
+) {
+    if let Some(_table) = ui.begin_table(table_id, 2) {
+        ui.table_setup_column_stretch_weight("From", TableColumnFlags::NONE, 1.0);
+        ui.table_setup_column_stretch_weight("Through", TableColumnFlags::NONE, 1.0);
+        ui.table_next_row();
+        ui.table_next_column();
+        ui.text("From");
+        ui.same_line();
+        ui.set_next_item_width(ui.content_region_avail()[0].max(1.0));
+        ui.input_text(from_id, from).build();
+        ui.table_next_column();
+        ui.text("Through");
+        ui.same_line();
+        ui.set_next_item_width(ui.content_region_avail()[0].max(1.0));
+        ui.input_text(through_id, through).build();
     }
 }
 fn draw_map(ui: &Ui, state: &mut State, settings: &Settings) {
@@ -360,6 +391,7 @@ pub(super) fn draw(lab: &mut PluginLab, ui: &Ui, context: PluginContext<'_>) -> 
         ui.table_setup_column_stretch_weight("Variables", TableColumnFlags::NONE, 1.0);
         ui.table_next_row();
         ui.table_next_column();
+        let left_top = ui.cursor_screen_pos()[1];
         ui.text("Dataset source");
         ui.set_next_item_width(ui.content_region_avail()[0].max(1.0));
         if ui.combo_simple_string("##subset_source", &mut state.source, &labels) {
@@ -382,34 +414,36 @@ pub(super) fn draw(lab: &mut PluginLab, ui: &Ui, context: PluginContext<'_>) -> 
             ));
         }
         let available = &state.available.as_ref().unwrap().2;
-        ui.text("Date range (YYYY-MM-DD)");
+        ui.text("Dates (YYYY-MM-DD)");
+        ui.same_line();
         if let Some((first, last)) = &available.dates {
-            ui.text_disabled(format!("Available: {first} to {last}"));
+            ui.text_disabled(format!("{first} to {last}"));
         } else {
-            ui.text_disabled("No indexed dates available");
+            ui.text_disabled("No indexed dates");
         }
-        ui.text("From");
-        ui.set_next_item_width(ui.content_region_avail()[0].max(1.0));
-        ui.input_text("##subset_date_from", &mut state.from_date)
-            .build();
-        ui.text("Through");
-        ui.set_next_item_width(ui.content_region_avail()[0].max(1.0));
-        ui.input_text("##subset_date_through", &mut state.through_date)
-            .build();
-        ui.text("Orbit range");
+        range_inputs(
+            ui,
+            "subset_date_inputs",
+            "##subset_date_from",
+            "##subset_date_through",
+            &mut state.from_date,
+            &mut state.through_date,
+        );
+        ui.text("Orbits");
+        ui.same_line();
         if let Some((first, last)) = &available.orbits {
-            ui.text_disabled(format!("Available: {first} to {last}"));
+            ui.text_disabled(format!("{first} to {last}"));
         } else {
-            ui.text_disabled("No indexed orbits available");
+            ui.text_disabled("No indexed orbits");
         }
-        ui.text("From");
-        ui.set_next_item_width(ui.content_region_avail()[0].max(1.0));
-        ui.input_text("##subset_orbit_from", &mut state.from_orbit)
-            .build();
-        ui.text("Through");
-        ui.set_next_item_width(ui.content_region_avail()[0].max(1.0));
-        ui.input_text("##subset_orbit_through", &mut state.through_orbit)
-            .build();
+        range_inputs(
+            ui,
+            "subset_orbit_inputs",
+            "##subset_orbit_from",
+            "##subset_orbit_through",
+            &mut state.from_orbit,
+            &mut state.through_orbit,
+        );
         let products = selected_products(&context, state);
         ui.text(format!("{} indexed products selected", products.len()));
         if let Some(first) = products.first() {
@@ -425,16 +459,22 @@ pub(super) fn draw(lab: &mut PluginLab, ui: &Ui, context: PluginContext<'_>) -> 
                 });
             }
         }
+        editable_bounds(ui, state, context.settings.tutorial_tips);
+        let left_height = ui.cursor_screen_pos()[1] - left_top;
         ui.table_next_column();
+        let right_top = ui.cursor_screen_pos()[1];
         ui.text("Variables");
-        if state.inspection.is_busy() {
-            ui.text("Inspecting representative product...");
-        } else if state.variables.is_empty() {
-            ui.text_wrapped("No supported geographic numeric fields found. This first version accepts NetCDF regular grids and 2D swaths with identifiable latitude and longitude coordinates.");
-        } else {
-            ui.child_window("subset_variable_list")
-                .size([0.0, 230.0])
-                .build(ui, || {
+        ui.separator();
+        let header_height = ui.cursor_screen_pos()[1] - right_top;
+        ui.child_window("subset_variable_panel")
+            .size([0.0, (left_height - header_height).max(230.0)])
+            .flags(WindowFlags::HORIZONTAL_SCROLLBAR)
+            .build(ui, || {
+                if state.inspection.is_busy() {
+                    ui.text("Inspecting representative product...");
+                } else if state.variables.is_empty() {
+                    ui.text_wrapped("No supported geographic numeric fields found. This first version accepts NetCDF regular grids and 2D swaths with identifiable latitude and longitude coordinates.");
+                } else {
                     let mut clipper = ListClipper::new(state.variables.len()).begin(ui);
                     while clipper.step() {
                         for i in clipper.display_start()..clipper.display_end() {
@@ -450,13 +490,12 @@ pub(super) fn draw(lab: &mut PluginLab, ui: &Ui, context: PluginContext<'_>) -> 
                             item_tip(ui,context.settings.tutorial_tips,"Include this variable in the export.","Select fields sharing the same spatial coordinates and shape. The export checks each selected product for compatible fields.");
                         }
                     }
-                });
-        }
+                }
+            });
         products
     } else {
         selected_products(&context, state)
     };
-    editable_bounds(ui, state);
     if state.coverage_job.is_busy() {
         ui.text("Sampling combined coverage...");
     } else if ui.button("Preview selected coverage") {

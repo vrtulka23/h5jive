@@ -234,15 +234,11 @@ impl App {
                 self.globe_rotation = None;
             }
         }
-        let earth_texture = self.earth_texture_id(&self.settings.globe_background);
+        let earth_texture = self.earth_texture_id();
         let draw = ui.get_window_draw_list();
         let clip = draw.push_clip_rect(cursor, [cursor[0] + area[0], cursor[1] + area[1]], true);
         let palette = &self.settings.palette;
-        let ocean = if self.settings.globe_background == "ocean" {
-            mix_color(palette.panel, palette.heatmap_low, 0.30)
-        } else {
-            palette.panel
-        };
+        let ocean = palette.panel;
         draw.add_circle(center, radius, ocean).filled(true).build();
         draw.add_circle(center, radius, palette.border).build();
         if let Some(texture) = earth_texture {
