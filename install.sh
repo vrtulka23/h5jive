@@ -154,8 +154,15 @@ if [ ! -x "$package/h5jive" ] || [ ! -f "$package/settings/DIPfile" ]; then
     echo 'Release archive is missing the executable or DIPL settings.' >&2
     exit 1
 fi
-downloaded_version=$("$package/h5jive" --version)
-echo "Downloaded version: $downloaded_version"
+if downloaded_version=$("$package/h5jive" --version 2>&1); then
+    echo "Downloaded version: $downloaded_version"
+elif help_text=$("$package/h5jive" --help 2>&1) &&
+    ! printf '%s\n' "$help_text" | grep -Fq -- '--version'; then
+    echo 'Downloaded version: unavailable (this release predates --version support).'
+else
+    echo "Downloaded executable failed its version check: $downloaded_version" >&2
+    exit 1
+fi
 if [ -f "$install_dir/settings/overrides.dip" ]; then
     # Local repository paths belong to the user, so carry them into upgrades.
     cp "$install_dir/settings/overrides.dip" "$package/settings/overrides.dip"
