@@ -48,6 +48,9 @@ The six CEOS reference sites have published CEOS and CNES regions. Other USGS
 catalog sites use published CNES and SDSU regions, whose catalog centers may
 lie outside the regions. A labelled regional or station search window helps
 find overpasses but does not define calibration pixels.
+The PICS schemas declare latitude, longitude, and region bounds in `deg`,
+usable distances in `km`, and altitude in `m`. Values without an explicit unit
+in a site entry use the unit declared by its schema.
 Use `h5jive --settings-help 'dataset_sources[gome].product_regex'` to read a
 setting's DIPL description. The same command accepts other DIPL paths, such as
 `pics[algeria_3]`, and shows source URLs where available. The schema also
@@ -81,7 +84,8 @@ Each source declares its own format link, for example
 repositories can use different formats.
 
 The bundled source definitions are examples of DIPL settings for supported
-product formats. They use `root = "./"` as a portable default. Put your local
+product formats. Most use `root = "./"` as a portable default; the source
+checkout's ERA5 example points to its bundled sample directory. Put your local
 dataset roots in `settings/runtime/overrides.dip`; the app creates this
 Git-ignored file on first launch if it is missing. Relative roots are resolved
 from the `settings` directory. A native release includes a blank override file

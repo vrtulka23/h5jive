@@ -3,14 +3,14 @@ import TopNav from '../../components/TopNav.astro';
 
 const smallerFeatures = [
   {
-    number: '03',
+    number: '05',
     title: 'Learn as you explore',
     body: 'Tutorial tips explain interactive controls on hover. Turn them off from Help when you know your way around.',
     link: '../guide/settings-and-formats.html',
     linkLabel: 'Tutorial tip setting',
   },
   {
-    number: '04',
+    number: '06',
     title: 'Keep an eye on resources',
     body: 'The top bar shows process memory, UI time, and the selected dataset’s raw size while you work.',
     link: '../guide/exploring-data.html',
@@ -25,7 +25,7 @@ const smallerFeatures = [
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="theme-color" content="#081b2d" />
-    <meta name="description" content="Small H5Jive features that make exploring HDF5 and NetCDF files easier, including drag and drop for files A and B." />
+    <meta name="description" content="Explore H5Jive's file shortcuts, table editing, and geographic coverage preview." />
     <link rel="icon" type="image/png" href="../h5jive-icon.png" />
     <link rel="stylesheet" href="../site.css" />
     <link rel="stylesheet" href="../layout.css" />
@@ -50,13 +50,23 @@ const smallerFeatures = [
         <figure class="feature-image"><a href="../drag-and-drop.png" aria-label="Open full-size drag and drop screenshot"><img src="../drag-and-drop.png" width="2564" height="1508" alt="H5Jive window showing two drag and drop targets labeled Drop as File A and Drop as File B, with a local file hovering over the left target" decoding="async" /></a><figcaption><span>DRAG &amp; DROP <span class="caption-divider">/</span> FILE A OR B</span><a href="../drag-and-drop.png">View full size <span aria-hidden="true">↗</span></a></figcaption></figure>
       </section>
 
-      <section class="feature-story" aria-labelledby="edit-title">
-        <div class="story-copy"><p class="feature-index">02 / EDIT VALUES</p><h2 id="edit-title">Edit, review, then apply.</h2><p>Click a numeric table cell to change it. Staged values stay highlighted while you inspect the table, and you can apply or discard the changes together.</p><a class="text-link" href="../guide/exploring-data.html">How table editing works <span aria-hidden="true">↗</span></a></div>
+      <section class="feature-story" aria-labelledby="quick-file-title">
+        <div class="story-copy"><p class="feature-index">02 / QUICK FILE SELECTION</p><h2 id="quick-file-title">Switch files from the tree.</h2><p>Click the file name under File A or File B to open the file picker for that tab. Choose a different file without leaving the dataset tree.</p><a class="text-link" href="../guide/getting-started.html">Opening files in H5Jive <span aria-hidden="true">↗</span></a></div>
+        <figure class="feature-image feature-image--compact"><a href="../feature-quick-file-select.png" aria-label="Open full-size quick file selection screenshot"><img src="../feature-quick-file-select.png" width="962" height="620" alt="File A tab in the dataset tree with its file name underlined and a tooltip explaining that clicking it opens the file picker for this tab" loading="lazy" decoding="async" /></a><figcaption><span>DATASET TREE <span class="caption-divider">/</span> FILE PICKER</span><a href="../feature-quick-file-select.png">View full size <span aria-hidden="true">↗</span></a></figcaption></figure>
+      </section>
+
+      <section class="feature-story" aria-labelledby="edit-values-title">
+        <div class="story-copy"><p class="feature-index">03 / EDIT VALUES</p><h2 id="edit-values-title">Edit, review, then apply.</h2><p>Click a numeric table cell to change it. Staged values stay highlighted while you inspect the table, and you can apply or discard the changes together.</p><a class="text-link" href="../guide/exploring-data.html">How table editing works <span aria-hidden="true">↗</span></a></div>
         <figure class="feature-image"><a href="../view-data-edit.png" aria-label="Open full-size data editing screenshot"><img src="../view-data-edit.png" width="2564" height="1508" alt="H5Jive data table with highlighted pending cell edits, an active cell editor, and Discard and Apply changes buttons below the table" loading="lazy" decoding="async" /></a><figcaption><span>DATA TABLE <span class="caption-divider">/</span> PENDING EDITS</span><a href="../view-data-edit.png">View full size <span aria-hidden="true">↗</span></a></figcaption></figure>
       </section>
 
+      <section class="feature-story" aria-labelledby="coverage-title">
+        <div class="story-copy"><p class="feature-index">04 / COVERAGE PREVIEW</p><h2 id="coverage-title">See the footprint first.</h2><p>Before exporting a spatiotemporal subset, preview the selected products as sampled points on a world map and two opposite globe hemispheres. The popup gives a quick check of geographic coverage.</p><a class="text-link" href="../plugins/spatiotemporal-subset/">Explore the subset plugin <span aria-hidden="true">↗</span></a></div>
+        <figure class="feature-image feature-image--portrait"><a href="../feature-coverage-preview.png" aria-label="Open full-size coverage preview screenshot"><img src="../feature-coverage-preview.png" width="1178" height="1196" alt="Coverage preview popup showing sampled orange points over a world map and two globe hemispheres with geographic grids and muted coastlines" loading="lazy" decoding="async" /></a><figcaption><span>SUBSET EXPORT <span class="caption-divider">/</span> COVERAGE</span><a href="../feature-coverage-preview.png">View full size <span aria-hidden="true">↗</span></a></figcaption></figure>
+      </section>
+
       <section class="feature-collection" aria-labelledby="more-features-title">
-        <div class="collection-heading"><div><p class="eyebrow">MORE IN THE WORKFLOW</p><h2 id="more-features-title">Useful touches.</h2></div><p>More small features can join this collection as H5Jive grows.</p></div>
+        <div class="collection-heading"><div><p class="eyebrow">MORE IN THE WORKFLOW</p><h2 id="more-features-title">Useful touches.</h2></div><p>Settings and status cues help you stay oriented as you work.</p></div>
         <div class="collection-grid">{smallerFeatures.map((feature) => <article class="collection-card"><span>{feature.number}</span><h3>{feature.title}</h3><p>{feature.body}</p><a href={feature.link}>{feature.linkLabel} <span aria-hidden="true">↗</span></a></article>)}</div>
       </section>
     </main>

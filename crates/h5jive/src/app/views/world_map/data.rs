@@ -82,6 +82,7 @@ mod tests {
                 assert!(geo.scan_direction.is_none());
                 assert!(data.points.iter().any(|point| point.footprint.is_some()));
             }
+            drop(file);
             std::fs::remove_file(output).unwrap();
         }
         std::fs::remove_dir(directory).unwrap();
@@ -153,6 +154,7 @@ mod tests {
                 map.points.iter().any(|point| point.value.is_finite()),
                 "{mode:?}"
             );
+            drop(file);
             std::fs::remove_file(output).unwrap();
         }
         std::fs::remove_dir(directory).unwrap();

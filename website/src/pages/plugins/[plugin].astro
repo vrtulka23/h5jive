@@ -7,7 +7,7 @@ export function getStaticPaths() {
 }
 
 const { plugin } = Astro.props;
-const other = pluginPages.find((item) => item.id !== plugin.id);
+const nextPlugin = pluginPages[(pluginPages.findIndex((item) => item.id === plugin.id) + 1) % pluginPages.length];
 ---
 
 <!doctype html>
@@ -39,10 +39,10 @@ const other = pluginPages.find((item) => item.id !== plugin.id);
           <p class="mode-summary">{plugin.summary}</p>
         </section>
 
-        <figure class="mode-preview"><img src={`../../${plugin.image}`} width="2564" height="1508" alt={plugin.alt} decoding="async" /><figcaption><span>H5JIVE <span class="caption-divider">/</span> PLUGIN LAB</span><span>{plugin.caption}</span></figcaption></figure>
+        <figure class="mode-preview"><img src={`../../${plugin.image}`} width={plugin.imageWidth ?? 2564} height={plugin.imageHeight ?? 1508} alt={plugin.alt} decoding="async" /><figcaption><span>H5JIVE <span class="caption-divider">/</span> PLUGIN LAB</span><span>{plugin.caption}</span></figcaption></figure>
 
         <section class="mode-content" aria-labelledby="plugin-features">
-          <div class="mode-section-head"><p class="eyebrow">WHAT IT DOES</p><h2 id="plugin-features">Explore the comparison.</h2></div>
+          <div class="mode-section-head"><p class="eyebrow">WHAT IT DOES</p><h2 id="plugin-features">Explore the plugin.</h2></div>
           <div class="mode-points">{plugin.points.map(([title, body], i) => <article class="mode-point"><span class="mode-number">0{i + 1}</span><h3>{title}</h3><p>{body}</p></article>)}</div>
         </section>
 
@@ -51,7 +51,7 @@ const other = pluginPages.find((item) => item.id !== plugin.id);
           <div><ol>{plugin.workflow.map((step) => <li>{step}</li>)}</ol><p class="mode-note">{plugin.note}</p></div>
         </section>
 
-        <nav class="mode-neighbors" aria-label="Other plugins"><a href="../"><span>← PLUGIN LAB</span><strong>All plugins</strong></a><a href={`../${other.id}/`}><span>ANOTHER PLUGIN →</span><strong>{other.name}</strong></a></nav>
+        <nav class="mode-neighbors" aria-label="Other plugins"><a href="../"><span>← PLUGIN LAB</span><strong>All plugins</strong></a><a href={`../${nextPlugin.id}/`}><span>NEXT PLUGIN →</span><strong>{nextPlugin.name}</strong></a></nav>
         <div class="mode-guide"><p>Want to try this plugin with example files?</p><a class="button primary" href={plugin.demo}>Open the demo <span>↗</span></a><a class="text-link" href={plugin.source}>Read the source <span>↗</span></a></div>
       </div>
     </main>

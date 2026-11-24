@@ -106,12 +106,13 @@ to seconds since 1970-01-01; products are ordered by time, and overlaps are
 rejected. When there is no time coordinate, name the leading index dimension
 (for example, `product`). The optional group name places the series under one
 NetCDF group; leaving it blank writes variables at the root. Regular grid
-coordinates, selected variable units, and calendars must match. **Gridded mosaic** combines valid samples on one regular
-grid using Mean, Newest, Oldest, Minimum, or Maximum. Mean gives every valid
+coordinates, selected variable units, and calendars must match. **Gridded mosaic**
+combines valid samples on one regular grid using Mean, Newest, Oldest, Minimum,
+or Maximum. Mean gives every valid
 sample equal weight. Newest and Oldest follow Dataset Browser date/orbit order
 and CF time within each product. The companion count records all valid samples,
-and the output includes grid cell bounds. Both modes read spatial rows in bounded chunks and create a
-new file without overwriting an existing one.
+and the output includes grid cell bounds. All three modes read spatial rows in
+bounded chunks and create a new file without overwriting an existing one.
 
 The mosaic methods do not apply quality flags or uncertainty weights. For
 satellite radiance, use scientifically comparable channels and observation
@@ -121,7 +122,8 @@ The first version supports NetCDF products with 2D swath coordinates or 1D
 regular latitude and longitude axes, numeric 2D fields, and 3D fields with a
 leading CF time coordinate. Native export keeps every channel of 4D
 geolocated fields such as GOME-2 radiance, while mosaic export averages each
-channel separately. Both outputs can be reopened in World map and Globe view.
+channel separately. Native and mosaic outputs can be reopened in World map and
+Globe view.
 Mosaic cells have new footprints and do not carry source scan direction. The
 plugin does not reproject curvilinear grids, preserve source numeric
 storage types, or write into existing A/B files. See the

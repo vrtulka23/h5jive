@@ -107,8 +107,9 @@ on a Wayland desktop this uses XWayland if the compositor provides it. This
 applies to Ubuntu 22.04 and openSUSE Leap as well.
 Start it normally with `h5jive`; no display variables need to be changed in
 the shell. If X11 is unavailable, H5Jive uses native Wayland and file drops
-remain unavailable; use **Browse A** or **Browse B**. To request a native
-Wayland window even when XWayland is available, run:
+remain unavailable; click the file name in the File A or File B tree tab to
+open the file picker. To request a native Wayland window even when XWayland is
+available, run:
 
 ```sh
 H5JIVE_WINDOW_BACKEND=wayland h5jive
@@ -119,7 +120,7 @@ is hovered, then uses the same position to choose A or B on drop. Winit 0.30
 does not expose XDND drag-motion coordinates, so a compositor that does not
 update the X11 pointer during a Wayland-to-XWayland drag may still leave the
 highlight stationary. If no position is available, H5Jive leaves both drop
-regions unselected and asks you to use Browse A or Browse B.
+regions unselected and asks you to choose a file for A or B instead.
 
 ### Run over SSH with X11 forwarding
 
@@ -159,14 +160,15 @@ dataset immediately; with two files, the first specified dataset is selected.
 `./h5jive.sh --help` lists the
 available options. `SNT3_PREFIX` and `SNT3_BUILD_DIR` can select an external
 native SNT3 build; otherwise the crate's bundled SNT3 source is used.
-You can also browse the system folders and set or replace input file A and B
-from the **Files** menu while the viewer is running; both file trees remain
-available in the sidebar.
+You can also set or replace input file A and B from the **Files** menu while
+the viewer is running. Enter a path or click the folder icon to open the file
+picker. Both file trees remain available in the sidebar, where clicking the
+file name also opens the picker for that tab.
 You can also drag one local file at a time over the H5Jive window. Two drop panels appear:
 drop on the left for File A or on the right for File B. If File A is empty,
 a file dropped on B waits until A is loaded. Native file drops are supported
 on macOS, Windows, and Linux X11. The current window library does not deliver
-file-drop events on Wayland; use **Files** → **Browse** there.
+file-drop events on Wayland; use the file picker there.
 For an H5Jive window forwarded over SSH, the dropped path must exist on the
 remote machine; dragging a file that exists only on your local computer does
 not transfer its contents.
