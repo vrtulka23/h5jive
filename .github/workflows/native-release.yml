@@ -233,6 +233,9 @@ jobs:
           for library in bundle/lib/*.so*; do
             [ -e "$library" ] && patchelf --set-rpath '$ORIGIN' "$library"
           done
+          # The bundled rpath must be what the smoke tests resolve, not the
+          # temporary build directories left in LD_LIBRARY_PATH.
+          unset LD_LIBRARY_PATH
           ldd bundle/h5jive | awk '/libhdf5/ && !/bundle\/lib/ {print "HDF5 library is not bundled: " $0 > "/dev/stderr"; exit 1}'
           ldd bundle/h5jive | awk '/libnetcdf/ && !/bundle\/lib/ {print "NetCDF library is not bundled: " $0 > "/dev/stderr"; exit 1}'
           if readelf -d bundle/lib/libhdf5.so* | grep -F 'libcurl.so'; then
