@@ -38,23 +38,31 @@ import TopNav from '../../components/TopNav.astro';
         </div>
       </section>
 
-      <section class="lab-benefits">
-        <div class="wrap lab-benefit-grid">
-          <article><span>BUILT WITH DEAR IMGUI</span><h2>Native, responsive UI</h2><p>Plugin panels use the same immediate mode desktop interface as H5Jive's data inspector.</p></article>
-          <article><span>NO ADMIN RIGHTS</span><h2>Install in your space</h2><p><a href="../#download">Precompiled downloads</a> run from your own directory. The Windows setup installer uses a per-user install.</p></article>
-          <article><span>X11 SUPPORT</span><h2>Work remotely</h2><p>On Linux, H5Jive can use OpenGL for SSH forwarded X11 sessions when a compatible graphics stack is available.</p></article>
-        </div>
-      </section>
-
       <section id="catalog" class="wrap lab-catalog">
         <div class="lab-section-heading"><div><p class="eyebrow">THE COLLECTION</p><h2>Available plugins.</h2></div><p>Enable each tool centrally with DIPL. Plugins are compiled from source and kept separate from the core views.</p></div>
-        <div class="lab-plugin-list">
-          {pluginPages.map((plugin, index) => <article class="lab-plugin-card">
-            <div class="lab-plugin-mark" aria-hidden="true"><span>{plugin.mark[0]}</span><i>{plugin.mark[1]}</i><span>{plugin.mark[2]}</span></div>
-            <div class="lab-plugin-main"><p class="lab-plugin-index">PLUGIN {String(index + 1).padStart(2, '0')}</p><h3>{plugin.name}</h3><p>{plugin.summary}</p><ul>{plugin.details.map((detail) => <li>{detail}</li>)}</ul><div class="lab-plugin-links"><a href={`./${plugin.id}/`}>Explore plugin <span>→</span></a><a href={plugin.source}>View source <span>↗</span></a><a href={plugin.demo}>Try the demo <span>↗</span></a></div></div>
-            <div class="lab-plugin-setting"><span>DIPL SWITCH</span><code>{plugin.setting}</code><small>settings/runtime/plugins.dip</small></div>
-            <figure class="lab-plugin-preview"><a href={`../${plugin.image}`} aria-label={`Open full-size ${plugin.name} screenshot`}><img src={`../${plugin.image}`} width={plugin.imageWidth ?? 2564} height={plugin.imageHeight ?? 1508} alt={plugin.alt} loading="lazy" decoding="async" /></a><figcaption>{plugin.caption}</figcaption></figure>
-          </article>)}
+        <div class="lab-plugin-sections">
+          {pluginPages.map((plugin, index) => (
+            <section class={`lab-plugin-section${index % 2 === 1 ? ' lab-plugin-section--reverse' : ''}`} id={plugin.id} aria-labelledby={`plugin-title-${plugin.id}`}>
+              <figure class="lab-plugin-media">
+                <a href={`../${plugin.image}`} aria-label={`Open full-size ${plugin.name} screenshot`}>
+                  <img src={`../${plugin.image}`} width={plugin.imageWidth ?? 2546} height={plugin.imageHeight ?? 1430} alt={plugin.alt} loading={index < 1 ? 'eager' : 'lazy'} decoding="async" />
+                </a>
+                <figcaption><span>H5JIVE <span class="caption-divider">/</span> {plugin.name.toUpperCase()}</span><span>{plugin.caption}</span></figcaption>
+              </figure>
+              <div class="lab-plugin-copy">
+                <p class="eyebrow">PLUGIN 0{index + 1} / 04</p>
+                <h2 id={`plugin-title-${plugin.id}`}>{plugin.name}<span class="lab-plugin-dot">.</span></h2>
+                <p class="lab-plugin-summary">{plugin.summary}</p>
+                <ul class="lab-plugin-highlights">
+                  {plugin.points.map(([title, body]) => (
+                    <li><strong>{title}</strong><span>{body}</span></li>
+                  ))}
+                </ul>
+                <div class="lab-plugin-links"><a class="text-link" href={plugin.source}>View source <span aria-hidden="true">↗</span></a><a class="text-link" href={plugin.demo}>Try the demo <span aria-hidden="true">↗</span></a></div>
+                <p class="lab-plugin-setting"><span>DIPL SWITCH</span><code>{plugin.setting}</code></p>
+              </div>
+            </section>
+          ))}
         </div>
         <p class="lab-catalog-note">Plugins are compiled into H5Jive. Enable the tools you need in DIPL; each has its own settings and example workflow.</p>
       </section>

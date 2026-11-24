@@ -318,8 +318,12 @@
 .download-links .download-installer{color:#e8f4f8}
 .download-links [hidden]{display:none}
 .download-note{margin:20px 0 0}
-.lab-benefit-grid a{text-decoration:underline;text-underline-offset:3px}
-@media(max-width:700px){.download-heading{display:block}.download-heading>p{margin-top:18px}.install-grid,.download-grid{grid-template-columns:1fr}.manual-download-heading{display:block;margin-top:42px}.manual-download-heading p{margin-top:8px}.downloads{padding-block:70px 76px}}
+.perks-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px;margin-top:28px}
+.perk{padding:24px;border:1px solid #ffffff27;background:#0c2538}
+.perk>span{font:10px 'DM Mono',monospace;letter-spacing:.1em;color:#72bcca}
+.perk h3{font:600 20px Manrope,sans-serif;margin:12px 0 8px}
+.perk p{color:#9ab7c2;font-size:13px;line-height:1.6;margin:0}
+@media(max-width:700px){.download-heading{display:block}.download-heading>p{margin-top:18px}.install-grid,.download-grid,.perks-grid{grid-template-columns:1fr}.manual-download-heading{display:block;margin-top:42px}.manual-download-heading p{margin-top:8px}.downloads{padding-block:70px 76px}}
 
 .browser-section {
   padding-block: 96px 105px;

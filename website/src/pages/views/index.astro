@@ -29,12 +29,31 @@ import TopNav from '../../components/TopNav.astro';
         <p>Move between source values, profiles, slices, volumes, and geographic views. Each view keeps the selected dataset in context while showing a different part of its shape or location.</p>
       </section>
 
-      <section class="views-grid" aria-label="Explore H5Jive views">
-        {viewPages.map((view, index) => <a class="views-card" href={`./${view.slug}/`}>
-          <div class="views-card-image"><img src={`../${view.image}`} width="2564" height="1508" alt={view.alt} loading={index < 2 ? 'eager' : 'lazy'} decoding="async" /></div>
-          <div class="views-card-copy"><span class="views-card-number">VIEW {String(index + 1).padStart(2, '0')} / 06</span><h2>{view.title}</h2><p>{view.summary}</p><span class="views-card-link">Explore view <span aria-hidden="true">↗</span></span></div>
-        </a>)}
-      </section>
+      <div class="views-sections">
+        {viewPages.map((view, index) => (
+          <section class={`view-section${index % 2 === 1 ? ' view-section--reverse' : ''}`} id={view.slug} aria-labelledby={`view-title-${view.slug}`}>
+            <figure class="view-section-media">
+              <a href={`../${view.image}`} aria-label={`Open full-size ${view.title} screenshot`}>
+                <img src={`../${view.image}`} width={view.imageWidth} height={view.imageHeight} alt={view.alt} loading={index < 1 ? 'eager' : 'lazy'} decoding="async" />
+              </a>
+              <figcaption><span>H5JIVE <span class="caption-divider">/</span> {view.title.toUpperCase()}</span><span>{view.caption}</span></figcaption>
+            </figure>
+            <div class="view-section-copy">
+              <p class="eyebrow">VIEW 0{index + 1} / 06 · {view.kicker.toUpperCase()}</p>
+              <h2 id={`view-title-${view.slug}`}>{view.title}<span class="view-title-dot">.</span></h2>
+              <p class="view-section-summary">{view.summary}</p>
+              <ul class="view-section-highlights">
+                {view.points.map(([title, body]) => (
+                  <li><strong>{title}</strong><span>{body}</span></li>
+                ))}
+              </ul>
+              <a class="text-link" href="../guide/exploring-data.html">Explore controls and examples <span aria-hidden="true">↗</span></a>
+            </div>
+          </section>
+        ))}
+      </div>
+
+      <div class="views-guide"><p>Want the full list of controls and examples?</p><a class="button primary" href="../guide/exploring-data.html">Read the exploring data guide <span>→</span></a></div>
       <p class="sample-credit">Screenshots show modified EUMETSAT Metop-B GOME-2 Level 1B data (2013). © EUMETSAT 2013. <a href="https://creativecommons.org/licenses/by/4.0/">CC BY 4.0</a>. Map backgrounds: <a href="https://www.naturalearthdata.com/about/terms-of-use/">Natural Earth</a>.</p>
     </main>
     <footer class="footer wrap"><a class="brand" href="../"><img class="brand-icon" src="../h5jive.png" width="32" height="32" alt="" /> H5Jive</a><span>Dig into your data.</span><span>© H5Jive contributors</span></footer>

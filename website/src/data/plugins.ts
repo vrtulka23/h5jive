@@ -5,6 +5,8 @@ export const pluginPages = [
     summary: 'Compare paths in files A and B, inspect structural and metadata differences, and copy missing or changed objects between files.',
     details: ['Same, Different, Only A, and Only B filters', 'Shapes, datatypes, and attributes', 'Copy and replace actions with confirmation'],
     image: 'plugin-path-comparison.png',
+    imageWidth: 2546,
+    imageHeight: 1430,
     alt: 'A/B path comparison showing matching paths, changed metadata, and paths present in only one file in two aligned columns',
     caption: 'Aligned file columns show matching, changed, and missing paths, with actions to synchronize them.',
     points: [
@@ -17,7 +19,6 @@ export const pluginPages = [
     setting: 'path_comparison_enabled',
     source: 'https://github.com/vrtulka23/h5jive/blob/main/crates/h5jive/src/plugins/path_comparison.rs',
     demo: 'https://github.com/vrtulka23/h5jive/tree/main/examples/plugins/path_comparison',
-    mark: ['A', '⇄', 'B'],
   },
   {
     id: 'value-comparison',
@@ -25,6 +26,8 @@ export const pluginPages = [
     summary: 'Select two numeric datasets with the same shape from A or B. Compare their values as a difference or ratio on a 2D heatmap.',
     details: ['Searchable, shape-aware dataset selectors', 'Difference or ratio heatmap', 'Two displayed axes with other dimensions pinned'],
     image: 'plugin-value-comparison.png',
+    imageWidth: 2546,
+    imageHeight: 1430,
     alt: 'Dataset value comparison showing two selected datasets and a red-to-blue difference heatmap over two dimensions',
     caption: 'Choose compatible arrays, select two dimensions, and inspect their value difference or ratio.',
     points: [
@@ -37,7 +40,6 @@ export const pluginPages = [
     setting: 'value_comparison_enabled',
     source: 'https://github.com/vrtulka23/h5jive/blob/main/crates/h5jive/src/plugins/value_comparison.rs',
     demo: 'https://github.com/vrtulka23/h5jive/tree/main/examples/plugins/value_comparison',
-    mark: ['A', '÷', 'B'],
   },
   {
     id: 'dataset-manipulation',
@@ -45,8 +47,8 @@ export const pluginPages = [
     summary: 'Create a new dataset by slicing a numeric array or combining two compatible arrays with arithmetic.',
     details: ['Slice multidimensional regions', 'Add, subtract, multiply, or divide arrays', 'Save to file A, file B, or a new HDF5 file'],
     image: 'plugin-dataset-manipulation.png',
-    imageWidth: 2562,
-    imageHeight: 1506,
+    imageWidth: 2546,
+    imageHeight: 1430,
     alt: 'Dataset manipulation plugin showing a selected source array, slice ranges for one axis, and options to save a new dataset into file A, file B, or a new file',
     caption: 'Choose an operation, set its source or slice, and create a new dataset at the destination.',
     points: [
@@ -59,7 +61,6 @@ export const pluginPages = [
     setting: 'dataset_manipulation_enabled',
     source: 'https://github.com/vrtulka23/h5jive/blob/main/crates/h5jive/src/plugins/dataset_manipulation.rs',
     demo: 'https://github.com/vrtulka23/h5jive/tree/main/examples/plugins/dataset_manipulation',
-    mark: ['[', '+', ']'],
   },
   {
     id: 'spatiotemporal-subset',
@@ -67,8 +68,8 @@ export const pluginPages = [
     summary: 'Select indexed products, dates or orbits, geographic bounds, and variables, then export a smaller NetCDF-4 file.',
     details: ['Preview coverage on a map and two globes', 'Native products or combined time series', 'Gridded mosaic with five methods'],
     image: 'plugin-spatiotemporal-subset.png',
-    imageWidth: 2562,
-    imageHeight: 1506,
+    imageWidth: 2546,
+    imageHeight: 1430,
     alt: 'Spatiotemporal subset plugin showing a GOME dataset source, available date and orbit ranges, variable checkboxes, geographic bounds, and three NetCDF export modes',
     caption: 'Select products and variables, inspect their coverage, then choose the export view.',
     points: [
@@ -81,6 +82,5 @@ export const pluginPages = [
     setting: 'spatiotemporal_subset_enabled',
     source: 'https://github.com/vrtulka23/h5jive/blob/main/crates/h5jive/src/plugins/spatiotemporal_subset.rs',
     demo: 'https://github.com/vrtulka23/h5jive/tree/main/examples/plugins/spatiotemporal_subset',
-    mark: ['◯', '⊕', '◯'],
   },
 ];

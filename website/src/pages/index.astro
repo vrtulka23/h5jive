@@ -45,8 +45,8 @@ import TopNav from '../components/TopNav.astro';
         <div class="carousel" role="region" aria-label="H5Jive views" aria-roledescription="carousel">
           <div class="preview carousel-track" id="view-carousel">
             {viewPages.map((shot, i) => <figure class="carousel-slide" aria-label={`${i + 1} of ${viewPages.length}: ${shot.title}`}>
-              <div class="map-art"><img src={`./${shot.image}`} width="2564" height="1508" alt={shot.alt} loading={i === 0 ? 'eager' : 'lazy'} fetchpriority={i === 0 ? 'high' : undefined} decoding="async" /></div>
-              <figcaption><span><b class="dot"></b> H5JIVE <span class="caption-divider">/</span> {shot.title.toUpperCase()}</span><a href={`./views/${shot.slug}/`}>Explore this view <span aria-hidden="true">↗</span></a></figcaption>
+              <div class="map-art"><img src={`./${shot.image}`} width={shot.imageWidth} height={shot.imageHeight} alt={shot.alt} loading={i === 0 ? 'eager' : 'lazy'} fetchpriority={i === 0 ? 'high' : undefined} decoding="async" /></div>
+              <figcaption><span><b class="dot"></b> H5JIVE <span class="caption-divider">/</span> {shot.title.toUpperCase()}</span><a href={`./views/#${shot.slug}`}>Explore this view <span aria-hidden="true">↗</span></a></figcaption>
             </figure>)}
           </div>
           <div class="carousel-controls">
@@ -124,6 +124,11 @@ powershell -NoProfile -ExecutionPolicy Bypass -File "$env:TEMP\h5jive-install.ps
           </article>
         </div>
         <p class="download-note">All downloads are precompiled. Portable bundles need no installation. <a data-release-checksum href="https://github.com/vrtulka23/h5jive/releases/latest/download/SHA256SUMS">Verify downloads with SHA256SUMS ↗</a></p>
+        <div class="perks-grid" aria-label="Why H5Jive">
+          <article class="perk"><span>BUILT WITH DEAR IMGUI</span><h3>Native, responsive UI</h3><p>Plugin panels use the same immediate mode desktop interface as H5Jive's data inspector.</p></article>
+          <article class="perk"><span>NO ADMIN RIGHTS</span><h3>Install in your space</h3><p>Precompiled downloads run from your own directory. The Windows setup installer uses a per-user install.</p></article>
+          <article class="perk"><span>X11 SUPPORT</span><h3>Work remotely</h3><p>On Linux, H5Jive can use OpenGL for SSH forwarded X11 sessions when a compatible graphics stack is available.</p></article>
+        </div>
       </section>
 
       <section id="data" class="data-band">
