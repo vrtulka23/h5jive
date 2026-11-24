@@ -11,6 +11,7 @@ impl ValueVisibility {
         counts: [usize; 4],
     ) -> bool {
         let mut changed = false;
+        changed |= self.draw_all_button(ui, palette, width, tutorial_tips);
         ui.text("Normal values");
         for (index, (count, enabled, label, tooltip)) in [
             (
@@ -41,7 +42,6 @@ impl ValueVisibility {
                 tutorial_tips,
             );
         }
-        changed |= self.draw_all_button(ui, palette, width, tutorial_tips);
         ui.separator();
         ui.text("Special values");
         for (count, enabled, label, tooltip, color) in [

@@ -11,11 +11,15 @@ use ndarray::{ArrayD, IxDyn};
 use netcdf_reader::{NcAttrValue, NcAttribute, NcFile, NcSliceInfo, NcSliceInfoElem, NcType};
 use std::{cell::RefCell, error::Error, fmt, path::Path};
 mod file_operations;
+mod find_replace;
 mod geolocation;
 mod statistics;
 mod subset;
 pub use file_operations::{
     copy_hdf5_object, dataset_path_parts, same_file, Hdf5ObjectKind, StagedOutput, WritableFile,
+};
+pub use find_replace::{
+    NumericMatch, NumericReplaceOutcome, NumericSearchMatch, NumericSearchSummary,
 };
 pub use geolocation::{
     geographic_coordinate_role, select_geographic_axes, CoordinateCandidate, CoordinateRole,

@@ -727,6 +727,23 @@ pub(super) fn draw_update_button_with_height(
     clicked
 }
 
+pub(super) fn draw_accent_button(ui: &Ui, palette: &Palette, label: &str, size: [f32; 2]) -> bool {
+    let _button = ui.push_style_color(StyleColor::Button, palette.accent);
+    let _hover = ui.push_style_color(
+        StyleColor::ButtonHovered,
+        mix_color(palette.accent, palette.text, 0.18),
+    );
+    let _active = ui.push_style_color(
+        StyleColor::ButtonActive,
+        mix_color(palette.accent, palette.panel, 0.2),
+    );
+    if size == [0.0, 0.0] {
+        ui.button(label)
+    } else {
+        ui.button_with_size(label, size)
+    }
+}
+
 pub(super) fn draw_workspace_mode_icon(
     draw: &DrawListMut<'_>,
     mode: WorkspaceMode,

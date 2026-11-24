@@ -62,11 +62,11 @@ impl App {
                 ) {
                     browse_path = Some(dialog.path.clone());
                 }
-                if ui.button("Save") {
+                if draw_accent_button(ui, &self.settings.palette, "Save", [0.0, 0.0]) {
                     save = true;
                 }
                 ui.same_line();
-                if ui.button("Close") {
+                if draw_accent_button(ui, &self.settings.palette, "Close", [0.0, 0.0]) {
                     close = true;
                 }
                 if let Some(message) = &dialog.message {

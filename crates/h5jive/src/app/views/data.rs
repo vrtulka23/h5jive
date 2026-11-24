@@ -3,8 +3,14 @@ use super::super::*;
 impl App {
     pub(crate) fn draw_data_view(&mut self, ui: &Ui, plot_ui: &PlotUi<'_>, plot_ctx: &PlotContext) {
         let Some(selection) = self.selection.clone() else {
-            if self.cell_edit_job.is_some() {
-                ui.text("Applying cell changes...");
+            if self.cell_edit_job.is_some() || self.bulk_replace_job.is_some() {
+                ui.text("Applying data changes...");
+                if let Some(job) = &self.bulk_replace_job {
+                    ui.text(format!(
+                        "{} cells processed",
+                        job.progress.load(Ordering::Relaxed)
+                    ));
+                }
             } else {
                 ui.text("Select a dataset from the tree.");
                 if !self.pending_cell_edits.is_empty() {
@@ -88,7 +94,10 @@ impl App {
                 ui.separator();
             }
         }
-        self.draw_region_controls(ui, &shape);
+        self.draw_region_controls(ui, &selection, &shape);
+        if self.view == ViewMode::Data {
+            self.draw_find_replace_dialog(ui, &selection, &shape);
+        }
         let measured = (ui.cursor_pos_y() - footer_start).max(1.0);
         if self.view == ViewMode::Slice2d {
             self.slice_footer_height = measured;
@@ -97,7 +106,7 @@ impl App {
         }
     }
 
-    fn draw_region_controls(&mut self, ui: &Ui, shape: &[usize]) {
+    fn draw_region_controls(&mut self, ui: &Ui, selection: &Selection, shape: &[usize]) {
         let button_width = control_action_width(ui, &self.settings);
         if let Some(_table) = begin_control_columns(ui, "view_controls", button_width) {
             self.draw_dimension_controls(ui, shape);
@@ -121,6 +130,10 @@ impl App {
                         self.heatmap_tiles.clear();
                     }
                 }
+            }
+            if self.view == ViewMode::Data {
+                ui.spacing();
+                self.draw_find_replace_action(ui, selection, shape);
             }
         }
     }
@@ -349,6 +362,9 @@ impl App {
             outer_size,
             0.0,
         ) {
+            if let Some(row) = self.table_scroll_to_row.take() {
+                ui.set_scroll_y(row as f32 * row_height);
+            }
             ui.table_setup_column_fixed_width("Row", TableColumnFlags::NONE, row_width);
             for (label, width) in column_labels.into_iter().zip(column_widths.iter().copied()) {
                 ui.table_setup_column_fixed_width(label, TableColumnFlags::NONE, width);

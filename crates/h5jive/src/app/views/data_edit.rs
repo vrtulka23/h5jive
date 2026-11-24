@@ -224,14 +224,24 @@ impl App {
             ui.text_wrapped("This dataset has staged cell changes. Apply or discard them before switching datasets.");
             let button_width = ui.calc_text_size("Apply changes")[0] + 24.0;
             let button_size = [button_width, ui.frame_height()];
-            if ui.button_with_size("Apply changes##switch_dataset", button_size) {
+            if draw_accent_button(
+                ui,
+                &self.settings.palette,
+                "Apply changes##switch_dataset",
+                button_size,
+            ) {
                 self.start_cell_edit_job(&current);
                 if self.cell_edit_job.is_some() {
                     ui.close_current_popup();
                 }
             }
             ui.same_line_with_spacing(0.0, PANEL_GAP);
-            if ui.button_with_size("Discard##switch_dataset", button_size) {
+            if draw_accent_button(
+                ui,
+                &self.settings.palette,
+                "Discard##switch_dataset",
+                button_size,
+            ) {
                 self.pending_cell_edits
                     .retain(|key, _| key.file != current.file || key.path != current.path);
                 self.cell_editor = None;
@@ -240,7 +250,12 @@ impl App {
                 ui.close_current_popup();
             }
             ui.same_line_with_spacing(0.0, PANEL_GAP);
-            if ui.button_with_size("Cancel##switch_dataset", button_size) {
+            if draw_accent_button(
+                ui,
+                &self.settings.palette,
+                "Cancel##switch_dataset",
+                button_size,
+            ) {
                 self.queued_selection = None;
                 ui.close_current_popup();
             }
@@ -252,6 +267,7 @@ impl App {
 
     pub(crate) fn start_cell_edit_job(&mut self, selection: &Selection) {
         if self.cell_edit_job.is_some()
+            || self.bulk_replace_job.is_some()
             || self.plugins.is_busy()
             || self.file_open_jobs.iter().any(Option::is_some)
         {

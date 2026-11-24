@@ -1,6 +1,7 @@
 mod color;
 mod data;
 mod data_edit;
+mod find_replace;
 mod geospatial;
 mod globe;
 mod profiles;

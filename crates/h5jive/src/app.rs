@@ -156,6 +156,9 @@ struct App {
     pending_cell_edits: HashMap<CellKey, PendingCellEdit>,
     cell_editor: Option<CellEditor>,
     cell_edit_job: Option<CellEditJob>,
+    find_replace_dialog: Option<FindReplaceDialog>,
+    bulk_replace_job: Option<BulkReplaceJob>,
+    table_scroll_to_row: Option<usize>,
     cell_edit_message: Option<String>,
     queued_selection: Option<Selection>,
     heatmap_cache: Option<(HeatmapKey, Result<Arc<HeatmapImage>, String>)>,
@@ -337,6 +340,11 @@ impl Application for App {
         }
         if self.plugins.is_busy()
             || self.cell_edit_job.is_some()
+            || self.bulk_replace_job.is_some()
+            || self
+                .find_replace_dialog
+                .as_ref()
+                .is_some_and(|dialog| dialog.search_job.is_some())
             || self.heatmap_overview_job.is_some()
             || self.heatmap_view_overview_job.is_some()
             || self.profile_job.is_some()
@@ -523,6 +531,9 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
         pending_cell_edits: HashMap::new(),
         cell_editor: None,
         cell_edit_job: None,
+        find_replace_dialog: None,
+        bulk_replace_job: None,
+        table_scroll_to_row: None,
         cell_edit_message: None,
         queued_selection: None,
         heatmap_cache: None,

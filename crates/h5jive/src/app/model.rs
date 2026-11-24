@@ -29,6 +29,30 @@ pub(crate) struct CellEditJob {
     pub(crate) receiver: mpsc::Receiver<(h5jive_data::NumericApplyOutcome, Result<File, String>)>,
 }
 
+pub(crate) struct FindReplaceDialog {
+    pub(crate) selection: Selection,
+    pub(crate) open_requested: bool,
+    pub(crate) needle: String,
+    pub(crate) replacement: String,
+    pub(crate) match_mode: usize,
+    pub(crate) tolerance: String,
+    pub(crate) decimals: i32,
+    pub(crate) first_result: u64,
+    pub(crate) summary: Option<Result<h5jive_data::NumericSearchSummary, String>>,
+    pub(crate) progress: Arc<AtomicU64>,
+    pub(crate) cancel: Arc<AtomicBool>,
+    pub(crate) search_job:
+        Option<mpsc::Receiver<Result<h5jive_data::NumericSearchSummary, String>>>,
+    pub(crate) message: Option<String>,
+    pub(crate) preserved: bool,
+}
+
+pub(crate) struct BulkReplaceJob {
+    pub(crate) selection: Selection,
+    pub(crate) progress: Arc<AtomicU64>,
+    pub(crate) receiver: mpsc::Receiver<(h5jive_data::NumericReplaceOutcome, Result<File, String>)>,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct GeoViewOptions {
     pub(crate) time: Option<usize>,

@@ -13,6 +13,7 @@ fn volume_key_cells(key: &VolumeKey) -> usize {
 impl App {
     pub(super) fn draw(&mut self, ui: &Ui, plot_ui: &PlotUi<'_>, plot_ctx: &PlotContext) {
         self.poll_cell_edit_job();
+        self.poll_bulk_replace_job();
         self.poll_file_open_jobs();
         if self.plugins.take_reload().is_some() {
             if self.sync_restore_selection.is_none() {
@@ -364,8 +365,8 @@ impl App {
                                     ui.child_window(format!("file_tree_slot_{index}"))
                                         .size([0.0, 0.0])
                                         .build(ui, || {
-                                            if self.cell_edit_job.is_some() {
-                                                ui.text("Applying cell changes...");
+                                            if self.cell_edit_job.is_some() || self.bulk_replace_job.is_some() {
+                                                ui.text("Applying data changes...");
                                             } else if let Some(file) = self.files.get(index) {
                                                 if draw_file_root(
                                                     ui,
@@ -798,6 +799,7 @@ impl App {
             }
             WorkspaceMode::PluginLab => {
                 let can_write_files = self.cell_edit_job.is_none()
+                    && self.bulk_replace_job.is_none()
                     && !self.plugins.is_syncing()
                     && self.file_open_jobs.iter().all(Option::is_none)
                     && self.pending_cell_edits.is_empty();
@@ -835,7 +837,10 @@ impl App {
                     self.open_file_picker_for(target, path);
                 }
                 if self.plugins.has_sync_request() {
-                    if !self.pending_cell_edits.is_empty() || self.cell_edit_job.is_some() {
+                    if !self.pending_cell_edits.is_empty()
+                        || self.cell_edit_job.is_some()
+                        || self.bulk_replace_job.is_some()
+                    {
                         self.plugins.invalidate();
                         self.file_error = Some(
                             "Apply or discard pending cell edits before synchronizing files."
@@ -914,7 +919,12 @@ impl App {
                         ui.text_wrapped("Statistics exclude fill and nonfinite values. Large-dataset quartiles may use a bounded sample and are marked approximate in the table.");
                     }
                 });
-            if ui.button("Close##section_help") {
+            if draw_accent_button(
+                ui,
+                &self.settings.palette,
+                "Close##section_help",
+                [0.0, 0.0],
+            ) {
                 ui.close_current_popup();
             }
         }
@@ -1390,7 +1400,6 @@ impl App {
         let mut opened = true;
         let mut navigate = None;
         let mut chosen = None;
-        let mut cancel = false;
         if let Some(_popup) = ui
             .begin_modal_popup_config(POPUP)
             .opened(&mut opened)
@@ -1399,7 +1408,13 @@ impl App {
             ui.set_window_size_with_cond([640.0, 520.0], Condition::FirstUseEver);
             ui.text(picker.target.title());
             ui.separator();
-            if ui.button_with_size("##file_picker_refresh", [ui.frame_height(); 2]) {
+            let icon_button_size = ui.frame_height() + 6.0;
+            if draw_accent_button(
+                ui,
+                &self.settings.palette,
+                "##file_picker_refresh",
+                [icon_button_size; 2],
+            ) {
                 navigate = Some(picker.directory.clone());
             }
             draw_file_picker_refresh_icon(ui, &self.settings.palette);
@@ -1410,7 +1425,12 @@ impl App {
                 "Rescan this folder if a file was added outside H5Jive.",
             );
             ui.same_line_with_spacing(0.0, PANEL_GAP);
-            if ui.button_with_size("##file_picker_new_folder", [ui.frame_height(); 2]) {
+            if draw_accent_button(
+                ui,
+                &self.settings.palette,
+                "##file_picker_new_folder",
+                [icon_button_size; 2],
+            ) {
                 picker.creating_folder = !picker.creating_folder;
                 picker.error = None;
             }
@@ -1429,10 +1449,16 @@ impl App {
             });
             ui.same_line_with_spacing(0.0, PANEL_GAP);
             let _delete_disabled = ui.begin_disabled_with_cond(selected_file.is_none());
-            if ui.button("Delete selected file") {
+            if draw_accent_button(
+                ui,
+                &self.settings.palette,
+                "##file_picker_delete",
+                [icon_button_size; 2],
+            ) {
                 picker.pending_delete = selected_file.cloned();
                 picker.error = None;
             }
+            draw_file_picker_delete_icon(ui, &self.settings.palette, selected_file.is_some());
             drop(_delete_disabled);
             item_tip(
                 ui,
@@ -1440,22 +1466,40 @@ impl App {
                 "Delete the selected file",
                 "Select a file in the list, then confirm its deletion. Folders cannot be deleted here.",
             );
-            ui.same_line_with_spacing(0.0, PANEL_GAP);
-            ui.align_text_to_frame_padding();
-            ui.text_wrapped(picker.directory.display().to_string());
+            let path_text = picker.directory.display().to_string();
+            let path_width = ui.calc_text_size(&path_text)[0];
+            let delete_right = ui.item_rect_max()[0];
+            let content_right = ui.cursor_screen_pos()[0] + ui.content_region_avail()[0];
+            if path_width <= content_right - delete_right - PANEL_GAP {
+                ui.same_line_with_spacing(0.0, PANEL_GAP);
+                ui.align_text_to_frame_padding();
+                ui.text_wrapped(&path_text);
+            } else {
+                ui.text_wrapped(&path_text);
+            }
             if picker.creating_folder {
                 ui.set_next_item_width((ui.content_region_avail()[0] - 150.0).max(120.0));
                 ui.input_text("##file_picker_folder_name", &mut picker.new_folder_name)
                     .build();
                 ui.same_line();
-                if ui.button("Create##file_picker_folder") {
+                if draw_accent_button(
+                    ui,
+                    &self.settings.palette,
+                    "Create##file_picker_folder",
+                    [0.0, 0.0],
+                ) {
                     match create_file_picker_folder(&picker.directory, &picker.new_folder_name) {
                         Ok(path) => navigate = Some(path),
                         Err(error) => picker.error = Some(error),
                     }
                 }
                 ui.same_line();
-                if ui.button("Cancel##file_picker_folder") {
+                if draw_accent_button(
+                    ui,
+                    &self.settings.palette,
+                    "Cancel##file_picker_folder",
+                    [0.0, 0.0],
+                ) {
                     picker.creating_folder = false;
                     picker.new_folder_name.clear();
                     picker.error = None;
@@ -1464,7 +1508,12 @@ impl App {
             if let Some(path) = picker.pending_delete.clone() {
                 ui.separator();
                 ui.text_wrapped(format!("Permanently delete {}?", path.display()));
-                if ui.button("Delete file##file_picker_confirm_delete") {
+                if draw_accent_button(
+                    ui,
+                    &self.settings.palette,
+                    "Delete file##file_picker_confirm_delete",
+                    [0.0, 0.0],
+                ) {
                     match delete_file_picker_selection(
                         picker,
                         &path,
@@ -1485,7 +1534,12 @@ impl App {
                     picker.pending_delete = None;
                 }
                 ui.same_line();
-                if ui.button("Keep file##file_picker_cancel_delete") {
+                if draw_accent_button(
+                    ui,
+                    &self.settings.palette,
+                    "Keep file##file_picker_cancel_delete",
+                    [0.0, 0.0],
+                ) {
                     picker.pending_delete = None;
                 }
             }
@@ -1555,7 +1609,7 @@ impl App {
                 ui.set_next_item_width(ui.content_region_avail()[0].max(120.0));
                 ui.input_text("##picker_save_name", &mut picker.filename)
                     .build();
-                if ui.button("Use path") {
+                if draw_accent_button(ui, &self.settings.palette, "Use path", [0.0, 0.0]) {
                     let name = picker.filename.trim();
                     if name.is_empty()
                         || name == "."
@@ -1574,17 +1628,6 @@ impl App {
                                 Some("Choose a filename with the expected extension".into());
                         }
                     }
-                }
-                ui.same_line();
-                if ui.button("Cancel##picker_save") {
-                    cancel = true;
-                    ui.close_current_popup();
-                }
-            } else {
-                ui.separator();
-                if ui.button("Cancel##picker_open") {
-                    cancel = true;
-                    ui.close_current_popup();
                 }
             }
         } else if !ui.is_popup_open(POPUP) {
@@ -1614,7 +1657,7 @@ impl App {
                     .plugins
                     .set_picker_path(target, path.display().to_string()),
             }
-        } else if !opened || cancel {
+        } else if !opened {
             self.file_picker = None;
         }
     }
@@ -1631,6 +1674,7 @@ impl App {
 
     fn load_file_slot(&mut self, slot: usize) {
         if self.cell_edit_job.is_some()
+            || self.bulk_replace_job.is_some()
             || self.pending_cell_edits.keys().any(|key| key.file == slot)
         {
             self.file_error = Some(format!(
@@ -1829,16 +1873,74 @@ fn draw_file_picker_new_folder_icon(ui: &Ui, palette: &Palette) {
     draw.add_line(
         [center[0] + 4.0, center[1] - 7.0],
         [center[0] + 4.0, center[1] + 1.0],
-        palette.accent,
+        palette.text,
     )
     .thickness(1.7)
     .build();
     draw.add_line(
         [center[0], center[1] - 3.0],
         [center[0] + 8.0, center[1] - 3.0],
-        palette.accent,
+        palette.text,
     )
     .thickness(1.7)
+    .build();
+}
+
+fn draw_file_picker_delete_icon(ui: &Ui, palette: &Palette, enabled: bool) {
+    let min = ui.item_rect_min();
+    let max = ui.item_rect_max();
+    let center = [(min[0] + max[0]) * 0.5, (min[1] + max[1]) * 0.5];
+    let color = if enabled { palette.text } else { palette.muted };
+    let draw = ui.get_window_draw_list();
+    draw.add_line(
+        [center[0] - 7.0, center[1] - 6.0],
+        [center[0] + 7.0, center[1] - 6.0],
+        color,
+    )
+    .thickness(1.7)
+    .build();
+    draw.add_line(
+        [center[0] - 2.5, center[1] - 6.0],
+        [center[0] - 2.5, center[1] - 8.0],
+        color,
+    )
+    .thickness(1.7)
+    .build();
+    draw.add_line(
+        [center[0] + 2.5, center[1] - 6.0],
+        [center[0] + 2.5, center[1] - 8.0],
+        color,
+    )
+    .thickness(1.7)
+    .build();
+    draw.add_rect(
+        [center[0] - 6.0, center[1] - 5.0],
+        [center[0] + 6.0, center[1] + 6.0],
+        color,
+    )
+    .rounding(1.5)
+    .thickness(1.7)
+    .build();
+    draw.add_line(
+        [center[0] - 3.0, center[1] - 2.0],
+        [center[0] - 3.0, center[1] + 3.0],
+        color,
+    )
+    .thickness(1.5)
+    .build();
+    draw.add_line(
+        [center[0], center[1] - 2.0],
+        [center[0], center[1] + 3.0],
+        color,
+    )
+    .thickness(1.5)
+    .build();
+    draw.add_line(
+        [center[0] + 3.0, center[1] - 2.0],
+        [center[0] + 3.0, center[1] + 3.0],
+        color,
+    )
+    .thickness(1.5)
     .build();
 }
 
