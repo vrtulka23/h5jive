@@ -1,0 +1,45 @@
+dataset_formats[s5p_tropomi] : dataset_format
+  ?descr "Sentinel-5P TROPOMI swath products. Radiance bands and Level-2 retrieved fields use two group arrangements."
+  ?url "https://sentinels.copernicus.eu/data-products"
+  name = "Sentinel-5P TROPOMI"
+
+  identification
+    file_glob = "S5P_*.nc"
+
+    platform = ""
+
+    sensor = ""
+
+    product_type = ""
+
+  observation_group = ""
+
+  coordinate_group = ""
+
+  latitude = "latitude"
+
+  longitude = "longitude"
+
+  latitude_bounds = ""
+
+  longitude_bounds = ""
+
+  time_coordinate = "time"
+
+  layouts[] : dataset_layout
+    file_glob = "S5P_*_L1B_RA_BD?_*.nc"
+
+    observation_group = "OBSERVATIONS"
+
+    coordinate_group = "GEODATA"
+
+    latitude_bounds = "latitude_bounds"
+
+    longitude_bounds = "longitude_bounds"
+
+  layouts[] : dataset_layout
+    file_glob = "S5P_*_L2__*.nc"
+
+    observation_group = "PRODUCT"
+
+    coordinate_group = "PRODUCT"

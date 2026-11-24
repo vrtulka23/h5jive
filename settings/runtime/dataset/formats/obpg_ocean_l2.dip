@@ -1,0 +1,27 @@
+dataset_formats[obpg_ocean_l2] : dataset_format
+  ?descr "NASA OB.DAAC Level-2 ocean-color swaths, including MODIS, VIIRS, and PACE OCI products with pixel-matched navigation arrays."
+  ?url "https://oceancolor.gsfc.nasa.gov/docs/format/Ocean_Data_Product_Users_Guide.pdf"
+  name = "NASA OB.DAAC Ocean Color Level 2"
+
+  identification
+    file_glob = "*.L2*.nc"
+
+    platform = ""
+
+    sensor = ""
+
+    product_type = ""
+
+  observation_group = "geophysical_data"
+
+  coordinate_group = "navigation_data"
+
+  latitude = "latitude"
+
+  longitude = "longitude"
+
+  latitude_bounds = ""
+
+  longitude_bounds = ""
+
+  time_coordinate = ""

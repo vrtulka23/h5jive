@@ -739,11 +739,7 @@ mod tests {
         assert!(settings
             .dataset_rules
             .iter()
-            .any(|rule| rule.file_glob == "ESA_FDR_ATMOS__L1A_UVN__*.nc"));
-        assert!(settings
-            .dataset_rules
-            .iter()
-            .any(|rule| rule.file_glob == "ESA_FDR_ATMOS__L1B_UVN__*.nc"));
+            .any(|rule| rule.file_glob == "ESA_FDR_ATMOS__L1?_UVN__*.nc"));
         for source in &settings.dataset_sources {
             if !source.root.is_dir() {
                 continue;

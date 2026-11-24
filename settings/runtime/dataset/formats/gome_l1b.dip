@@ -24,3 +24,10 @@ dataset_formats[gome_l1b] : dataset_format
   longitude_bounds = "longitude_bounds"
 
   time_coordinate = "time"
+
+  scan_direction
+    forward_groups = "MODE_NADIR, MODE_NARROW_SWATH, MODE_NORTHPOLAR_VIEW, MODE_SOUTHPOLAR_VIEW, MODE_STATIC_VIEW"
+
+    backward_groups = "MODE_NADIR_BACKSCAN, MODE_NARROW_SWATH_BACKSCAN, MODE_NORTHPOLAR_VIEW_BACKSCAN, MODE_SOUTHPOLAR_VIEW_BACKSCAN, MODE_STATIC_VIEW_BACKSCAN"
+
+    default_filter = "both"

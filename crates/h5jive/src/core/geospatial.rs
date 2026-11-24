@@ -236,6 +236,7 @@ mod cell_tests {
     fn mixed_scan_cells_are_not_labeled_as_one_direction() {
         let scan = ScanDirection {
             path: "scan_direction".into(),
+            constant: None,
             forward_values: vec![1],
             backward_values: vec![2],
             default_filter: h5jive_data::ScanFilter::Forward,
@@ -826,6 +827,7 @@ fn load_map_data_inner(
     let scan_shape = geolocation
         .scan_direction
         .as_ref()
+        .filter(|scan| scan.constant.is_none())
         .map(|scan| file.dataset_info(&scan.path).map(|info| info.shape))
         .transpose()
         .map_err(|error| error.to_string())?;
@@ -1205,7 +1207,9 @@ fn load_map_data_inner(
                     value,
                     special,
                     scan_direction: geolocation.scan_direction.as_ref().and_then(|scan| {
-                        if let Some(all) = &all_scan_values {
+                        if let Some(direction) = scan.constant {
+                            Some(direction)
+                        } else if let Some(all) = &all_scan_values {
                             Some(cell_scan_class(
                                 scan,
                                 all,

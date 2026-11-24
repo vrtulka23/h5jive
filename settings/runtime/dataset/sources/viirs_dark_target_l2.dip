@@ -1,0 +1,11 @@
+dataset_sources[viirs_dark_target_l2] : dataset_source
+  ?descr "Local NASA VIIRS Dark Target aerosol Level-2 NetCDF granules from SNPP or NOAA platforms."
+  name = "VIIRS Dark Target aerosol Level 2"
+
+  root = "./"
+
+  format link = {?dataset_formats[viirs_dark_target_l2]}
+
+  tags = "nasa, viirs, aerosol, dark-target, l2"
+
+  product_regex = "^(?:.*/)?AERDT_L2_VIIRS_(?:SNPP|NOAA20|NOAA21)[.]A(?P<year>[0-9]{4})[0-9]{3}[.][0-9]{4}[.][0-9]{3}[.][0-9]{13}[.]nc$"

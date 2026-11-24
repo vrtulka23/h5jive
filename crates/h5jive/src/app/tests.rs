@@ -104,7 +104,7 @@ fn startup_dataset_suffix_keeps_windows_drive_and_plain_paths() {
 #[test]
 fn dataset_formats_load_from_dipl() {
     let rules = &test_settings().dataset_rules;
-    assert_eq!(rules.len(), 7);
+    assert_eq!(rules.len(), 11);
     assert!(rules.iter().any(|rule| rule.file_glob == "ERA5_*.nc"));
     assert!(rules.iter().any(|rule| {
         rule.file_glob == "ER2_RPRO_GOM_L1B*.nc"
@@ -128,7 +128,7 @@ fn dataset_formats_load_from_dipl() {
     assert_eq!(
         rules
             .iter()
-            .find(|rule| rule.sensor == "TROPOMI")
+            .find(|rule| rule.file_glob == "S5P_*_L1B_RA_BD?_*.nc")
             .unwrap()
             .time_coordinate,
         "time"
@@ -138,9 +138,20 @@ fn dataset_formats_load_from_dipl() {
     assert_eq!(scan.forward_values, [1]);
     assert_eq!(scan.backward_values, [2]);
     assert_eq!(scan.default_filter, ScanFilter::Forward);
+    let gome = rules.iter().find(|rule| rule.sensor == "GOME").unwrap();
+    let group_scan = gome.scan_direction.as_ref().unwrap();
+    assert!(group_scan.forward_groups.contains(&"MODE_NADIR".to_owned()));
+    assert!(group_scan
+        .backward_groups
+        .contains(&"MODE_NARROW_SWATH_BACKSCAN".to_owned()));
+    assert!(rules
+        .iter()
+        .any(|rule| rule.file_glob == "*_????.nc" && rule.time_coordinate == "day"));
+    assert!(rules
+        .iter()
+        .any(|rule| rule.file_glob == "*.L3m.*.nc" && rule.latitude == "lat"));
     assert!(rules.iter().any(|rule| {
         rule.file_glob == "S5P_*_L1B_RA_BD?_*.nc"
-            && rule.sensor == "TROPOMI"
             && rule.observation_group == "OBSERVATIONS"
             && rule.coordinate_group == "GEODATA"
     }));
@@ -154,6 +165,47 @@ fn dataset_formats_load_from_dipl() {
     assert_eq!(scan.forward_values, [0]);
     assert_eq!(scan.backward_values, [1]);
     assert_eq!(scan.default_filter, ScanFilter::Forward);
+    for (glob, observation, coordinates) in [
+        ("*.L2*.nc", "geophysical_data", "navigation_data"),
+        (
+            "AERDT_L2_VIIRS_*.nc",
+            "geophysical_data",
+            "geolocation_data",
+        ),
+        ("S5P_*_L2__*.nc", "PRODUCT", "PRODUCT"),
+    ] {
+        assert!(rules.iter().any(|rule| {
+            rule.file_glob == glob
+                && rule.observation_group == observation
+                && rule.coordinate_group == coordinates
+                && rule.latitude == "latitude"
+                && rule.longitude == "longitude"
+        }));
+    }
+    let sources = &test_settings().dataset_sources;
+    for (id, filename) in [
+        ("obpg_ocean_l2", "A2025001000000.L2_OC.nc"),
+        ("pace_oci_l2", "PACE_OCI.20240426T074015.L2.OC_AOP.V3_0.nc"),
+        (
+            "viirs_dark_target_l2",
+            "AERDT_L2_VIIRS_SNPP.A2025181.1812.021.2025191191124.nc",
+        ),
+        (
+            "s5p_tropomi_l2",
+            "S5P_OFFL_L2__NO2____20201007T202447_20201007T220617_15471_01_020200_20210515T213556.nc",
+        ),
+        (
+            "s5p_tropomi_l2",
+            "S5P_OFFL_L2__O3_____20201007T202447_20201007T220617_15471_01_020200_20210515T213556.nc",
+        ),
+        ("gridmet", "tmmx_2024.nc"),
+        ("obpg_ocean_l3_smi", "AQUA_MODIS.20240905_20240912.L3m.8D.CHL.chlor_a.9km.nc"),
+    ] {
+        let source = sources.iter().find(|source| source.id == id).unwrap();
+        assert!(regex::Regex::new(&source.product_regex)
+            .unwrap()
+            .is_match(filename));
+    }
     let project =
         Project::load(Path::new(env!("CARGO_MANIFEST_DIR")).join("../../settings/runtime/DIPfile"))
             .unwrap();
@@ -231,7 +283,7 @@ fn s5p_radiance_reads_a_zoomed_2d_tile_when_available() {
 }
 
 #[test]
-fn dataset_format_schema_rejects_invalid_scan_options_and_depth() {
+fn dataset_format_schema_rejects_invalid_scan_values_and_depth() {
     let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../settings/runtime");
     let temporary = std::env::temp_dir().join(format!(
         "h5jive-schema-{}-{}",
@@ -246,7 +298,6 @@ fn dataset_format_schema_rejects_invalid_scan_options_and_depth() {
     let format_file = temporary.join("dataset/formats/gome2_l1b.dip");
     let original = std::fs::read_to_string(&format_file).unwrap();
     for (valid, invalid) in [
-        ("group = \"coordinate\"", "group = \"sideways\""),
         (
             "default_filter = \"forward\"",
             "default_filter = \"sideways\"",
@@ -264,7 +315,7 @@ fn dataset_format_schema_rejects_invalid_scan_options_and_depth() {
             "DIPL accepted {invalid}"
         );
     }
-    let schema_file = temporary.join("dataset/formats/fdr_atmos_l1b_uvn.dip");
+    let schema_file = temporary.join("dataset/formats/fdr_atmos_uvn.dip");
     let original_format = std::fs::read_to_string(&schema_file).unwrap();
     assert!(original_format.contains("overpass_group_depth = 1"));
     std::fs::write(&format_file, original).unwrap();

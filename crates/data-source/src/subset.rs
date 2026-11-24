@@ -852,12 +852,36 @@ fn write_native_product(
         }
     }
     if let Some(geo) = &source_geolocation {
+        if let Some(scan) = geo
+            .scan_direction
+            .as_ref()
+            .filter(|scan| scan.constant.is_some())
+        {
+            let code = match scan.constant.unwrap() {
+                super::ScanDirectionClass::Forward => 1.0,
+                super::ScanDirectionClass::Backward => 2.0,
+                super::ScanDirectionClass::Other => f64::NAN,
+            };
+            let mut dst = out
+                .add_variable::<f64>(&format!("{prefix}/scan_direction"), &["row", "column"])
+                .map_err(err)?;
+            for row in 0..r1 - r0 {
+                for run in &window.columns {
+                    let values = vec![code; run.count];
+                    dst.put_values(&values, ([row, run.output], [1, run.count]))
+                        .map_err(err)?;
+                }
+            }
+        }
         for (name, path) in [
             ("latitude_bounds", geo.latitude_bounds.as_ref()),
             ("longitude_bounds", geo.longitude_bounds.as_ref()),
             (
                 "scan_direction",
-                geo.scan_direction.as_ref().map(|scan| &scan.path),
+                geo.scan_direction
+                    .as_ref()
+                    .filter(|scan| scan.constant.is_none())
+                    .map(|scan| &scan.path),
             ),
         ] {
             let Some(path) = path else { continue };
@@ -1732,15 +1756,28 @@ fn write_time_series(out: &mut netcdf::FileMut, request: &SubsetRequest) -> Resu
                                     ),
                                 ] {
                                     let Some(path) = path else { continue };
-                                    let values = series_aux_row(
-                                        &file,
-                                        path,
-                                        source_time,
-                                        row,
-                                        column,
-                                        len,
-                                        bounds,
-                                    )?;
+                                    let values = if name == "scan_direction" && path.is_empty() {
+                                        let code = match geo
+                                            .scan_direction
+                                            .as_ref()
+                                            .and_then(|scan| scan.constant)
+                                        {
+                                            Some(super::ScanDirectionClass::Forward) => 1.0,
+                                            Some(super::ScanDirectionClass::Backward) => 2.0,
+                                            _ => f64::NAN,
+                                        };
+                                        vec![code; len]
+                                    } else {
+                                        series_aux_row(
+                                            &file,
+                                            path,
+                                            source_time,
+                                            row,
+                                            column,
+                                            len,
+                                            bounds,
+                                        )?
+                                    };
                                     let (start, shape) = if bounds {
                                         (
                                             vec![

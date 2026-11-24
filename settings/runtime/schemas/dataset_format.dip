@@ -36,12 +36,19 @@ overpass_group_depth int = 0
   ?descr "Leading geolocation path components identifying independent platforms within one product; 0 groups by product."
   !condition ({.} >= 0 && {.} <= 4)
 
+layouts list
+  ?descr "Optional alternative observation/geolocation layouts within one mission class. Each entry may narrow the filename glob."
+
 scan_direction
-  ?descr "Optional per-pixel scan direction flag. Unknown codes remain visible in Both mode."
+  ?descr "Optional per-pixel scan flag or direction encoded by an ancestor group name. Unknown codes remain visible in Both mode."
   group str = "coordinate"
-    ?descr "Set to coordinate or observation to choose the sibling group."
-    !options ["coordinate", "observation"]
-    !condition ({.} == "coordinate" || {.} == "observation")
+    ?descr "Flag location: coordinate, observation, or another sibling group path."
+
+  forward_groups str = ""
+    ?descr "Comma-separated ancestor group names whose observations are forward scans."
+
+  backward_groups str = ""
+    ?descr "Comma-separated ancestor group names whose observations are backward scans."
 
   variable str = ""
 

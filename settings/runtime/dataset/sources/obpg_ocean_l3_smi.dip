@@ -1,0 +1,11 @@
+dataset_sources[obpg_ocean_l3_smi] : dataset_source
+  ?descr "Locally downloaded NASA Ocean Color Level-3 standard mapped NetCDF files."
+  name = "NASA Ocean Color Level 3 SMI"
+
+  root = "./"
+
+  format link = {?dataset_formats[obpg_ocean_l3_smi]}
+
+  tags = "nasa, obdaac, ocean-color, gridded, l3"
+
+  product_regex = "^(?:.*/)?[^/]+[.](?P<year>[12][0-9]{3})(?P<month>[01][0-9])(?P<day>[0-3][0-9])(?:_[0-9]{8})?[.]L3m[.][^/]+[.]nc$"

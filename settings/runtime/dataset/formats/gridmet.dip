@@ -1,0 +1,27 @@
+dataset_formats[gridmet] : dataset_format
+  ?descr "GridMET annual CF NetCDF climate grids, with a day axis and one-dimensional latitude and longitude coordinates."
+  ?url "https://www.reacchpna.org/thredds/dodsC/MET/tmmx/tmmx_2024.nc.html"
+  name = "GridMET annual climate grid"
+
+  identification
+    file_glob = "*_????.nc"
+
+    platform = ""
+
+    sensor = ""
+
+    product_type = ""
+
+  observation_group = ""
+
+  coordinate_group = ""
+
+  latitude = "lat"
+
+  longitude = "lon"
+
+  latitude_bounds = ""
+
+  longitude_bounds = ""
+
+  time_coordinate = "day"

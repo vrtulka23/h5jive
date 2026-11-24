@@ -3,7 +3,7 @@ dataset_sources[s5p] : dataset_source
 
   root = "./"
 
-  format link = {?dataset_formats[s5p_tropomi_l1b_radiance]}
+  format link = {?dataset_formats[s5p_tropomi]}
 
   tags = "s5p, sentinel-5p, tropomi, radiance, l1b"
 

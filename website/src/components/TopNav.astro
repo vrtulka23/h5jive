@@ -2,7 +2,7 @@
 interface Props {
   root: string;
   home?: boolean;
-  current?: 'features' | 'views' | 'plugins';
+  current?: 'browser' | 'features' | 'views' | 'plugins';
   pluginsCatalog?: boolean;
 }
 
@@ -13,10 +13,9 @@ const plugins = pluginsCatalog ? '#catalog' : `${root}plugins/`;
 
 <nav aria-label="Main navigation">
   <a href={section('download')}>Install</a>
-  <a href={section('browser')}>Browser</a>
-  <a href={section('views')} aria-current={current === 'views' ? 'page' : undefined}>Views</a>
+  <a href={`${root}browser/`} aria-current={current === 'browser' ? 'page' : undefined}>Browser</a>
+  <a href={`${root}views/`} aria-current={current === 'views' ? 'page' : undefined}>Views</a>
   <a href={plugins} aria-current={current === 'plugins' ? 'page' : undefined}>Plugins</a>
-  <a href={section('capabilities')}>Capabilities</a>
   <a href={`${root}features/`} aria-current={current === 'features' ? 'page' : undefined}>Features</a>
   <a href={`${root}guide/`}>Guide</a>
   <a class="nav-cta" href="https://github.com/vrtulka23/h5jive">Source code <span aria-hidden="true">↗</span></a>

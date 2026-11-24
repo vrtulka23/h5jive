@@ -1,0 +1,42 @@
+---
+import { viewPages } from '../../data/views';
+import TopNav from '../../components/TopNav.astro';
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#081b2d" />
+    <meta name="description" content="Explore H5Jive's data table, profiles, slices, volumes, world map, and globe views." />
+    <link rel="icon" type="image/png" href="../h5jive-icon.png" />
+    <link rel="stylesheet" href="../site.css" />
+    <link rel="stylesheet" href="../layout.css" />
+    <link rel="stylesheet" href="../views.css" />
+    <script data-goatcounter="https://h5jive.goatcounter.com/count" async src="//gc.zgo.at/count.js"></script>
+    <title>Views — H5Jive</title>
+  </head>
+  <body>
+    <header class="topbar wrap">
+      <a class="brand" href="../" aria-label="H5Jive home"><img class="brand-icon" src="../h5jive.png" width="42" height="42" alt="" /> H5Jive</a>
+      <TopNav root="../" current="views" />
+    </header>
+
+    <main class="views-page wrap">
+      <section class="views-intro" aria-labelledby="views-title">
+        <div><p class="eyebrow">H5JIVE / VIEWS</p><h1 id="views-title">One dataset.<br /><em>Many ways to see it.</em></h1></div>
+        <p>Move between source values, profiles, slices, volumes, and geographic views. Each view keeps the selected dataset in context while showing a different part of its shape or location.</p>
+      </section>
+
+      <section class="views-grid" aria-label="Explore H5Jive views">
+        {viewPages.map((view, index) => <a class="views-card" href={`./${view.slug}/`}>
+          <div class="views-card-image"><img src={`../${view.image}`} width="2564" height="1508" alt={view.alt} loading={index < 2 ? 'eager' : 'lazy'} decoding="async" /></div>
+          <div class="views-card-copy"><span class="views-card-number">VIEW {String(index + 1).padStart(2, '0')} / 06</span><h2>{view.title}</h2><p>{view.summary}</p><span class="views-card-link">Explore view <span aria-hidden="true">↗</span></span></div>
+        </a>)}
+      </section>
+      <p class="sample-credit">Screenshots show modified EUMETSAT Metop-B GOME-2 Level 1B data (2013). © EUMETSAT 2013. <a href="https://creativecommons.org/licenses/by/4.0/">CC BY 4.0</a>. Map backgrounds: <a href="https://www.naturalearthdata.com/about/terms-of-use/">Natural Earth</a>.</p>
+    </main>
+    <footer class="footer wrap"><a class="brand" href="../"><img class="brand-icon" src="../h5jive.png" width="32" height="32" alt="" /> H5Jive</a><span>Dig into your data.</span><span>© H5Jive contributors</span></footer>
+  </body>
+</html>

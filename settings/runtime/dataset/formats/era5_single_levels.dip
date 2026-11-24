@@ -1,4 +1,5 @@
 dataset_formats[era5_single_levels] : dataset_format
+  ?descr "ERA5 single-level CF grids with latitude, longitude, and a valid_time coordinate."
   name = "ERA5 single levels"
 
   identification

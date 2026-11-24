@@ -130,6 +130,7 @@ pub fn select_geographic_axes(
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ScanDirection {
     pub path: String,
+    pub constant: Option<ScanDirectionClass>,
     pub forward_values: Vec<i64>,
     pub backward_values: Vec<i64>,
     pub default_filter: ScanFilter,
@@ -176,6 +177,9 @@ mod scan_filter_tests {
 
 impl ScanDirection {
     pub fn classify(&self, value: f64, fill: Option<f64>) -> ScanDirectionClass {
+        if let Some(direction) = self.constant {
+            return direction;
+        }
         if !value.is_finite() || fill == Some(value) || value.fract() != 0.0 {
             return ScanDirectionClass::Other;
         }
@@ -199,6 +203,8 @@ pub struct ScanDirectionRule {
     pub variable: String,
     pub forward_values: Vec<i64>,
     pub backward_values: Vec<i64>,
+    pub forward_groups: Vec<String>,
+    pub backward_groups: Vec<String>,
     pub default_filter: ScanFilter,
 }
 
@@ -238,10 +244,32 @@ impl File {
                 continue;
             }
             let scan_direction = rule.scan_direction.as_ref().and_then(|config| {
+                let ancestors = base.split('/');
+                let direction = ancestors.clone().find_map(|part| {
+                    if config.forward_groups.iter().any(|name| name == part) {
+                        Some(ScanDirectionClass::Forward)
+                    } else if config.backward_groups.iter().any(|name| name == part) {
+                        Some(ScanDirectionClass::Backward)
+                    } else {
+                        None
+                    }
+                });
+                if let Some(direction) = direction {
+                    return Some(ScanDirection {
+                        path: String::new(),
+                        constant: Some(direction),
+                        forward_values: vec![1],
+                        backward_values: vec![2],
+                        default_filter: config.default_filter,
+                    });
+                }
+                if config.variable.is_empty() {
+                    return None;
+                }
                 let group = match config.group.as_str() {
                     "observation" => &rule.observation_group,
                     "coordinate" => &rule.coordinate_group,
-                    _ => return None,
+                    _ => &config.group,
                 };
                 let path = format!("{base}/{group}/{}", config.variable);
                 self.dataset_info(&path)
@@ -249,6 +277,7 @@ impl File {
                     .filter(|info| info.numeric && compatible_shape(&info.shape, &shape))?;
                 Some(ScanDirection {
                     path,
+                    constant: None,
                     forward_values: config.forward_values.clone(),
                     backward_values: config.backward_values.clone(),
                     default_filter: config.default_filter,
@@ -380,6 +409,7 @@ impl File {
                         };
                         ScanDirection {
                             path: scan,
+                            constant: None,
                             forward_values: codes("scan_forward_values"),
                             backward_values: codes("scan_backward_values"),
                             default_filter: match attribute("scan_default_filter") {
@@ -409,6 +439,9 @@ impl GeolocationRule {
             ("sensor", &self.sensor),
             ("product_type", &self.product_type),
         ] {
+            if pattern.is_empty() {
+                continue;
+            }
             if let Some(attribute) = attributes.iter().find(|attribute| attribute.name == name) {
                 if !glob_matches(pattern, &attribute.value) {
                     return false;
@@ -676,5 +709,15 @@ mod tests {
         assert!(!rule.matches("other_name.nc", &partial));
         assert!(rule.matches("20130101_gome.nc", &[]));
         assert!(!rule.matches("other_name.nc", &[]));
+
+        let filename_rule = GeolocationRule {
+            file_glob: "*.L2*.nc".into(),
+            platform: String::new(),
+            sensor: String::new(),
+            product_type: String::new(),
+            ..rule
+        };
+        assert!(filename_rule.matches("A2025001000000.L2_OC.nc", &attrs("Aqua", "L2_OC")));
+        assert!(!filename_rule.matches("other_name.nc", &attrs("Aqua", "L2_OC")));
     }
 }

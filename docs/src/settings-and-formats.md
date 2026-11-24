@@ -109,6 +109,44 @@ replaces it; closing the app does not delete it. When the configured root or
 product regex changes, the old index is ignored until the next refresh. You can
 delete `.cache/datasets/` to clear all saved indexes; scans will recreate them.
 
+## Supported dataset formats
+
+H5Jive registers these mission and collection layouts in DIPL. A format entry
+describes how measurements relate to geographic coordinates; a source entry
+points to a repository of files. Ordinary numeric HDF5 and NetCDF arrays can be
+inspected without either entry.
+
+| Format class | How H5Jive locates geography |
+| --- | --- |
+| [GOME Level 1B](https://github.com/vrtulka23/h5jive/blob/main/settings/runtime/dataset/formats/gome_l1b.dip) | Band observations with sibling geodata; mode groups identify forward/backward scans |
+| [SCIAMACHY Level 1C](https://github.com/vrtulka23/h5jive/blob/main/settings/runtime/dataset/formats/sciamachy_l1c.dip) | Band observations with sibling geodata and a backscan flag |
+| [GOME-2 Level 1B](https://github.com/vrtulka23/h5jive/blob/main/settings/runtime/dataset/formats/gome2_l1b.dip) | One layout for MetOp-A/B/C; sibling geodata and per-pixel scan flags |
+| [FDR4ATMOS UVN](https://github.com/vrtulka23/h5jive/blob/main/settings/runtime/dataset/formats/fdr_atmos_uvn.dip) | One layout for Level 1A/1B, with GOME and SCIAMACHY groups |
+| [Sentinel-5P TROPOMI](https://github.com/vrtulka23/h5jive/blob/main/settings/runtime/dataset/formats/s5p_tropomi.dip) | Radiance bands use sibling `OBSERVATIONS`/`GEODATA`; Level-2 gas, aerosol, and cloud swaths use `PRODUCT` coordinates |
+| [NASA OB.DAAC Ocean Color Level 2](https://github.com/vrtulka23/h5jive/blob/main/settings/runtime/dataset/formats/obpg_ocean_l2.dip) | MODIS, VIIRS, and PACE OCI swaths with pixel-matched `navigation_data` |
+| [VIIRS Dark Target aerosol Level 2](https://github.com/vrtulka23/h5jive/blob/main/settings/runtime/dataset/formats/viirs_dark_target_l2.dip) | Geophysical observations with sibling `geolocation_data` |
+| [ERA5 single levels](https://github.com/vrtulka23/h5jive/blob/main/settings/runtime/dataset/formats/era5_single_levels.dip) | CF regular grid with `valid_time` |
+| [GridMET annual climate grids](https://github.com/vrtulka23/h5jive/blob/main/settings/runtime/dataset/formats/gridmet.dip) | CF regular grid with `day`, `lat`, and `lon` |
+| [NASA Ocean Color Level 3 SMI](https://github.com/vrtulka23/h5jive/blob/main/settings/runtime/dataset/formats/obpg_ocean_l3_smi.dip) | Regular mapped ocean-color grid |
+
+Bundled source entries are examples. You can register several repositories with
+the same format, such as separate GOME-1 processing releases, by giving each
+source its own ID and root. Grouped products require coordinate arrays that
+match the observation pixels. Multi-file packages and subsampled navigation
+control points need additional handling before they can be mapped.
+
+When a mission has multiple group arrangements, its format can declare
+`layouts[]` entries with a filename glob and the coordinate-group relationship
+for each arrangement. TROPOMI uses this for Level-1B radiance and Level-2
+retrievals. This is a structural distinction: NO₂, ozone, methane, and other
+Level-2 variables share the `PRODUCT` geolocation rule when their coordinate
+arrays match the selected observation.
+
+To request support for another layout, [open a GitHub issue](https://github.com/vrtulka23/h5jive/issues/new)
+and include a representative file or the product format specification. New
+format definitions can then be added to DIPL without duplicating an existing
+mission class.
+
 ## Supported data
 
 The data-source crate reads HDF5/NetCDF-4 and classic NetCDF. Numeric datasets
@@ -155,7 +193,8 @@ GOME-2 Band 3 sample is an example: it has a leading time dimension but no
 time coordinate values.
 
 Formats can also define a `scan_direction` subnode for a per-pixel flag. Set
-`group` to `coordinate` or `observation`, `variable` to the flag name, and
+`group` to `coordinate`, `observation`, or another sibling group path. Set
+`variable` to the flag name, and
 `forward_values` and `backward_values` to comma-separated integer codes. The
 `default_filter` setting chooses the initial world/globe selection (`forward`,
 `backward`, or `both`); bundled GOME-2 and SCIAMACHY formats start on `forward`.
@@ -165,6 +204,11 @@ The flag must share the observation's spatial dimensions. GOME-2 uses
 then offer icon buttons for both, forward, and backward scans. They filter the
 loaded pixels immediately; the both-directions setting also includes pixels
 with unknown flag codes.
+
+When direction is encoded by the surrounding group instead of a pixel flag,
+list its ancestor names in `forward_groups` and `backward_groups`. GOME-1 uses
+this layout for separate scan-mode groups. The same general fields can describe
+other products that divide forward and backward observations into groups.
 
 Four-dimensional radiance arrays use their first three dimensions for map
 geolocation and a pinned fourth-axis index for values. The world map and globe

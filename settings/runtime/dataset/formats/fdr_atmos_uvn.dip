@@ -1,15 +1,15 @@
-dataset_formats[fdr_atmos_l1a_uvn] : dataset_format
-  ?descr "FDR4ATMOS Level 1A UVN contains GOME and SCIAMACHY observation groups."
-  name = "FDR4ATMOS Level 1A UVN"
+dataset_formats[fdr_atmos_uvn] : dataset_format
+  ?descr "FDR4ATMOS UVN Level 1A and 1B products share GOME and SCIAMACHY observation and geodata groups."
+  name = "FDR4ATMOS UVN"
 
   identification
-    file_glob = "ESA_FDR_ATMOS__L1A_UVN__*.nc"
+    file_glob = "ESA_FDR_ATMOS__L1?_UVN__*.nc"
 
     platform = "ERS-2, ENVISAT"
 
     sensor = "GOME, SCIAMACHY"
 
-    product_type = "ATMOS__L1A"
+    product_type = "ATMOS__L1?"
 
   observation_group = "OBSERVATIONS"
 

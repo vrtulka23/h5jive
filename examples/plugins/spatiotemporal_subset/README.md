@@ -15,7 +15,7 @@ repository), and add `code[]` with that file path to `settings/runtime/DIPfile`:
 dataset_sources[subset_demo] : dataset_source
   name = "North Sea subset demo"
   root = "../../examples/plugins/spatiotemporal_subset/products"
-  format link = {?dataset_formats[s5p_tropomi_l1b_radiance]}
+  format link = {?dataset_formats[s5p_tropomi]}
   tags = "demo, wind"
   product_regex = "^north_sea_(?P<year>[0-9]{4})(?P<month>[0-9]{2})(?P<day>[0-9]{2})_orbit(?P<orbit>[0-9]+)[.]nc$"
 ```

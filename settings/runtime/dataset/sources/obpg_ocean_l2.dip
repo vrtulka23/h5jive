@@ -1,0 +1,11 @@
+dataset_sources[obpg_ocean_l2] : dataset_source
+  ?descr "Local MODIS or VIIRS OB.DAAC ocean-color Level-2 NetCDF granules using the legacy year/day-of-year filename."
+  name = "NASA Ocean Color Level 2"
+
+  root = "./"
+
+  format link = {?dataset_formats[obpg_ocean_l2]}
+
+  tags = "nasa, obdaac, ocean-color, modis, viirs, l2"
+
+  product_regex = "^(?:.*/)?[AVT](?P<year>[0-9]{4})[0-9]{9}[.]L2_[^/]+[.]nc$"

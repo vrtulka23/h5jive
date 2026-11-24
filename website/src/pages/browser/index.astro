@@ -1,0 +1,65 @@
+---
+import TopNav from '../../components/TopNav.astro';
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#081b2d" />
+    <meta name="description" content="Find HDF5 and NetCDF products in indexed dataset sources with the H5Jive Dataset Browser." />
+    <link rel="icon" type="image/png" href="../h5jive-icon.png" />
+    <link rel="stylesheet" href="../site.css" />
+    <link rel="stylesheet" href="../layout.css" />
+    <script data-goatcounter="https://h5jive.goatcounter.com/count" async src="//gc.zgo.at/count.js"></script>
+    <title>Dataset Browser — H5Jive</title>
+  </head>
+  <body>
+    <header class="topbar wrap">
+      <a class="brand" href="../" aria-label="H5Jive home"><img class="brand-icon" src="../h5jive.png" width="42" height="42" alt="" /> H5Jive</a>
+      <TopNav root="../" current="browser" />
+    </header>
+
+    <main class="browser-page">
+      <section class="browser-section wrap" aria-labelledby="browser-title">
+        <div class="browser-heading">
+          <div><p class="eyebrow">H5JIVE / DATASET BROWSER</p><h1 id="browser-title">Find the product.<br />Then explore the data.</h1></div>
+          <p>Register dataset locations in DIPL and browse their indexed products from one place. Filter sources by tag, search products by name, path, date, or orbit, and open a selection as file A or B in the inspector.</p>
+        </div>
+        <figure class="browser-preview">
+          <a href="../dataset-browser.png" aria-label="Open full-size Dataset Browser screenshot"><img src="../dataset-browser.png" width="2564" height="1508" alt="H5Jive Dataset Browser showing tagged source repositories, product search, a sortable product table, and file A and B slots" decoding="async" /></a>
+          <figcaption>Configured sources on the left · searchable products on the right · selected files below</figcaption>
+        </figure>
+        <div class="browser-details">
+          <p><strong>Keep the index close.</strong> Refresh a source when its files change; the browser saves the product list for later sessions.</p>
+          <a class="text-link" href="../guide/settings-and-formats.html">Configure dataset sources <span aria-hidden="true">↗</span></a>
+        </div>
+      </section>
+
+      <section class="browser-workflow wrap" aria-labelledby="browser-workflow-title">
+        <div><p class="eyebrow">FROM FILES TO FINDINGS</p><h2 id="browser-workflow-title">One place to find a product.</h2></div>
+        <ol>
+          <li><strong>Register a source.</strong> Point a DIPL dataset source at a directory of products.</li>
+          <li><strong>Find a product.</strong> Refresh its index, then filter by source tag or search by name, path, date, or orbit.</li>
+          <li><strong>Open it in H5Jive.</strong> Send the product to File A or B and inspect its datasets in the tree and views.</li>
+        </ol>
+      </section>
+
+      <section class="browser-formats wrap" aria-labelledby="browser-formats-title">
+        <div class="browser-formats-intro">
+          <div><p class="eyebrow">DATASET FORMATS</p><h2 id="browser-formats-title">Geography follows the layout.</h2></div>
+          <p>H5Jive reads CF coordinates directly and uses DIPL rules when a product places measurements and geolocation in different NetCDF groups. The rules describe structures shared across missions and processing releases.</p>
+        </div>
+        <div class="browser-format-grid">
+          <div class="browser-format-group"><h3>CF coordinate grids</h3><p>Latitude and longitude axes live with the field; time may have a separate coordinate name.</p><strong>ERA5 · GridMET · NASA Ocean Color Level 3 SMI</strong></div>
+          <div class="browser-format-group"><h3>Swaths with sibling geolocation</h3><p>H5Jive pairs observation groups with navigation or geodata groups. Scan direction may come from a flag or a mode group.</p><strong>GOME · SCIAMACHY · GOME-2 (MetOp A/B/C) · FDR4ATMOS UVN · TROPOMI radiance · NASA Ocean Color Level 2 (MODIS, VIIRS, PACE OCI) · VIIRS Dark Target</strong></div>
+          <div class="browser-format-group"><h3>Swaths with shared product group</h3><p>Measurements and pixel centers live in the same <code>PRODUCT</code> group.</p><strong>TROPOMI Level 2 gas, aerosol, and cloud products</strong></div>
+        </div>
+        <p class="browser-formats-note">One mission can have distinct layouts; one layout can serve many product variants. Source entries are examples, and multiple repositories can share a format. <a href="../guide/settings-and-formats.html">See the format registry and registration steps <span aria-hidden="true">→</span></a></p>
+        <p class="browser-formats-note">Need another dataset layout? <a href="https://github.com/vrtulka23/h5jive/issues/new">Open a GitHub issue</a> with a sample file or a link to its format specification so we can add it.</p>
+      </section>
+    </main>
+    <footer class="footer wrap"><a class="brand" href="../"><img class="brand-icon" src="../h5jive.png" width="32" height="32" alt="" /> H5Jive</a><span>Dig into your data.</span><span>© H5Jive contributors</span></footer>
+  </body>
+</html>

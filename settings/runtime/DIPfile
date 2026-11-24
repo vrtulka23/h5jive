@@ -29,6 +29,11 @@ schemas[]
   file = "schemas/dataset_format.dip"
 
 schemas[]
+  name = "dataset_layout"
+
+  file = "schemas/dataset_layout.dip"
+
+schemas[]
   name = "dataset_source"
 
   file = "schemas/dataset_source.dip"
@@ -166,13 +171,22 @@ code[]
   file = "dataset/formats/era5_single_levels.dip"
 
 code[]
-  file = "dataset/formats/s5p_tropomi_l1b_radiance.dip"
+  file = "dataset/formats/s5p_tropomi.dip"
 
 code[]
-  file = "dataset/formats/fdr_atmos_l1a_uvn.dip"
+  file = "dataset/formats/fdr_atmos_uvn.dip"
 
 code[]
-  file = "dataset/formats/fdr_atmos_l1b_uvn.dip"
+  file = "dataset/formats/obpg_ocean_l2.dip"
+
+code[]
+  file = "dataset/formats/viirs_dark_target_l2.dip"
+
+code[]
+  file = "dataset/formats/gridmet.dip"
+
+code[]
+  file = "dataset/formats/obpg_ocean_l3_smi.dip"
 
 code[]
   file = "dataset/sources/gome.dip"
@@ -188,6 +202,24 @@ code[]
 
 code[]
   file = "dataset/sources/s5p.dip"
+
+code[]
+  file = "dataset/sources/obpg_ocean_l2.dip"
+
+code[]
+  file = "dataset/sources/pace_oci_l2.dip"
+
+code[]
+  file = "dataset/sources/viirs_dark_target_l2.dip"
+
+code[]
+  file = "dataset/sources/s5p_tropomi_l2.dip"
+
+code[]
+  file = "dataset/sources/gridmet.dip"
+
+code[]
+  file = "dataset/sources/obpg_ocean_l3_smi.dip"
 
 code[]
   file = "themes/dark.dip"

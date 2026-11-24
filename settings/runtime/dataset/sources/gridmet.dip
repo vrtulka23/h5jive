@@ -1,0 +1,12 @@
+dataset_sources[gridmet] : dataset_source
+  ?descr "Locally downloaded GridMET annual climate files from the University of Idaho THREDDS catalog."
+  ?url "https://tds-proxy.nkn.uidaho.edu/thredds/reacch_climate_MET_catalog.html"
+  name = "GridMET"
+
+  root = "./"
+
+  format link = {?dataset_formats[gridmet]}
+
+  tags = "gridmet, climate, meteorology, cf, grid"
+
+  product_regex = "^(?:.*/)?[a-z0-9]+_(?P<year>[12][0-9]{3})[.]nc$"

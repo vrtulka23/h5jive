@@ -1,0 +1,27 @@
+dataset_formats[obpg_ocean_l3_smi] : dataset_format
+  ?descr "NASA OB.DAAC Level-3 standard mapped ocean-color fields on a regular latitude/longitude grid."
+  ?url "https://oceancolor.gsfc.nasa.gov/docs/format/Ocean_Data_Product_Users_Guide.pdf"
+  name = "NASA Ocean Color Level 3 SMI"
+
+  identification
+    file_glob = "*.L3m.*.nc"
+
+    platform = ""
+
+    sensor = ""
+
+    product_type = ""
+
+  observation_group = ""
+
+  coordinate_group = ""
+
+  latitude = "lat"
+
+  longitude = "lon"
+
+  latitude_bounds = ""
+
+  longitude_bounds = ""
+
+  time_coordinate = ""

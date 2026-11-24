@@ -1,0 +1,27 @@
+dataset_formats[viirs_dark_target_l2] : dataset_format
+  ?descr "NASA VIIRS Dark Target aerosol Level-2 swaths with geophysical and geolocation groups."
+  ?url "https://atmosphere-imager.gsfc.nasa.gov/sites/default/files/ModAtmo/DT_Aerosol_UsersGuide_MODIS_VIIRS_v3.pdf"
+  name = "VIIRS Dark Target aerosol Level 2"
+
+  identification
+    file_glob = "AERDT_L2_VIIRS_*.nc"
+
+    platform = ""
+
+    sensor = ""
+
+    product_type = ""
+
+  observation_group = "geophysical_data"
+
+  coordinate_group = "geolocation_data"
+
+  latitude = "latitude"
+
+  longitude = "longitude"
+
+  latitude_bounds = ""
+
+  longitude_bounds = ""
+
+  time_coordinate = ""

@@ -271,7 +271,26 @@ fn read_dataset_rules(dip: &Project) -> Result<Vec<GeolocationRule>, Box<dyn std
                 .as_string()
         };
         let scan_variable = field("scan_direction.variable")?;
-        let scan_direction = if scan_variable.is_empty() {
+        let groups = |name: &str| -> Result<Vec<String>, Box<dyn std::error::Error>> {
+            Ok(field(name)?
+                .split(',')
+                .map(str::trim)
+                .filter(|name| !name.is_empty())
+                .map(str::to_owned)
+                .collect())
+        };
+        let forward_groups = groups("scan_direction.forward_groups")?;
+        let backward_groups = groups("scan_direction.backward_groups")?;
+        if forward_groups
+            .iter()
+            .any(|group| backward_groups.contains(group))
+        {
+            return Err(format!("Invalid overlapping scan direction groups for {id}").into());
+        }
+        let scan_direction = if scan_variable.is_empty()
+            && forward_groups.is_empty()
+            && backward_groups.is_empty()
+        {
             None
         } else {
             let values = |name: &str| -> Result<Vec<i64>, Box<dyn std::error::Error>> {
@@ -296,6 +315,8 @@ fn read_dataset_rules(dip: &Project) -> Result<Vec<GeolocationRule>, Box<dyn std
                 variable: scan_variable,
                 forward_values,
                 backward_values,
+                forward_groups,
+                backward_groups,
                 default_filter: match field("scan_direction.default_filter")?.as_str() {
                     "both" => ScanFilter::Both,
                     "forward" => ScanFilter::Forward,
@@ -304,7 +325,7 @@ fn read_dataset_rules(dip: &Project) -> Result<Vec<GeolocationRule>, Box<dyn std
                 },
             })
         };
-        rules.push(GeolocationRule {
+        let base = GeolocationRule {
             file_glob: field("identification.file_glob")?,
             platform: field("identification.platform")?,
             sensor: field("identification.sensor")?,
@@ -317,7 +338,32 @@ fn read_dataset_rules(dip: &Project) -> Result<Vec<GeolocationRule>, Box<dyn std
             longitude_bounds: field("longitude_bounds")?,
             time_coordinate: field("time_coordinate")?,
             scan_direction,
-        });
+        };
+        let layout_node = dip.node(&format!("dataset_formats[{id}].layouts"))?;
+        let layouts = layout_node.entries()?;
+        if layouts.is_empty() {
+            rules.push(base);
+        } else {
+            for (index, _) in layouts.into_iter().enumerate() {
+                let layout = |name: &str| {
+                    dip.node(&format!("dataset_formats[{id}].layouts[{index}].{name}"))?
+                        .as_string()
+                };
+                let mut rule = base.clone();
+                rule.file_glob = layout("file_glob")?;
+                rule.observation_group = layout("observation_group")?;
+                rule.coordinate_group = layout("coordinate_group")?;
+                rule.latitude = layout("latitude")?;
+                rule.longitude = layout("longitude")?;
+                rule.latitude_bounds = layout("latitude_bounds")?;
+                rule.longitude_bounds = layout("longitude_bounds")?;
+                let time = layout("time_coordinate")?;
+                if !time.is_empty() {
+                    rule.time_coordinate = time;
+                }
+                rules.push(rule);
+            }
+        }
     }
     Ok(rules)
 }

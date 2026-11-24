@@ -1,0 +1,17 @@
+?descr "One observation/geolocation group arrangement within a dataset format."
+file_glob str
+  ?descr "Filename glob selecting this layout within its parent format."
+
+observation_group str
+
+coordinate_group str
+
+latitude str = "latitude"
+
+longitude str = "longitude"
+
+latitude_bounds str = ""
+
+longitude_bounds str = ""
+
+time_coordinate str = ""
