@@ -1,4 +1,4 @@
-# Other desert PICS. A regional search window finds overpasses but does not define calibration pixels.
+?descr "Other desert PICS with regional overpass search windows that do not define calibration pixels."
 pics[libya_2] : calibration_site
   ?url "https://calval.cr.usgs.gov/apps/libya-2"
   name = "Libya 2"

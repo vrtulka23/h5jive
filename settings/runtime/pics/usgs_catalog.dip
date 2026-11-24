@@ -1,4 +1,4 @@
-# Additional USGS catalog PICS with published CNES and SDSU regions; catalog centers may lie outside the regions.
+?descr "Additional USGS catalog PICS with published CNES and SDSU regions; catalog centers may lie outside the regions."
 pics[egypt_1] : pics_catalog_site
   ?url "https://calval.cr.usgs.gov/apps/egypt-1"
   name = "Egypt 1"

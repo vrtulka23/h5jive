@@ -1,4 +1,4 @@
-# Snow, ice, ocean color, and atmospheric stations are search locations, not desert PICS.
+?descr "Snow, ice, ocean color, and atmospheric reference stations used as overpass search locations."
 pics[dome_c] : calibration_site
   ?url "https://calval.cr.usgs.gov/apps/node/21"
   name = "Dome C"

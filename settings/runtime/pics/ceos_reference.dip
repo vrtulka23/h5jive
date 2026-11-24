@@ -1,4 +1,4 @@
-# Six CEOS reference PICS. Site centers and ROIs are sourced from the USGS EROS Cal/Val Test Sites Catalog.
+?descr "Six CEOS reference PICS with site centers and regions sourced from the USGS EROS Cal/Val Test Sites Catalog."
 pics[algeria_3] : pics_site
   ?url "https://calval.cr.usgs.gov/apps/algeria-3"
   name = "Algeria 3"

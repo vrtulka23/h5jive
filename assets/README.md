@@ -1,5 +1,8 @@
 # Earth background texture
 
+`dipl-cheatsheet.pdf` is the source copy of the DIPL cheatsheet appended to
+`settings/settings-report.pdf` by `generate-settings-report.sh`.
+
 `earth_natural_earth_2_relief_water_4096.bmp` is a 4096 × 2048 rendering of
 Natural Earth II with shaded relief, water, and drainages, 1:10m raster. Natural
 Earth data is free for use in any type of project. The source download is hosted

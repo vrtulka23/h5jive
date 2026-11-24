@@ -59,8 +59,37 @@ fn format_dip_settings() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+#[cfg(unix)]
+fn generate_settings_report() {
+    let script = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../generate-settings-report.sh");
+    let cheatsheet = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/dipl-cheatsheet.pdf");
+    println!("cargo:rerun-if-changed={}", script.display());
+    println!("cargo:rerun-if-changed={}", cheatsheet.display());
+
+    match Command::new("sh").arg(&script).output() {
+        Ok(output) if output.status.success() => {
+            let message = String::from_utf8_lossy(&output.stdout);
+            if !message.trim().is_empty() {
+                println!("cargo:warning={}", message.trim());
+            }
+        }
+        Ok(output) => {
+            let message = String::from_utf8_lossy(&output.stderr);
+            println!(
+                "cargo:warning=Settings PDF generation failed: {}",
+                message.trim()
+            );
+        }
+        Err(error) => println!("cargo:warning=Settings PDF generation failed: {error}"),
+    }
+}
+
+#[cfg(not(unix))]
+fn generate_settings_report() {}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     format_dip_settings()?;
+    generate_settings_report();
     Config::new("../../settings/build/DIPfile")
         .rust_struct("crate::app::plugins::PluginLayout")
         .const_name("PLUGIN_LAYOUT")

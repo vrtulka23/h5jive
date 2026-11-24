@@ -1,4 +1,4 @@
-# H5Jive viewer instance; defaults and validation are in schemas/viewer.dip.
+?descr "Assembles the runtime viewer from named view and plugin settings; defaults and validation live in the schemas."
 viewer : h5jive_settings
   views
     data

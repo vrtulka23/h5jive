@@ -19,3 +19,10 @@ With `snt dip format` on `PATH`, compilation checks and formats the `.dip`
 files and `DIPfile`s in this tree. Validate the projects with
 `snt dip validate --project settings/build/DIPfile` and
 `snt dip validate --project settings/runtime/DIPfile`.
+
+The combined [settings report](settings-report.pdf) contains the runtime and
+build parameter references followed by the DIPL cheatsheet. Compilation
+refreshes it when the settings change and `snt`, `pdflatex`, and `pdfjam` are
+available. Run `./generate-settings-report.sh` from the repository root to
+refresh it manually. The report is generated from project defaults, excluding
+local `runtime/overrides.dip` values.

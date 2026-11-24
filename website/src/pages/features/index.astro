@@ -6,6 +6,10 @@ const smallerFeatures = [
     number: '05',
     title: 'Learn as you explore',
     body: 'Tutorial tips explain interactive controls on hover. Turn them off from Help when you know your way around.',
+    image: 'feature-tutorial-help.png',
+    imageWidth: 1108,
+    imageHeight: 372,
+    imageAlt: 'Help menu with Tutorial tips checked and a tooltip explaining the setting',
     link: '../guide/settings-and-formats.html',
     linkLabel: 'Tutorial tip setting',
   },
@@ -13,6 +17,10 @@ const smallerFeatures = [
     number: '06',
     title: 'Keep an eye on resources',
     body: 'The top bar shows process memory, UI time, and the selected dataset’s raw size while you work.',
+    image: 'feature-process-stats.png',
+    imageWidth: 1086,
+    imageHeight: 344,
+    imageAlt: 'H5Jive status bar showing raw data size, RAM usage, UI time, and display backend',
     link: '../guide/exploring-data.html',
     linkLabel: 'Exploring data guide',
   },
@@ -67,7 +75,7 @@ const smallerFeatures = [
 
       <section class="feature-collection" aria-labelledby="more-features-title">
         <div class="collection-heading"><div><p class="eyebrow">MORE IN THE WORKFLOW</p><h2 id="more-features-title">Useful touches.</h2></div><p>Settings and status cues help you stay oriented as you work.</p></div>
-        <div class="collection-grid">{smallerFeatures.map((feature) => <article class="collection-card"><span>{feature.number}</span><h3>{feature.title}</h3><p>{feature.body}</p><a href={feature.link}>{feature.linkLabel} <span aria-hidden="true">↗</span></a></article>)}</div>
+        <div class="collection-grid">{smallerFeatures.map((feature) => <article class="collection-card"><span>{feature.number}</span><h3>{feature.title}</h3><p>{feature.body}</p><a class="collection-thumb" href={`../${feature.image}`} aria-label={`Open full-size ${feature.title.toLowerCase()} screenshot`}><img src={`../${feature.image}`} width={feature.imageWidth} height={feature.imageHeight} alt={feature.imageAlt} loading="lazy" decoding="async" /></a><a href={feature.link}>{feature.linkLabel} <span aria-hidden="true">↗</span></a></article>)}</div>
       </section>
     </main>
     <footer class="footer wrap"><a class="brand" href="../"><img class="brand-icon" src="../h5jive.png" width="32" height="32" alt="" /> H5Jive</a><span>Dig into your data.</span><span>© H5Jive contributors</span></footer>
