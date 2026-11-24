@@ -26,3 +26,17 @@ local website preview.
 The [Pages workflow](../.github/workflows/pages.yml) builds both and publishes
 the guide at `/guide/`. It runs when the root README, documentation, or website
 changes on `main`.
+
+## Keeping screenshots in sync
+
+Application screenshots live in the repository-root `assets/` directory, while
+the website serves its copies from `website/public/`. After regenerating or
+replacing a screenshot, copy the fresh files into the public directory with:
+
+```sh
+./scripts/sync-website-images.sh
+```
+
+The script only writes PNG files that are missing or different in
+`website/public/`, leaving website-only files such as the logo and favicon
+untouched.
