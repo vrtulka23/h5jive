@@ -1,6 +1,7 @@
 //! Reading swaths as geolocated map points and optional pixel footprints.
 use super::*;
 use h5jive_data::ScanDirection;
+use std::collections::HashMap;
 
 /// Geographic center of the selected observations, including date-line crossings.
 pub(crate) fn geospatial_center(
@@ -44,6 +45,29 @@ pub(crate) fn sampled_indexes(length: usize, wanted: usize) -> Vec<usize> {
         .collect()
 }
 
+fn map_sample_indexes(
+    rows: usize,
+    columns: usize,
+    budget: usize,
+    full_swath_width: bool,
+) -> (Vec<usize>, Vec<usize>) {
+    let row_target = if full_swath_width {
+        (budget / columns).max(1).min(rows)
+    } else {
+        rows.min((budget as f64 * rows as f64 / columns as f64).sqrt().ceil() as usize)
+            .max(1)
+    };
+    let column_target = if full_swath_width {
+        columns
+    } else {
+        columns.min((budget / row_target).max(1))
+    };
+    (
+        sampled_indexes(rows, row_target),
+        sampled_indexes(columns, column_target),
+    )
+}
+
 fn sample_cell_edges(indexes: &[usize], length: usize) -> Vec<(usize, usize)> {
     indexes
         .iter()
@@ -84,6 +108,15 @@ mod cell_tests {
     }
 
     #[test]
+    fn swath_sampling_keeps_every_across_track_pixel() {
+        let (rows, columns) = map_sample_indexes(1250, 32, 500, true);
+        assert_eq!(rows.len(), 15);
+        assert_eq!(columns, (0..32).collect::<Vec<_>>());
+        let (_, grid_columns) = map_sample_indexes(1250, 32, 500, false);
+        assert!(grid_columns.len() < 32);
+    }
+
+    #[test]
     fn cell_average_excludes_fill_and_nonfinite_values() {
         let values = Region {
             data: vec![1.0, 2.0, f64::NAN, 3.0, -999.0, 5.0],
@@ -92,6 +125,58 @@ mod cell_tests {
         };
         assert_eq!(cell_average(&values, 3, (0, 1), (0, 2)), Some(2.75));
         assert_eq!(cell_average(&values, 3, (0, 0), (2, 2)), None);
+    }
+
+    #[test]
+    fn padded_scanline_uses_only_valid_columns_for_tile_edges() {
+        let latitudes = Region {
+            data: vec![-999.0, 4.0, 4.0, 4.0, -999.0],
+            shape: vec![1, 5],
+            fill_value: Some(-999.0),
+        };
+        let longitudes = Region {
+            data: vec![-999.0, 10.0, 11.0, 12.0, -999.0],
+            shape: vec![1, 5],
+            fill_value: Some(-999.0),
+        };
+        assert_eq!(
+            valid_column_in_cell(&latitudes, &longitudes, 0, 5, (0, 2), 0),
+            Some(1)
+        );
+        assert_eq!(
+            valid_column_in_cell(&latitudes, &longitudes, 0, 5, (2, 4), 4),
+            Some(3)
+        );
+        assert_eq!(
+            valid_column_in_cell(&latitudes, &longitudes, 0, 5, (0, 0), 0),
+            None
+        );
+    }
+
+    #[test]
+    fn padded_edge_row_uses_the_next_valid_scanline() {
+        let latitudes = Region {
+            data: vec![-999.0, -999.0, 3.0, 3.0],
+            shape: vec![2, 2],
+            fill_value: Some(-999.0),
+        };
+        let longitudes = Region {
+            data: vec![-999.0, -999.0, 10.0, 11.0],
+            shape: vec![2, 2],
+            fill_value: Some(-999.0),
+        };
+        assert_eq!(
+            valid_edge_pixel(&latitudes, &longitudes, 2, (0, 1), (0, 1), false, false),
+            Some((1, 0))
+        );
+        assert_eq!(
+            valid_edge_pixel(&latitudes, &longitudes, 2, (0, 1), (0, 1), false, true),
+            Some((1, 1))
+        );
+        assert_eq!(
+            valid_center_pixel(&latitudes, &longitudes, 2, (0, 1), (0, 1), 0, 0),
+            Some((1, 0))
+        );
     }
 
     #[test]
@@ -232,6 +317,110 @@ fn longitude_delta(value: f64, reference: f64) -> f64 {
     (value - reference + 180.0).rem_euclid(360.0) - 180.0
 }
 
+fn valid_geo(latitudes: &Region, longitudes: &Region, index: usize) -> Option<(f64, f64)> {
+    let latitude = finite_value(*latitudes.data.get(index)?, latitudes.fill_value)?;
+    let longitude = finite_value(*longitudes.data.get(index)?, longitudes.fill_value)?;
+    (-90.0..=90.0)
+        .contains(&latitude)
+        .then_some((latitude, longitude))
+}
+
+fn valid_column_in_cell(
+    latitudes: &Region,
+    longitudes: &Region,
+    row: usize,
+    width: usize,
+    columns: (usize, usize),
+    preferred: usize,
+) -> Option<usize> {
+    (columns.0..=columns.1)
+        .filter(|&column| valid_geo(latitudes, longitudes, row * width + column).is_some())
+        .min_by_key(|&column| column.abs_diff(preferred))
+}
+
+fn valid_edge_pixel(
+    latitudes: &Region,
+    longitudes: &Region,
+    width: usize,
+    rows: (usize, usize),
+    columns: (usize, usize),
+    from_bottom: bool,
+    from_right: bool,
+) -> Option<(usize, usize)> {
+    let preferred = if from_right { columns.1 } else { columns.0 };
+    let mut search = rows.0..=rows.1;
+    if from_bottom {
+        search.rev().find_map(|row| {
+            valid_column_in_cell(latitudes, longitudes, row, width, columns, preferred)
+                .map(|column| (row, column))
+        })
+    } else {
+        search.find_map(|row| {
+            valid_column_in_cell(latitudes, longitudes, row, width, columns, preferred)
+                .map(|column| (row, column))
+        })
+    }
+}
+
+fn valid_center_pixel(
+    latitudes: &Region,
+    longitudes: &Region,
+    width: usize,
+    rows: (usize, usize),
+    columns: (usize, usize),
+    preferred_row: usize,
+    preferred_column: usize,
+) -> Option<(usize, usize)> {
+    (rows.0..=rows.1)
+        .filter_map(|row| {
+            valid_column_in_cell(latitudes, longitudes, row, width, columns, preferred_column)
+                .map(|column| (row, column))
+        })
+        .min_by_key(|&(row, column)| {
+            (
+                row.abs_diff(preferred_row),
+                column.abs_diff(preferred_column),
+            )
+        })
+}
+
+#[allow(clippy::too_many_arguments)]
+fn cached_outer_corner(
+    file: &File,
+    latitude_path: &str,
+    longitude_path: &str,
+    latitude_shape: &[usize],
+    longitude_shape: &[usize],
+    time: usize,
+    width: usize,
+    cache: &mut HashMap<usize, (Region, Region)>,
+    latitudes: &Region,
+    longitudes: &Region,
+    row: usize,
+    column: usize,
+    x_sign: f64,
+    y_sign: f64,
+) -> Result<Option<[f32; 2]>, String> {
+    if let std::collections::hash_map::Entry::Vacant(entry) = cache.entry(row) {
+        entry.insert((
+            sample_bounds_line(file, latitude_path, latitude_shape, time, row, width)?,
+            sample_bounds_line(file, longitude_path, longitude_shape, time, row, width)?,
+        ));
+    }
+    let (latitude_bounds, longitude_bounds) = &cache[&row];
+    Ok(outer_pixel_corner(
+        latitude_bounds,
+        longitude_bounds,
+        latitudes,
+        longitudes,
+        row,
+        column,
+        width,
+        x_sign,
+        y_sign,
+    ))
+}
+
 fn outer_pixel_corner(
     latitude_bounds: &Region,
     longitude_bounds: &Region,
@@ -244,43 +433,43 @@ fn outer_pixel_corner(
     y_sign: f64,
 ) -> Option<[f32; 2]> {
     let index = row * width + column;
-    let latitude = *latitudes.data.get(index)?;
-    let longitude = *longitudes.data.get(index)?;
-    if !(-90.0..=90.0).contains(&latitude) || !longitude.is_finite() {
-        return None;
-    }
-    let neighbor_x = if column + 1 < width {
-        column + 1
-    } else {
-        column.saturating_sub(1)
-    };
-    let neighbor_y = if row + 1 < latitudes.data.len() / width {
-        row + 1
-    } else {
-        row.saturating_sub(1)
-    };
-    let x_step = if neighbor_x > column { 1.0 } else { -1.0 };
-    let y_step = if neighbor_y > row { 1.0 } else { -1.0 };
-    let x_index = row * width + neighbor_x;
-    let y_index = neighbor_y * width + column;
-    let x_latitude = *latitudes.data.get(x_index)?;
-    let x_longitude = *longitudes.data.get(x_index)?;
-    let y_latitude = *latitudes.data.get(y_index)?;
-    let y_longitude = *longitudes.data.get(y_index)?;
-    if !(-90.0..=90.0).contains(&x_latitude)
-        || !(-90.0..=90.0).contains(&y_latitude)
-        || !x_longitude.is_finite()
-        || !y_longitude.is_finite()
-    {
-        return None;
-    }
+    let (latitude, longitude) = valid_geo(latitudes, longitudes, index)?;
+    let height = latitudes.data.len() / width;
+    let neighbor_x = (1..width).find_map(|distance| {
+        [
+            column.checked_add(distance).filter(|&x| x < width),
+            column.checked_sub(distance),
+        ]
+        .into_iter()
+        .flatten()
+        .find_map(|candidate| {
+            valid_geo(latitudes, longitudes, row * width + candidate)
+                .map(|coords| (candidate, coords))
+        })
+    })?;
+    let neighbor_y = (1..height).find_map(|distance| {
+        [
+            row.checked_add(distance).filter(|&y| y < height),
+            row.checked_sub(distance),
+        ]
+        .into_iter()
+        .flatten()
+        .find_map(|candidate| {
+            valid_geo(latitudes, longitudes, candidate * width + column)
+                .map(|coords| (candidate, coords))
+        })
+    })?;
+    let (x_latitude, x_longitude) = neighbor_x.1;
+    let (y_latitude, y_longitude) = neighbor_y.1;
+    let x_step = neighbor_x.0 as f64 - column as f64;
+    let y_step = neighbor_y.0 as f64 - row as f64;
     let lon_scale = latitude.to_radians().cos().abs().max(0.05);
     let expected_x = 0.5
-        * (x_sign * longitude_delta(x_longitude, longitude) * x_step
-            + y_sign * longitude_delta(y_longitude, longitude) * y_step)
+        * (x_sign * longitude_delta(x_longitude, longitude) / x_step
+            + y_sign * longitude_delta(y_longitude, longitude) / y_step)
         * lon_scale;
     let expected_y = 0.5
-        * (x_sign * (x_latitude - latitude) * x_step + y_sign * (y_latitude - latitude) * y_step);
+        * (x_sign * (x_latitude - latitude) / x_step + y_sign * (y_latitude - latitude) / y_step);
     (0..4)
         .filter_map(|corner| {
             let bound_latitude = *latitude_bounds.data.get(column * 4 + corner)?;
@@ -319,6 +508,85 @@ fn sample_line(
     };
     file.region(path, &start, &count)
         .map_err(|error| error.to_string())
+}
+
+fn sample_coordinate_line(
+    file: &File,
+    path: &str,
+    shape: &[usize],
+    time: usize,
+    row: usize,
+    width: usize,
+    latitude: bool,
+) -> Result<Region, String> {
+    if shape.len() != 1 {
+        return sample_line(file, path, shape, time, row, width, 0);
+    }
+    let (start, count) = if latitude {
+        (vec![row], vec![1])
+    } else {
+        (vec![0], vec![width])
+    };
+    let region = file
+        .region(path, &start, &count)
+        .map_err(|error| error.to_string())?;
+    Ok(Region {
+        data: if latitude {
+            vec![region.data[0]; width]
+        } else {
+            region.data
+        },
+        shape: vec![width],
+        fill_value: region.fill_value,
+    })
+}
+
+fn sample_coordinate_rows(
+    file: &File,
+    path: &str,
+    shape: &[usize],
+    time: usize,
+    rows: usize,
+    width: usize,
+    latitude: bool,
+) -> Result<Region, String> {
+    if shape.len() != 1 {
+        return sample_all_rows(file, path, shape, time, rows, width, 0);
+    }
+    let region = file
+        .region(path, &[0], &[shape[0]])
+        .map_err(|error| error.to_string())?;
+    let mut data = Vec::with_capacity(rows * width);
+    if latitude {
+        for value in region.data {
+            data.extend(std::iter::repeat_n(value, width));
+        }
+    } else {
+        for _ in 0..rows {
+            data.extend_from_slice(&region.data);
+        }
+    }
+    Ok(Region {
+        data,
+        shape: vec![rows, width],
+        fill_value: region.fill_value,
+    })
+}
+
+fn sample_coordinate_plane(
+    file: &File,
+    path: &str,
+    shape: &[usize],
+    time: usize,
+    rows: usize,
+    width: usize,
+    latitude: bool,
+) -> Result<Region, String> {
+    if shape.len() == 1 {
+        sample_coordinate_rows(file, path, shape, time, rows, width, latitude)
+    } else {
+        sample_spatial_plane(file, path, shape, time, rows, width, 0)
+    }
 }
 
 fn sample_all_rows(
@@ -580,22 +848,15 @@ fn load_map_data_inner(
     };
     let times: Vec<usize> = time.map_or_else(|| (0..nt).collect(), |index| vec![index]);
     let budget_per_time = (max_points / times.len()).max(1);
-    let row_target = ny
-        .min(
-            (budget_per_time as f64 * ny as f64 / nx as f64)
-                .sqrt()
-                .ceil() as usize,
-        )
-        .max(1);
-    let col_target = nx.min((budget_per_time / row_target).max(1));
-    let rows = sampled_indexes(ny, row_target);
-    let columns = sampled_indexes(nx, col_target);
-    let aggregate_footprints = !preview
+    let full_swath_width = geo_lat.len() > 1 && geo_lon.len() > 1;
+    let (rows, columns) = map_sample_indexes(ny, nx, budget_per_time, full_swath_width);
+    let aggregate_footprints = (!preview || ny.saturating_mul(nx) <= MAX_PLANE_CELLS)
         && (rows.len() < ny || columns.len() < nx)
         && nx > 1
         && ny > 1
         && bounds_lat.is_some()
         && bounds_lon.is_some();
+    let aggregate_values = aggregate_footprints && !preview;
     let row_cells = sample_cell_edges(&rows, ny);
     let column_cells = sample_cell_edges(&columns, nx);
     // Dense, modest swaths are much faster as a few hyperslabs than thousands of tiny reads.
@@ -604,33 +865,33 @@ fn load_map_data_inner(
     let mut range: Option<(f64, f64)> = None;
     for t in times {
         let spectral = spectral.min(shape[shape.len() - 1] - 1);
-        let all_values_owned = (aggregate_footprints && radiance.is_none())
+        let all_values_owned = (aggregate_values && radiance.is_none())
             .then(|| sample_spatial_plane(file, path, shape, t, ny, nx, spectral))
             .transpose()?;
         let all_values = radiance.or(all_values_owned.as_ref());
         let all_latitudes = aggregate_footprints
             .then(|| {
-                sample_spatial_plane(
+                sample_coordinate_plane(
                     file,
                     &geolocation.latitude,
                     &geo_lat,
                     if geo_lat.len() == 3 { t } else { 0 },
                     ny,
                     nx,
-                    0,
+                    true,
                 )
             })
             .transpose()?;
         let all_longitudes = aggregate_footprints
             .then(|| {
-                sample_spatial_plane(
+                sample_coordinate_plane(
                     file,
                     &geolocation.longitude,
                     &geo_lon,
                     if geo_lon.len() == 3 { t } else { 0 },
                     ny,
                     nx,
-                    0,
+                    false,
                 )
             })
             .transpose()?;
@@ -659,27 +920,27 @@ fn load_map_data_inner(
             .transpose()?;
         let latitudes_batch = batch_rows
             .then(|| {
-                sample_all_rows(
+                sample_coordinate_rows(
                     file,
                     &geolocation.latitude,
                     &geo_lat,
                     if geo_lat.len() == 3 { t } else { 0 },
                     ny,
                     nx,
-                    0,
+                    true,
                 )
             })
             .transpose()?;
         let longitudes_batch = batch_rows
             .then(|| {
-                sample_all_rows(
+                sample_coordinate_rows(
                     file,
                     &geolocation.longitude,
                     &geo_lon,
                     if geo_lon.len() == 3 { t } else { 0 },
                     ny,
                     nx,
-                    0,
+                    false,
                 )
             })
             .transpose()?;
@@ -726,6 +987,8 @@ fn load_map_data_inner(
         } else {
             None
         };
+        let mut bounds_cache = HashMap::new();
+        let mut value_row_cache = HashMap::new();
         for (row_index, &y) in rows.iter().enumerate() {
             // One contiguous row read per variable keeps both HDF5 and NetCDF access bounded.
             let values = if let Some(batch) = all_values.or(values_batch.as_ref()) {
@@ -737,28 +1000,28 @@ fn load_map_data_inner(
             {
                 batch_row(batch, y, nx)
             } else {
-                sample_line(
+                sample_coordinate_line(
                     file,
                     &geolocation.latitude,
                     &geo_lat,
                     if geo_lat.len() == 3 { t } else { 0 },
                     y,
                     nx,
-                    0,
+                    true,
                 )?
             };
             let longitudes =
                 if let Some(batch) = all_longitudes.as_ref().or(longitudes_batch.as_ref()) {
                     batch_row(batch, y, nx)
                 } else {
-                    sample_line(
+                    sample_coordinate_line(
                         file,
                         &geolocation.longitude,
                         &geo_lon,
                         if geo_lon.len() == 3 { t } else { 0 },
                         y,
                         nx,
-                        0,
+                        false,
                     )?
                 };
             let scan_values = if let Some(batch) = all_scan_values.as_ref().or(scan_batch.as_ref())
@@ -782,26 +1045,6 @@ fn load_map_data_inner(
                     })
                     .transpose()?
             };
-            let tile_corners = if aggregate_footprints {
-                if let (Some(lat_path), Some(lon_path), Some(lat_shape), Some(lon_shape)) = (
-                    &geolocation.latitude_bounds,
-                    &geolocation.longitude_bounds,
-                    &bounds_lat,
-                    &bounds_lon,
-                ) {
-                    let (first, last) = row_cells[row_index];
-                    Some((
-                        sample_bounds_line(file, lat_path, lat_shape, t, first, nx)?,
-                        sample_bounds_line(file, lon_path, lon_shape, t, first, nx)?,
-                        sample_bounds_line(file, lat_path, lat_shape, t, last, nx)?,
-                        sample_bounds_line(file, lon_path, lon_shape, t, last, nx)?,
-                    ))
-                } else {
-                    None
-                }
-            } else {
-                None
-            };
             let corners = if aggregate_footprints {
                 None
             } else if let Some((lat, lon)) = &bounds_batch {
@@ -818,29 +1061,144 @@ fn load_map_data_inner(
             } else {
                 None
             };
-            for (column_index, &x) in columns.iter().enumerate() {
-                let latitude = latitudes.data[x];
-                let longitude = longitudes.data[x];
+            for (column_index, &sampled_x) in columns.iter().enumerate() {
+                let (center_row, x) = if aggregate_footprints {
+                    let latitudes = all_latitudes.as_ref().expect("aggregated latitude plane");
+                    let longitudes = all_longitudes.as_ref().expect("aggregated longitude plane");
+                    let Some(pixel) = valid_center_pixel(
+                        latitudes,
+                        longitudes,
+                        nx,
+                        row_cells[row_index],
+                        column_cells[column_index],
+                        y,
+                        sampled_x,
+                    ) else {
+                        continue;
+                    };
+                    pixel
+                } else {
+                    (y, sampled_x)
+                };
+                let latitude = if center_row == y {
+                    latitudes.data[x]
+                } else {
+                    all_latitudes
+                        .as_ref()
+                        .expect("aggregated latitude plane")
+                        .data[center_row * nx + x]
+                };
+                let longitude = if center_row == y {
+                    longitudes.data[x]
+                } else {
+                    all_longitudes
+                        .as_ref()
+                        .expect("aggregated longitude plane")
+                        .data[center_row * nx + x]
+                };
                 if !latitude.is_finite()
                     || !longitude.is_finite()
                     || !(-90.0..=90.0).contains(&latitude)
                 {
                     continue;
                 }
-                let value = aggregate_footprints
+                let sampled_value = if center_row == y {
+                    values.data[x]
+                } else if let Some(all) = all_values {
+                    all.data[center_row * nx + x]
+                } else {
+                    if let std::collections::hash_map::Entry::Vacant(entry) =
+                        value_row_cache.entry(center_row)
+                    {
+                        entry.insert(sample_line(file, path, shape, t, center_row, nx, spectral)?);
+                    }
+                    value_row_cache[&center_row].data[x]
+                };
+                let value = aggregate_values
                     .then(|| {
                         all_values.and_then(|all| {
                             cell_average(all, nx, row_cells[row_index], column_cells[column_index])
                         })
                     })
                     .flatten()
-                    .unwrap_or(values.data[x]);
+                    .unwrap_or(sampled_value);
                 let special = SpecialValue::from_value(value, values.fill_value);
                 if let Some(finite) = finite_value(value, values.fill_value) {
                     range = Some(range.map_or((finite, finite), |(lo, hi)| {
                         (lo.min(finite), hi.max(finite))
                     }));
                 }
+                let footprint = if aggregate_footprints {
+                    let latitudes = all_latitudes.as_ref().expect("aggregated latitude plane");
+                    let longitudes = all_longitudes.as_ref().expect("aggregated longitude plane");
+                    let (Some(lat_path), Some(lon_path), Some(lat_shape), Some(lon_shape)) = (
+                        &geolocation.latitude_bounds,
+                        &geolocation.longitude_bounds,
+                        &bounds_lat,
+                        &bounds_lon,
+                    ) else {
+                        unreachable!("aggregated footprints require bounds");
+                    };
+                    let rows = row_cells[row_index];
+                    let columns = column_cells[column_index];
+                    let corners = [
+                        valid_edge_pixel(latitudes, longitudes, nx, rows, columns, false, false),
+                        valid_edge_pixel(latitudes, longitudes, nx, rows, columns, false, true),
+                        valid_edge_pixel(latitudes, longitudes, nx, rows, columns, true, true),
+                        valid_edge_pixel(latitudes, longitudes, nx, rows, columns, true, false),
+                    ];
+                    if let [Some(top_left), Some(top_right), Some(bottom_right), Some(bottom_left)] =
+                        corners
+                    {
+                        let mut polygon = [[0.0; 2]; 4];
+                        let pixels = [top_left, top_right, bottom_right, bottom_left];
+                        let signs = [(-1.0, -1.0), (1.0, -1.0), (1.0, 1.0), (-1.0, 1.0)];
+                        let mut complete = true;
+                        for (index, ((row, column), (x_sign, y_sign))) in
+                            pixels.into_iter().zip(signs).enumerate()
+                        {
+                            if let Some(corner) = cached_outer_corner(
+                                file,
+                                lat_path,
+                                lon_path,
+                                lat_shape,
+                                lon_shape,
+                                t,
+                                nx,
+                                &mut bounds_cache,
+                                latitudes,
+                                longitudes,
+                                row,
+                                column,
+                                x_sign,
+                                y_sign,
+                            )? {
+                                polygon[index] = corner;
+                            } else {
+                                complete = false;
+                                break;
+                            }
+                        }
+                        complete.then_some(polygon)
+                    } else {
+                        None
+                    }
+                } else {
+                    corners.as_ref().and_then(|(lat, lon)| {
+                        let mut polygon = [[0.0; 2]; 4];
+                        for corner in 0..4 {
+                            let index = x * 4 + corner;
+                            let latitude = *lat.data.get(index)? as f32;
+                            let longitude = *lon.data.get(index)? as f32;
+                            if !(-90.0..=90.0).contains(&latitude) || !longitude.is_finite() {
+                                return None;
+                            }
+                            polygon[corner] =
+                                [((longitude + 180.0).rem_euclid(360.0) - 180.0), latitude];
+                        }
+                        Some(polygon)
+                    })
+                };
                 points.push(MapPoint {
                     latitude: latitude as f32,
                     longitude: ((longitude + 180.0).rem_euclid(360.0) - 180.0) as f32,
@@ -861,77 +1219,7 @@ fn load_map_data_inner(
                                 .map(|values| scan.classify(values.data[x], values.fill_value))
                         }
                     }),
-                    footprint: tile_corners
-                        .as_ref()
-                        .and_then(|(top_lat, top_lon, bottom_lat, bottom_lon)| {
-                            let latitudes = all_latitudes.as_ref()?;
-                            let longitudes = all_longitudes.as_ref()?;
-                            let (first_row, last_row) = row_cells[row_index];
-                            let (first_column, last_column) = column_cells[column_index];
-                            Some([
-                                outer_pixel_corner(
-                                    top_lat,
-                                    top_lon,
-                                    latitudes,
-                                    longitudes,
-                                    first_row,
-                                    first_column,
-                                    nx,
-                                    -1.0,
-                                    -1.0,
-                                )?,
-                                outer_pixel_corner(
-                                    top_lat,
-                                    top_lon,
-                                    latitudes,
-                                    longitudes,
-                                    first_row,
-                                    last_column,
-                                    nx,
-                                    1.0,
-                                    -1.0,
-                                )?,
-                                outer_pixel_corner(
-                                    bottom_lat,
-                                    bottom_lon,
-                                    latitudes,
-                                    longitudes,
-                                    last_row,
-                                    last_column,
-                                    nx,
-                                    1.0,
-                                    1.0,
-                                )?,
-                                outer_pixel_corner(
-                                    bottom_lat,
-                                    bottom_lon,
-                                    latitudes,
-                                    longitudes,
-                                    last_row,
-                                    first_column,
-                                    nx,
-                                    -1.0,
-                                    1.0,
-                                )?,
-                            ])
-                        })
-                        .or_else(|| {
-                            corners.as_ref().and_then(|(lat, lon)| {
-                                let mut polygon = [[0.0; 2]; 4];
-                                for corner in 0..4 {
-                                    let index = x * 4 + corner;
-                                    let latitude = *lat.data.get(index)? as f32;
-                                    let longitude = *lon.data.get(index)? as f32;
-                                    if !(-90.0..=90.0).contains(&latitude) || !longitude.is_finite()
-                                    {
-                                        return None;
-                                    }
-                                    polygon[corner] =
-                                        [((longitude + 180.0).rem_euclid(360.0) - 180.0), latitude];
-                                }
-                                Some(polygon)
-                            })
-                        }),
+                    footprint,
                 });
             }
         }

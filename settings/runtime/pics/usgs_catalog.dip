@@ -2,42 +2,79 @@
 pics[egypt_1] : pics_catalog_site
   ?url "https://calval.cr.usgs.gov/apps/egypt-1"
   name = "Egypt 1"
+
   country = "Egypt"
+
   center_latitude = 27.41
+
   center_longitude = 26.38
+
   roi_1_name = "CNES"
+
   roi_1_south = 27.02
+
   roi_1_north = 27.22
+
   roi_1_west = 26.00
+
   roi_1_east = 26.20
+
   roi_2_name = "SDSU"
+
   roi_2_south = 26.91
+
   roi_2_north = 27.13
+
   roi_2_west = 26.31
+
   roi_2_east = 26.62
+
   usable_km_1 = 100
+
   usable_km_2 = 100
+
   altitude_m = 226
+
   landsat_wrs_2 = "179 / 41"
+
   status = "Active"
+
 pics[sudan_1] : pics_catalog_site
   ?url "https://calval.cr.usgs.gov/apps/sudan"
   name = "Sudan 1"
+
   country = "Sudan"
+
   center_latitude = 21.40
+
   center_longitude = 27.70
+
   roi_1_name = "CNES"
+
   roi_1_south = 21.80
+
   roi_1_north = 22.00
+
   roi_1_west = 27.90
+
   roi_1_east = 28.10
+
   roi_2_name = "SDSU"
+
   roi_2_south = 21.40
+
   roi_2_north = 21.75
+
   roi_2_west = 27.59
+
   roi_2_east = 27.81
+
   usable_km_1 = 10
+
   usable_km_2 = 10
+
   altitude_m = 325
+
   landsat_wrs_2 = "177 / 45"
+
   status = "Active"

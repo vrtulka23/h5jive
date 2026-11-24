@@ -2,6 +2,9 @@
 
 ## DIPL settings
 
+The [settings tree](../../settings/README.md) has a README in each source
+directory, connecting the two DIPL projects, their schemas, and their values.
+
 **Tutorial tips** are on by default for new installations. They add short
 instructions to tooltips on interactive controls. Use **Help → Tutorial tips**
 to turn them off or on; the choice is saved in `settings/runtime/overrides.dip`
@@ -136,6 +139,16 @@ a pattern and whose geolocation layout is the same. Format settings are
 independent of repository
 paths and dates. The viewer checks coordinate shapes before applying a format.
 Explicit coordinate paths need no format entry.
+
+The optional `time_coordinate` field names the one-dimensional CF time
+variable for an observation's leading dimension. It can differ from the
+dimension name: ERA5 uses `valid_time`, while Sentinel-5P radiance uses `time`.
+The reader checks that the coordinate uses the observation's first dimension.
+When the field is empty or that variable is absent, it looks for a coordinate
+named after the first dimension. If no numeric CF time coordinate is available,
+combined export uses its configured index dimension instead. The bundled
+GOME-2 Band 3 sample is an example: it has a leading time dimension but no
+time coordinate values.
 
 Formats can also define a `scan_direction` subnode for a per-pixel flag. Set
 `group` to `coordinate` or `observation`, `variable` to the flag name, and

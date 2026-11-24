@@ -104,7 +104,8 @@ fn startup_dataset_suffix_keeps_windows_drive_and_plain_paths() {
 #[test]
 fn dataset_formats_load_from_dipl() {
     let rules = &test_settings().dataset_rules;
-    assert_eq!(rules.len(), 6);
+    assert_eq!(rules.len(), 7);
+    assert!(rules.iter().any(|rule| rule.file_glob == "ERA5_*.nc"));
     assert!(rules.iter().any(|rule| {
         rule.file_glob == "ER2_RPRO_GOM_L1B*.nc"
             && rule.platform == "ERS-2"
@@ -115,6 +116,23 @@ fn dataset_formats_load_from_dipl() {
         .iter()
         .any(|rule| rule.platform == "MetOp M0?" && rule.product_type == "GO2_L1B___"));
     let gome2 = rules.iter().find(|rule| rule.sensor == "GOME-2").unwrap();
+    assert!(gome2.time_coordinate.is_empty());
+    assert_eq!(
+        rules
+            .iter()
+            .find(|rule| rule.file_glob == "ERA5_*.nc")
+            .unwrap()
+            .time_coordinate,
+        "valid_time"
+    );
+    assert_eq!(
+        rules
+            .iter()
+            .find(|rule| rule.sensor == "TROPOMI")
+            .unwrap()
+            .time_coordinate,
+        "time"
+    );
     let scan = gome2.scan_direction.as_ref().unwrap();
     assert_eq!(scan.variable, "scan_direction");
     assert_eq!(scan.forward_values, [1]);

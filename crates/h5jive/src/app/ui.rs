@@ -240,7 +240,73 @@ pub(super) fn draw_visibility_navigation(
 #[cfg(test)]
 mod navigation_tests {
     use super::*;
-    use dear_app::imgui::{Condition, Context};
+    use dear_app::imgui::{Condition, Context, MouseButton};
+
+    #[test]
+    fn file_name_opens_picker_while_file_icon_selects_root() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../examples/arrays/space_demo.hdf5");
+        let file = File::open(&path).unwrap();
+        let palette = Settings::load().unwrap().palette;
+        let mut context = Context::create();
+        context.set_ini_filename(None::<String>).unwrap();
+        context.io_mut().set_display_size([500.0, 300.0]);
+        context.io_mut().set_delta_time(1.0 / 60.0);
+        context
+            .font_atlas()
+            .try_claim_legacy_renderer()
+            .unwrap()
+            .build();
+        let mut selected = None;
+        let draw = |context: &mut Context, selected: &mut Option<Selection>| {
+            let ui = context.frame();
+            let mut clicked_name = false;
+            let mut name_x = 0.0;
+            let mut icon_x = 0.0;
+            let mut row_y = 0.0;
+            ui.window("File tree click")
+                .position([0.0, 0.0], Condition::Always)
+                .size([400.0, 150.0], Condition::Always)
+                .build(|| {
+                    let row_x = ui.cursor_screen_pos()[0];
+                    let prefix = tree_label_prefix(ui, row_x, false);
+                    name_x = row_x + ui.calc_text_size(format!("{prefix}X"))[0]
+                        - ui.calc_text_size("X")[0];
+                    icon_x = tree_icon_x(ui, row_x, false, false);
+                    clicked_name = draw_file_root(ui, &file, 0, selected, false, &palette);
+                    row_y = (ui.item_rect_min()[1] + ui.item_rect_max()[1]) * 0.5;
+                });
+            context.end_frame();
+            (clicked_name, name_x, icon_x, row_y)
+        };
+        let (_, name_x, icon_x, row_y) = draw(&mut context, &mut selected);
+        context.io_mut().add_mouse_pos_event([name_x + 4.0, row_y]);
+        draw(&mut context, &mut selected);
+        context
+            .io_mut()
+            .add_mouse_button_event(MouseButton::Left, true);
+        let pressed = draw(&mut context, &mut selected).0;
+        context
+            .io_mut()
+            .add_mouse_button_event(MouseButton::Left, false);
+        let released = draw(&mut context, &mut selected).0;
+        assert!(pressed || released);
+        assert!(selected.is_none());
+        context.io_mut().add_mouse_pos_event([icon_x + 5.0, row_y]);
+        draw(&mut context, &mut selected);
+        context
+            .io_mut()
+            .add_mouse_button_event(MouseButton::Left, true);
+        draw(&mut context, &mut selected);
+        context
+            .io_mut()
+            .add_mouse_button_event(MouseButton::Left, false);
+        draw(&mut context, &mut selected);
+        assert_eq!(
+            selected.as_ref().map(|selection| selection.path.as_str()),
+            Some("/")
+        );
+    }
 
     #[test]
     fn globe_center_button_reports_center_action() {
@@ -525,17 +591,23 @@ mod navigation_tests {
         ui.window("Tree alignment").build(|| {
             let folder_row_x = ui.cursor_screen_pos()[0];
             let folder_icon_x = tree_icon_x(ui, folder_row_x, true, false);
+            let root_prefix = tree_label_prefix(ui, folder_row_x, false);
+            let root_name_x = folder_row_x + ui.calc_text_size(format!("{root_prefix}X"))[0]
+                - ui.calc_text_size("X")[0];
+            let root_geo_icon_right = tree_icon_x(ui, folder_row_x, false, false) + 29.0;
+            assert!(root_name_x >= root_geo_icon_right + 6.0);
             let node = ui
                 .tree_node_config("folder")
                 .opened(true, Condition::Always)
                 .push();
             if let Some(_node) = node {
                 let dataset_row_x = ui.cursor_screen_pos()[0];
-                let name_x = dataset_row_x
-                    + ui.calc_text_size(format!("{DATASET_NAME_PREFIX}X"))[0]
+                let prefix = tree_label_prefix(ui, dataset_row_x, true);
+                let name_x = dataset_row_x + ui.calc_text_size(format!("{prefix}X"))[0]
                     - ui.calc_text_size("X")[0];
                 let geo_icon_right = tree_icon_x(ui, dataset_row_x, false, true) + 29.0;
-                assert!((name_x - geo_icon_right - 7.0).abs() <= 4.0);
+                assert!(name_x >= geo_icon_right + 6.0);
+                assert!((name_x - root_name_x).abs() <= ui.calc_text_size(" ")[0].max(4.0));
                 ui.selectable_config("dataset").build();
                 let dataset_icon_x = tree_icon_x(ui, dataset_row_x, false, true);
                 assert!((dataset_icon_x - folder_icon_x).abs() < 0.5);
@@ -906,7 +978,12 @@ pub(crate) fn find_entry<'a>(root: &'a Entry, path: &str) -> Option<&'a Entry> {
         .iter()
         .find_map(|entry| find_entry(entry, path))
 }
-const DATASET_NAME_PREFIX: &str = "     ";
+fn tree_label_prefix(ui: &Ui, row_x: f32, has_parent: bool) -> String {
+    // Reserve the geo icon column for every dataset so neighboring names align.
+    let icon_right = tree_icon_x(ui, row_x, false, has_parent) + 29.0;
+    let space_width = (ui.calc_text_size(" X")[0] - ui.calc_text_size("X")[0]).max(1.0);
+    " ".repeat(((icon_right - row_x + 7.0) / space_width).ceil().max(0.0) as usize)
+}
 
 pub(super) fn draw_file_root(
     ui: &Ui,
@@ -915,13 +992,19 @@ pub(super) fn draw_file_root(
     selected: &mut Option<Selection>,
     tutorial_tips: bool,
     palette: &Palette,
-) {
+) -> bool {
     let row_x = ui.cursor_screen_pos()[0];
     let is_selected = selected
         .as_ref()
         .is_some_and(|current| current.file == file && current.path == "/");
-    let label = format!("{DATASET_NAME_PREFIX}{}##file_root_{file}", source.name);
-    if ui.selectable_config(&label).selected(is_selected).build() {
+    let prefix = tree_label_prefix(ui, row_x, false);
+    let label = format!("{prefix}{}##file_root_{file}", source.name);
+    let clicked = ui.selectable_config(&label).selected(is_selected).build();
+    let name_x = row_x + ui.calc_text_size(format!("{prefix}X"))[0] - ui.calc_text_size("X")[0];
+    let name_right = name_x + ui.calc_text_size(&source.name)[0];
+    let pointer_x = ui.io().mouse_pos()[0];
+    let name_hovered = ui.is_item_hovered() && (name_x..=name_right).contains(&pointer_x);
+    if clicked && !name_hovered {
         *selected = Some(Selection {
             file,
             path: "/".into(),
@@ -931,12 +1014,24 @@ pub(super) fn draw_file_root(
         draw_selected_tree_row(ui, palette);
     }
     draw_tree_entry_icons(ui, row_x, false, false, false, palette);
+    if name_hovered {
+        ui.set_mouse_cursor(Some(MouseCursor::Hand));
+        let y = ui.item_rect_max()[1] - 2.0;
+        ui.get_window_draw_list()
+            .add_line([name_x, y], [name_right, y], palette.accent)
+            .build();
+    }
     item_tip(
         ui,
         tutorial_tips,
-        "",
-        "Select the file itself to inspect its root attributes.",
+        if name_hovered { "Choose a file" } else { "" },
+        if name_hovered {
+            "Click the file name to open the picker for this tab."
+        } else {
+            "Click the file icon to inspect root attributes."
+        },
     );
+    clicked && name_hovered
 }
 
 pub(crate) fn draw_entry(
@@ -967,12 +1062,14 @@ pub(crate) fn draw_entry(
             .clone(),
         _ => None,
     };
+    let row_x = ui.cursor_screen_pos()[0];
+    let dataset_prefix = tree_label_prefix(ui, row_x, has_parent);
     let visible_label = match &entry.kind {
         Kind::Group => format!("      {}", entry.name),
         Kind::Dataset { shape, .. } if show_shape => {
-            format!("{DATASET_NAME_PREFIX}{}  {:?}", entry.name, shape)
+            format!("{dataset_prefix}{}  {:?}", entry.name, shape)
         }
-        Kind::Dataset { .. } => format!("{DATASET_NAME_PREFIX}{}", entry.name),
+        Kind::Dataset { .. } => format!("{dataset_prefix}{}", entry.name),
         Kind::Other => format!("      {}", entry.name),
     };
     let label = format!("{visible_label}##{}", entry.path);

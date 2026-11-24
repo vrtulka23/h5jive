@@ -25,8 +25,8 @@ pub use geolocation::{
 pub use statistics::{DatasetDistribution, DatasetStatistics};
 pub use subset::{
     export_subset, inspect_subset_product, inspect_subset_product_with_rules,
-    preview_subset_coverage, CoveragePreview, SubsetBounds, SubsetMode, SubsetRequest,
-    SubsetVariable,
+    preview_subset_coverage, CoveragePreview, MosaicMethod, SubsetBounds, SubsetMode,
+    SubsetRequest, SubsetVariable,
 };
 
 #[derive(Debug)]

@@ -1,0 +1,25 @@
+dataset_formats[era5_single_levels] : dataset_format
+  name = "ERA5 single levels"
+
+  identification
+    file_glob = "ERA5_*.nc"
+
+    platform = ""
+
+    sensor = ""
+
+    product_type = ""
+
+  observation_group = ""
+
+  coordinate_group = ""
+
+  latitude = "latitude"
+
+  longitude = "longitude"
+
+  latitude_bounds = ""
+
+  longitude_bounds = ""
+
+  time_coordinate = "valid_time"

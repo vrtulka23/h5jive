@@ -94,18 +94,37 @@ shows reproducible slices and arithmetic operations.
 
 The Spatiotemporal subset plugin uses Dataset Browser's indexed products. Select
 a source, product date or orbit range, geographic bounds, and numeric variables.
-Its coverage preview layers sampled coordinates from every selected product on
-a world map or globe; dragging on the map sets the bounds. **Native products**
+Its coverage preview opens in a popup with a static world map and two opposite
+globe hemispheres. Enter the spatial bounds in the input fields. **Native products**
 exports cropped swaths in separate groups of one NetCDF-4 file, keeping their
-coordinates, numeric time axis, and variable attributes. **Gridded mosaic**
-averages overlapping samples onto one regular grid and writes sample counts
-for each variable. Both modes read spatial rows in bounded chunks and create a
+coordinates, numeric time axis, variable attributes, and available pixel bounds
+and scan direction. **Combined time series** joins compatible grids or swaths
+along a shared leading dimension. Swaths keep latitude, longitude, pixel bounds,
+and scan direction per sample; differing scan lengths are padded with missing
+values and recorded in `row_count` and `column_count`. A CF time coordinate is reused and normalized
+to seconds since 1970-01-01; products are ordered by time, and overlaps are
+rejected. When there is no time coordinate, name the leading index dimension
+(for example, `product`). The optional group name places the series under one
+NetCDF group; leaving it blank writes variables at the root. Regular grid
+coordinates, selected variable units, and calendars must match. **Gridded mosaic** combines valid samples on one regular
+grid using Mean, Newest, Oldest, Minimum, or Maximum. Mean gives every valid
+sample equal weight. Newest and Oldest follow Dataset Browser date/orbit order
+and CF time within each product. The companion count records all valid samples,
+and the output includes grid cell bounds. Both modes read spatial rows in bounded chunks and create a
 new file without overwriting an existing one.
+
+The mosaic methods do not apply quality flags or uncertainty weights. For
+satellite radiance, use scientifically comparable channels and observation
+conditions; a quality-based pixel choice is a separate method.
 
 The first version supports NetCDF products with 2D swath coordinates or 1D
 regular latitude and longitude axes, numeric 2D fields, and 3D fields with a
-leading CF time coordinate. It does not reproject curvilinear grids, preserve
-source numeric storage types, or write into existing A/B files. See the
+leading CF time coordinate. Native export keeps every channel of 4D
+geolocated fields such as GOME-2 radiance, while mosaic export averages each
+channel separately. Both outputs can be reopened in World map and Globe view.
+Mosaic cells have new footprints and do not carry source scan direction. The
+plugin does not reproject curvilinear grids, preserve source numeric
+storage types, or write into existing A/B files. See the
 [subset demo](../../examples/plugins/spatiotemporal_subset/README.md) for a
 reproducible source and export.
 

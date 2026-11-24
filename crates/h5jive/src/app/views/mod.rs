@@ -12,7 +12,7 @@ pub(super) use color::continuous_color;
 pub(super) use geospatial::{
     draw_geo_controls, geo_controls_height, observation_color, pixel_hover_distance,
 };
-pub(super) use world_map::coastlines;
+pub(crate) use world_map::coastlines;
 
 #[cfg(test)]
 pub(super) use profiles::draw_profile_plot;

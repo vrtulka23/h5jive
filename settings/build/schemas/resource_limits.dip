@@ -1,11 +1,15 @@
 ?descr "Built-in ceilings for runtime file access and sampling budgets."
 tree_max_depth int = 64
   !condition ({.} >= 24 && {.} <= 256)
+
 tree_max_objects int = 100000
   !condition ({.} >= 10000 && {.} <= 1000000)
+
 statistics_sample_values int = 5000000
   !condition ({.} >= 1000000 && {.} <= 10000000)
+
 slice_max_cells int = 1000000
   !condition ({.} >= 65536 && {.} <= 4000000)
+
 volume_preview_max_voxels int = 2000000
   !condition ({.} >= 500000 && {.} <= 8000000)

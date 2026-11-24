@@ -1,33 +1,51 @@
 ?descr "USGS PICS catalog site with published CNES and SDSU regions; its catalog center may lie outside either region."
 name str
+
 country str
-center_latitude float
-  !condition ({.} >= -90 && {.} <= 90)
-center_longitude float
-  !condition ({.} >= -180 && {.} <= 180)
-usable_km_1 int
-  !condition ({.} > 0)
-usable_km_2 int
-  !condition ({.} > 0)
-altitude_m int
+
+center_latitude float deg
+  !condition ({.} >= -90 deg && {.} <= 90 deg)
+
+center_longitude float deg
+  !condition ({.} >= -180 deg && {.} <= 180 deg)
+
+usable_km_1 int km
+  !condition ({.} > 0 km)
+
+usable_km_2 int km
+  !condition ({.} > 0 km)
+
+altitude_m int m
+
 landsat_wrs_2 str
+
 status str
   !options ["Active", "Inactive"]
+
 roi_1_name str
-roi_1_south float
-  !condition ({.} >= -90 && {.} < {.roi_1_north})
-roi_1_north float
-  !condition ({.} <= 90 && {.} > {.roi_1_south})
-roi_1_west float
-  !condition ({.} >= -180 && {.} < {.roi_1_east})
-roi_1_east float
-  !condition ({.} <= 180 && {.} > {.roi_1_west})
+
+roi_1_south float deg
+  !condition ({.} >= -90 deg && {.} < {.roi_1_north})
+
+roi_1_north float deg
+  !condition ({.} <= 90 deg && {.} > {.roi_1_south})
+
+roi_1_west float deg
+  !condition ({.} >= -180 deg && {.} < {.roi_1_east})
+
+roi_1_east float deg
+  !condition ({.} <= 180 deg && {.} > {.roi_1_west})
+
 roi_2_name str
-roi_2_south float
-  !condition ({.} >= -90 && {.} < {.roi_2_north})
-roi_2_north float
-  !condition ({.} <= 90 && {.} > {.roi_2_south})
-roi_2_west float
-  !condition ({.} >= -180 && {.} < {.roi_2_east})
-roi_2_east float
-  !condition ({.} <= 180 && {.} > {.roi_2_west})
+
+roi_2_south float deg
+  !condition ({.} >= -90 deg && {.} < {.roi_2_north})
+
+roi_2_north float deg
+  !condition ({.} <= 90 deg && {.} > {.roi_2_south})
+
+roi_2_west float deg
+  !condition ({.} >= -180 deg && {.} < {.roi_2_east})
+
+roi_2_east float deg
+  !condition ({.} <= 180 deg && {.} > {.roi_2_west})

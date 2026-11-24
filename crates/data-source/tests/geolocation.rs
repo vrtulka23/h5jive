@@ -24,6 +24,7 @@ fn bundled_band3_has_real_geolocation_bounds_and_scan_flags() {
         longitude: "longitude".into(),
         latitude_bounds: "latitude_bounds".into(),
         longitude_bounds: "longitude_bounds".into(),
+        time_coordinate: String::new(),
         scan_direction: Some(ScanDirectionRule {
             group: "coordinate".into(),
             variable: "scan_direction".into(),

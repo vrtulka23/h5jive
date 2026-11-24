@@ -1,11 +1,15 @@
 schemas[]
   name = "plugin_layout_settings"
+
   file = "schemas/plugin_layout.dip"
+
 schemas[]
   name = "resource_limits_settings"
+
   file = "schemas/resource_limits.dip"
 
 code[]
   file = "plugin_layout.dip"
+
 code[]
   file = "resource_limits.dip"

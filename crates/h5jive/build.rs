@@ -1,6 +1,66 @@
 use scinumtools3_build::{Config, RustType};
+use std::{
+    fs, io,
+    path::{Path, PathBuf},
+    process::Command,
+};
+
+fn dip_sources(directory: &Path, files: &mut Vec<PathBuf>) -> io::Result<()> {
+    for entry in fs::read_dir(directory)? {
+        let entry = entry?;
+        let path = entry.path();
+        if entry.file_type()?.is_dir() {
+            dip_sources(&path, files)?;
+        } else if path.extension().is_some_and(|extension| extension == "dip")
+            || path.file_name().is_some_and(|name| name == "DIPfile")
+        {
+            files.push(path);
+        }
+    }
+    Ok(())
+}
+
+fn format_dip_settings() -> Result<(), Box<dyn std::error::Error>> {
+    let settings = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../settings");
+    let mut files = Vec::new();
+    dip_sources(&settings, &mut files)?;
+    files.sort();
+    println!("cargo:rerun-if-changed={}", settings.display());
+
+    match Command::new("snt")
+        .args(["dip", "format", "--help"])
+        .output()
+    {
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(error.into()),
+        Ok(output) if !output.status.success() => {
+            println!("cargo:warning=snt is installed without dip format; skipping DIPL formatting");
+            return Ok(());
+        }
+        Ok(_) => {}
+    }
+
+    let mut check = Command::new("snt");
+    check.args(["dip", "format", "--check"]).args(&files);
+    match check.output() {
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(error.into()),
+        Ok(output) if output.status.success() => return Ok(()),
+        Ok(_) => {}
+    }
+
+    let status = Command::new("snt")
+        .args(["dip", "format", "--write"])
+        .args(&files)
+        .status()?;
+    if !status.success() {
+        return Err(io::Error::other("snt dip format --write failed").into());
+    }
+    Ok(())
+}
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    format_dip_settings()?;
     Config::new("../../settings/build/DIPfile")
         .rust_struct("crate::app::plugins::PluginLayout")
         .const_name("PLUGIN_LAYOUT")

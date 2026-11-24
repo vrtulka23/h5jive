@@ -1,0 +1,10 @@
+dataset_sources[era5_example] : dataset_source
+  name = "ERA5"
+
+  root = "../../examples/plugins/spatiotemporal_subset/era5"
+
+  format link = {?dataset_formats[era5_single_levels]}
+
+  tags = "era5, wind, example"
+
+  product_regex = "^ERA5_(?P<year>[0-9]{4})(?:_(?P<month>[0-9]{2}))?[.]nc$"

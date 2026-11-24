@@ -20,6 +20,7 @@ mod tutorial_tips;
 mod ui;
 mod value_visibility;
 mod views;
+pub(crate) use views::coastlines;
 mod volume_raycast;
 
 use crate::core::*;
@@ -251,6 +252,7 @@ struct App {
     details_panel_fraction: f32,
     show_about: bool,
     show_section_help: bool,
+    show_dataset_registration_help: bool,
     tutorial_tips_error: Option<String>,
     settings: Settings,
     resource_monitor: ResourceMonitor,
@@ -410,7 +412,10 @@ struct FilePickerState {
     filename: String,
     entries: Vec<FilePickerEntry>,
     selected: Option<PathBuf>,
+    pending_delete: Option<PathBuf>,
     error: Option<String>,
+    creating_folder: bool,
+    new_folder_name: String,
 }
 
 pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
@@ -611,6 +616,7 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
         display_backend: None,
         show_about: false,
         show_section_help: false,
+        show_dataset_registration_help: false,
         tutorial_tips_error: None,
         settings,
     };

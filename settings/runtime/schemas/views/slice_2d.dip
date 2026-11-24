@@ -7,29 +7,36 @@ colormap str = "viridis"
   !condition ({.} == "theme" || {.} == "viridis" || {.} == "grayscale")
   ?recommended_range "theme, viridis, grayscale"
   !setup
+
 range_mode str = "auto"
   ?descr "Choose the data-derived or fixed numeric color range."
   !options ["auto", "fixed"]
   !labels ["Automatic data range", "Fixed numeric range"]
   !condition ({.} == "auto" || {.} == "fixed")
   !setup
+
 cell_size int = 2
   ?descr "Approximate displayed cell size in pixels."
   !condition ({.} >= 1 && {.} <= 64)
+
 value_min float = -1.0
   ?descr "Lower color limit when range_mode is fixed."
   !condition (all_finite({.}) && {.} < {.value_max})
   !setup
+
 value_max float = 1.0
   ?descr "Upper color limit when range_mode is fixed."
   !condition (all_finite({.}) && {.} > {.value_min})
   !setup
+
 max_cells int = 65536
   ?descr "Sampled cells displayed in the overview, up to the compiled resource limit."
   !condition ({.} >= 256)
+
 legend_width int = 112
   ?descr "Color legend width in pixels."
   !condition ({.} >= 60 && {.} <= 300)
+
 legend_fraction float = 0.24
   ?descr "Fraction of the view reserved for the color legend."
   !condition ({.} > 0 && {.} <= 0.5)

@@ -1,21 +1,32 @@
 ?descr "Sourced calibration or reference location with one overpass search region; a regional search window does not define calibration pixels."
 name str
+
 country str
+
 category str
   !options ["Desert PICS", "Snow and ice", "Ocean color", "Atmospheric baseline"]
-center_latitude float
-  !condition ({.} >= -90 && {.} <= 90)
-center_longitude float
-  !condition ({.} >= -180 && {.} <= 180)
+
+center_latitude float deg
+  !condition ({.} >= -90 deg && {.} <= 90 deg)
+
+center_longitude float deg
+  !condition ({.} >= -180 deg && {.} <= 180 deg)
+
 roi_name str
-roi_south float
-  !condition ({.} >= -90 && {.} < {.roi_north})
-roi_north float
-  !condition ({.} <= 90 && {.} > {.roi_south})
-roi_west float
-  !condition ({.} >= -180 && {.} < {.roi_east})
-roi_east float
-  !condition ({.} <= 180 && {.} > {.roi_west})
+
+roi_south float deg
+  !condition ({.} >= -90 deg && {.} < {.roi_north})
+
+roi_north float deg
+  !condition ({.} <= 90 deg && {.} > {.roi_south})
+
+roi_west float deg
+  !condition ({.} >= -180 deg && {.} < {.roi_east})
+
+roi_east float deg
+  !condition ({.} <= 180 deg && {.} > {.roi_west})
+
 status str
   !options ["Active", "Reference", "Historical"]
+
 notes str

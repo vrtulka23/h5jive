@@ -4,6 +4,159 @@ use super::super::super::*;
 mod tests {
     use super::super::geospatial_point_budget;
     use super::*;
+    use h5jive_data::{
+        export_subset, inspect_subset_product_with_rules, MosaicMethod, SubsetBounds, SubsetMode,
+        SubsetRequest,
+    };
+
+    #[test]
+    fn exported_gome2_views_reopen_on_world_map() {
+        let source = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../examples/satellite/gome2_band3_20130106_gome.nc");
+        let rules = Settings::load().unwrap().dataset_rules;
+        let variable = inspect_subset_product_with_rules(&source, &rules)
+            .unwrap()
+            .into_iter()
+            .find(|choice| choice.path.ends_with("/OBSERVATIONS/radiance"))
+            .unwrap();
+        let directory = std::env::temp_dir().join(format!(
+            "h5jive-export-map-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir(&directory).unwrap();
+        for mode in [
+            SubsetMode::Native,
+            SubsetMode::TimeSeries,
+            SubsetMode::Mosaic,
+        ] {
+            let output = directory.join(format!("{mode:?}.nc"));
+            export_subset(&SubsetRequest {
+                products: vec![source.clone()],
+                variables: vec![variable.clone()],
+                bounds: SubsetBounds {
+                    west: -180.0,
+                    south: -90.0,
+                    east: 180.0,
+                    north: 90.0,
+                },
+                from_date: "2013-01-06".into(),
+                through_date: "2013-01-06".into(),
+                mode,
+                mosaic_method: MosaicMethod::Mean,
+                series_group: String::new(),
+                series_dimension: "product".into(),
+                resolution: 5.0,
+                output: output.clone(),
+                geolocation_rules: rules.clone(),
+            })
+            .unwrap();
+            let file = File::open(&output).unwrap();
+            let path = if mode == SubsetMode::Native {
+                "product_0000/radiance"
+            } else {
+                "radiance"
+            };
+            let geo = file
+                .geolocation(path)
+                .unwrap()
+                .unwrap_or_else(|| panic!("{mode:?} exported radiance geolocation"));
+            let shape = file.dataset_info(path).unwrap().shape;
+            let data = load_map_data(&file, path, &shape, &geo, Some(0), 3, 1000).unwrap();
+            assert!(!data.points.is_empty(), "{mode:?}");
+            if mode != SubsetMode::Mosaic {
+                assert!(geo.latitude_bounds.is_some());
+                assert!(geo.longitude_bounds.is_some());
+                assert!(geo.scan_direction.is_some());
+                assert!(data.points.iter().any(|point| point.footprint.is_some()));
+                assert!(data
+                    .points
+                    .iter()
+                    .any(|point| point.scan_direction.is_some()));
+            } else {
+                assert!(geo.latitude_bounds.is_some());
+                assert!(geo.longitude_bounds.is_some());
+                assert!(geo.scan_direction.is_none());
+                assert!(data.points.iter().any(|point| point.footprint.is_some()));
+            }
+            std::fs::remove_file(output).unwrap();
+        }
+        std::fs::remove_dir(directory).unwrap();
+    }
+
+    #[test]
+    fn exported_era5_grid_reopens_on_world_map() {
+        let source = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../examples/plugins/spatiotemporal_subset/era5/ERA5_2026_04.nc");
+        let variable = inspect_subset_product_with_rules(&source, &[])
+            .unwrap()
+            .into_iter()
+            .find(|choice| choice.path == "u10")
+            .unwrap();
+        let directory = std::env::temp_dir().join(format!(
+            "h5jive-era5-map-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir(&directory).unwrap();
+        for mode in [
+            SubsetMode::Native,
+            SubsetMode::TimeSeries,
+            SubsetMode::Mosaic,
+        ] {
+            let output = directory.join(format!("{mode:?}.nc"));
+            export_subset(&SubsetRequest {
+                products: vec![source.clone()],
+                variables: vec![variable.clone()],
+                bounds: SubsetBounds {
+                    west: 114.0,
+                    south: 21.0,
+                    east: 116.0,
+                    north: 24.0,
+                },
+                from_date: "2026-04-02".into(),
+                through_date: "2026-04-02".into(),
+                mode,
+                mosaic_method: MosaicMethod::Mean,
+                series_group: String::new(),
+                series_dimension: "product".into(),
+                resolution: 0.25,
+                output: output.clone(),
+                geolocation_rules: Vec::new(),
+            })
+            .unwrap();
+            let file = File::open(&output).unwrap();
+            let path = if mode == SubsetMode::Native {
+                "product_0000/u10"
+            } else {
+                "u10"
+            };
+            if mode == SubsetMode::TimeSeries {
+                assert_eq!(file.dataset_info(path).unwrap().shape[0], 24);
+            }
+            let geo = file
+                .geolocation(path)
+                .unwrap()
+                .expect("exported ERA5 geolocation");
+            assert_eq!(geo.latitude_bounds.is_some(), mode == SubsetMode::Mosaic);
+            assert_eq!(geo.longitude_bounds.is_some(), mode == SubsetMode::Mosaic);
+            assert!(geo.scan_direction.is_none());
+            let shape = file.dataset_info(path).unwrap().shape;
+            let map = load_map_data(&file, path, &shape, &geo, Some(0), 0, 1000).unwrap();
+            assert!(
+                map.points.iter().any(|point| point.value.is_finite()),
+                "{mode:?}"
+            );
+            std::fs::remove_file(output).unwrap();
+        }
+        std::fs::remove_dir(directory).unwrap();
+    }
     #[test]
     fn sampling_includes_both_ends_without_duplicates() {
         assert_eq!(sampled_indexes(48, 5), [0, 11, 23, 35, 47]);
@@ -76,6 +229,12 @@ mod tests {
         let shape = file.dataset_info(dataset).unwrap().shape;
         let map = load_map_data(&file, dataset, &shape, &geo, Some(0), 32, 500).unwrap();
         assert!(map.aggregated);
+        let sampled_rows = (500 / shape[2]).max(1).min(shape[1]);
+        assert!(
+            map.points.len() >= sampled_rows * shape[2] * 3 / 4,
+            "sampled swath should retain its unpadded across-track pixels: {} points, {sampled_rows} rows, {} columns, shape {shape:?}",
+            map.points.len(), shape[2]
+        );
         assert!(map
             .points
             .iter()
@@ -262,8 +421,16 @@ mod tests {
         }
         let preview = load_map_preview(&file, dataset, &shape, &geo, Some(0), 32, 500).unwrap();
         assert!(preview.preview);
-        assert!(!preview.aggregated);
+        assert!(preview.aggregated);
         assert!(!preview.points.is_empty());
+        assert!(
+            preview
+                .points
+                .iter()
+                .filter(|point| point.footprint.is_some())
+                .count()
+                > preview.points.len() / 2
+        );
     }
 
     #[test]
@@ -287,6 +454,7 @@ mod tests {
             longitude: "longitude".into(),
             latitude_bounds: "latitude_bounds".into(),
             longitude_bounds: "longitude_bounds".into(),
+            time_coordinate: String::new(),
             scan_direction: None,
         };
         let geo = file.geolocation_with_rules(path, &[rule]).unwrap().unwrap();

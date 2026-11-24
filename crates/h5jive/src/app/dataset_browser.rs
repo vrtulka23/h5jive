@@ -755,12 +755,15 @@ mod tests {
             }
             let expected = match source.id.as_str() {
                 "s5p" => 3,
+                "era5_example" => 1,
                 _ => 5,
             };
             assert_eq!(products.len(), expected, "{}", source.id);
-            assert!(products.iter().all(|product| product.year.len() == 4
-                && product.month.len() == 2
-                && product.day.len() == 2));
+            assert!(products.iter().all(|product| {
+                product.year.len() == 4
+                    && product.month.len() == 2
+                    && (product.day.len() == 2 || source.id == "era5_example")
+            }));
             if source.id == "gome" {
                 assert_eq!(products[0].orbit, "73861");
             }

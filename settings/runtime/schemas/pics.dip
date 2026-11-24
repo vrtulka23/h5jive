@@ -1,34 +1,50 @@
 ?descr "One CEOS reference pseudo-invariant calibration site, with USGS CEOS and CNES ROIs"
 name str
+
 country str
-center_latitude float
+
+center_latitude float deg
   ?descr "Site center latitude in decimal degrees north"
-  !condition ({.} >= -90 && {.} <= 90)
-center_longitude float
+  !condition ({.} >= -90 deg && {.} <= 90 deg)
+
+center_longitude float deg
   ?descr "Site center longitude in decimal degrees east"
-  !condition ({.} >= -180 && {.} <= 180)
-ceos_south float
-  !condition ({.} >= -90 && {.} < {.ceos_north})
-ceos_north float
-  !condition ({.} <= 90 && {.} > {.ceos_south})
-ceos_west float
-  !condition ({.} >= -180 && {.} < {.ceos_east})
-ceos_east float
-  !condition ({.} <= 180 && {.} > {.ceos_west})
-cnes_south float
+  !condition ({.} >= -180 deg && {.} <= 180 deg)
+
+ceos_south float deg
+  !condition ({.} >= -90 deg && {.} < {.ceos_north})
+
+ceos_north float deg
+  !condition ({.} <= 90 deg && {.} > {.ceos_south})
+
+ceos_west float deg
+  !condition ({.} >= -180 deg && {.} < {.ceos_east})
+
+ceos_east float deg
+  !condition ({.} <= 180 deg && {.} > {.ceos_west})
+
+cnes_south float deg
   !condition ({.} >= {.ceos_south} && {.} < {.cnes_north})
-cnes_north float
+
+cnes_north float deg
   !condition ({.} <= {.ceos_north} && {.} > {.cnes_south})
-cnes_west float
+
+cnes_west float deg
   !condition ({.} >= {.ceos_west} && {.} < {.cnes_east})
-cnes_east float
+
+cnes_east float deg
   !condition ({.} <= {.ceos_east} && {.} > {.cnes_west})
-usable_km_1 int
-  !condition ({.} > 0)
-usable_km_2 int
-  !condition ({.} > 0)
-altitude_m int
-  !condition ({.} >= -500)
+
+usable_km_1 int km
+  !condition ({.} > 0 km)
+
+usable_km_2 int km
+  !condition ({.} > 0 km)
+
+altitude_m int m
+  !condition ({.} >= -500 m)
+
 landsat_wrs_2 str
+
 status str
   !options ["Active", "Inactive"]

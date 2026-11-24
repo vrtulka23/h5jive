@@ -1,10 +1,14 @@
 ?descr "One local dataset repository; several repositories may use the same dataset format."
 name str
+
 root str
   ?descr "Repository root relative to settings/ by default; set the host path in overrides.dip."
+
 format
+
 tags str
   ?descr "Comma-separated tags for dataset grouping and search."
+
 product_regex str
   ?descr "Regex matched against the relative path; named captures year, month, day, orbit become index columns."
   ?example "^(?P<year>[0-9]{4})/(?P<orbit>[0-9]+)[.]nc$"

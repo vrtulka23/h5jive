@@ -2,98 +2,181 @@
 pics[dome_c] : calibration_site
   ?url "https://calval.cr.usgs.gov/apps/node/21"
   name = "Dome C"
+
   country = "Antarctica"
+
   category = "Snow and ice"
+
   center_latitude = -75.10
+
   center_longitude = 123.39
+
   roi_name = "Regional search window"
+
   roi_south = -75.35
+
   roi_north = -74.85
+
   roi_west = 122.89
+
   roi_east = 123.89
+
   status = "Active"
+
   notes = "Snow reference; reflective-band use is seasonal and requires BRDF screening."
+
 pics[greenland_summit] : calibration_site
   ?url "https://gml.noaa.gov/dv/site/site.php?code=SUM"
   name = "Summit, Greenland"
+
   country = "Greenland"
+
   category = "Snow and ice"
+
   center_latitude = 72.5962
+
   center_longitude = -38.422
+
   roi_name = "Station search window"
+
   roi_south = 72.3462
+
   roi_north = 72.8462
+
   roi_west = -38.672
+
   roi_east = -38.172
+
   status = "Reference"
+
   notes = "NOAA atmospheric and snow reference station; search window is not a uniform snow ROI."
+
 pics[moby] : calibration_site
   ?url "https://seabass.gsfc.nasa.gov/experiment/MOBY"
   name = "MOBY"
+
   country = "Hawaii offshore waters"
+
   category = "Ocean color"
+
   center_latitude = 20.8167
+
   center_longitude = -157.20
+
   roi_name = "Mooring search window"
+
   roi_south = 20.5667
+
   roi_north = 21.0667
+
   roi_west = -157.45
+
   roi_east = -156.95
+
   status = "Reference"
+
   notes = "Ocean-colour buoy; satellite matchups require time, geometry, and water-quality screening."
+
 pics[boussole] : calibration_site
   ?url "https://seabass.gsfc.nasa.gov/experiment/BOUSSOLE/"
   name = "BOUSSOLE"
+
   country = "Ligurian Sea"
+
   category = "Ocean color"
+
   center_latitude = 43.367
+
   center_longitude = 7.90
+
   roi_name = "Mooring search window"
+
   roi_south = 43.117
+
   roi_north = 43.617
+
   roi_west = 7.65
+
   roi_east = 8.15
+
   status = "Reference"
+
   notes = "Ocean-colour buoy; satellite matchups require time, geometry, and water-quality screening."
+
 pics[mauna_loa] : calibration_site
   ?url "https://gml.noaa.gov/dv/site/index.php?stacode=mlo"
   name = "Mauna Loa Observatory"
+
   country = "Hawaii, United States"
+
   category = "Atmospheric baseline"
+
   center_latitude = 19.5362
+
   center_longitude = -155.5763
+
   roi_name = "Station search window"
+
   roi_south = 19.2862
+
   roi_north = 19.7862
+
   roi_west = -155.8263
+
   roi_east = -155.3263
+
   status = "Reference"
+
   notes = "NOAA atmospheric baseline site; a satellite overpass is not a direct in-situ matchup."
+
 pics[barrow] : calibration_site
   ?url "https://gml.noaa.gov/dv/site/?stacode=BRW"
   name = "Barrow Observatory"
+
   country = "Alaska, United States"
+
   category = "Atmospheric baseline"
+
   center_latitude = 71.3230
+
   center_longitude = -156.6114
+
   roi_name = "Station search window"
+
   roi_south = 71.0730
+
   roi_north = 71.5730
+
   roi_west = -156.8614
+
   roi_east = -156.3614
+
   status = "Reference"
+
   notes = "NOAA Arctic atmospheric baseline site; matchups need time and air-mass screening."
+
 pics[american_samoa] : calibration_site
   ?url "https://gml.noaa.gov/dv/site/index.php?stacode=SMO"
   name = "American Samoa Observatory"
+
   country = "American Samoa"
+
   category = "Atmospheric baseline"
+
   center_latitude = -14.2474
+
   center_longitude = -170.5644
+
   roi_name = "Station search window"
+
   roi_south = -14.4974
+
   roi_north = -13.9974
+
   roi_west = -170.8144
+
   roi_east = -170.3144
+
   status = "Reference"
+
   notes = "NOAA South Pacific atmospheric baseline site; matchups need time and air-mass screening."

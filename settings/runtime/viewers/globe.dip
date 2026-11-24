@@ -1,5 +1,8 @@
 # Rotatable Earth view settings.
 zoom_min float = 0.55
+
 zoom_max float = 64.0
+
 zoom_factor float = 1.12
+
 pinned_default str = "middle"

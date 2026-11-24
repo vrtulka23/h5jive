@@ -1,7 +1,8 @@
 use super::*;
+use crate::app::coastlines;
 use h5jive_data::{
     export_subset, inspect_subset_product_with_rules, preview_subset_coverage, CoveragePreview,
-    SubsetBounds, SubsetMode, SubsetRequest, SubsetVariable,
+    MosaicMethod, SubsetBounds, SubsetMode, SubsetRequest, SubsetVariable,
 };
 use std::{path::PathBuf, sync::Arc};
 
@@ -23,11 +24,11 @@ pub(super) struct State {
     inspection: BackgroundJob<PathBuf, Vec<SubsetVariable>>,
     coverage: Option<CoveragePreview>,
     coverage_job: BackgroundJob<(), CoveragePreview>,
-    preview_globe: bool,
-    globe_yaw: f64,
-    globe_pitch: f64,
-    drag_start: Option<[f32; 2]>,
+    coverage_error: Option<String>,
     mode: SubsetMode,
+    series_group: String,
+    series_dimension: String,
+    mosaic_method: MosaicMethod,
     resolution: String,
     pub(super) output: String,
     export_job: BackgroundJob<(), String>,
@@ -53,11 +54,11 @@ impl Default for State {
             inspection: BackgroundJob::default(),
             coverage: None,
             coverage_job: BackgroundJob::default(),
-            preview_globe: false,
-            globe_yaw: 0.0,
-            globe_pitch: 0.0,
-            drag_start: None,
+            coverage_error: None,
             mode: SubsetMode::Mosaic,
+            series_group: String::new(),
+            series_dimension: "product".into(),
+            mosaic_method: MosaicMethod::Mean,
             resolution: "1".into(),
             output: "subset.nc".into(),
             export_job: BackgroundJob::default(),
@@ -75,6 +76,7 @@ impl State {
         self.enabled.clear();
         self.coverage = None;
         self.coverage_job.cancel();
+        self.coverage_error = None;
     }
     pub fn is_busy(&mut self) -> bool {
         let mut changed = false;
@@ -82,8 +84,11 @@ impl State {
             match result {
                 Ok(vars) => {
                     self.enabled = vec![false; vars.len()];
+                    self.status = None;
                     if !vars.is_empty() {
-                        self.enabled[0] = true;
+                        if vars[0].shape.len() == 4 {
+                            self.mode = SubsetMode::Native;
+                        }
                     }
                     self.variables = vars;
                     changed = true;
@@ -98,10 +103,11 @@ impl State {
             match result {
                 Ok(preview) => {
                     self.coverage = Some(preview);
+                    self.coverage_error = None;
                     changed = true;
                 }
                 Err(e) => {
-                    self.status = Some(Err(e));
+                    self.coverage_error = Some(e);
                     changed = true;
                 }
             }
@@ -152,6 +158,7 @@ fn selected_products(context: &PluginContext<'_>, state: &mut State) -> Arc<Vec<
     }
     state.coverage = None;
     state.coverage_job.cancel();
+    state.coverage_error = None;
     let paths: Arc<Vec<PathBuf>> = Arc::new(
         range
             .select(context.browser.products(state.source))
@@ -227,138 +234,247 @@ fn range_inputs(
         ui.input_text(through_id, through).build();
     }
 }
-fn draw_map(ui: &Ui, state: &mut State, settings: &Settings) {
-    let Some(coverage) = &state.coverage else {
-        return;
-    };
-    ui.text(format!(
-        "Combined coverage: {} products, {} sampled coordinate points",
-        coverage.products, coverage.sampled_points
-    ));
-    if ui.button(if state.preview_globe {
-        "World map"
-    } else {
-        "Globe"
-    }) {
-        state.preview_globe = !state.preview_globe;
-    }
-    item_tip(
-        ui,
-        settings.tutorial_tips,
-        "Switch between flat and globe coverage.",
-        "Switch between a world map for drawing bounds and a globe for viewing coverage.",
-    );
-    let width = ui.content_region_avail()[0].min(680.0).max(220.0);
-    let height = if state.preview_globe {
-        width.min(400.0)
-    } else {
-        width * 0.5
-    };
+fn draw_world_coverage(ui: &Ui, coverage: &CoveragePreview, settings: &Settings, width: f32) {
+    ui.text("World coverage");
+    ui.set_cursor_pos_x(ui.cursor_pos()[0] + (ui.content_region_avail()[0] - width).max(0.0) * 0.5);
+    let height = width * 0.5;
     let min = ui.cursor_screen_pos();
     let max = [min[0] + width, min[1] + height];
-    ui.invisible_button("##subset_map", [width, height]);
+    ui.dummy([width, height]);
     let draw = ui.get_window_draw_list();
     draw.add_rect(min, max, settings.palette.panel)
         .filled(true)
         .build();
-    let bounds = state.bounds().ok();
-    let max_count = coverage.counts.iter().copied().max().unwrap_or(1).max(1) as f32;
-    if state.preview_globe {
-        let center = [min[0] + width * 0.5, min[1] + height * 0.5];
-        let radius = width.min(height) * 0.43;
-        if ui.is_item_active() && ui.is_mouse_dragging(dear_app::imgui::MouseButton::Left) {
-            let delta = ui.io().mouse_delta();
-            state.globe_yaw -= delta[0] as f64 / radius as f64;
-            state.globe_pitch =
-                (state.globe_pitch + delta[1] as f64 / radius as f64).clamp(-1.5, 1.5);
-        }
-        draw.add_circle(center, radius, settings.palette.border)
-            .build();
-        let projection = GlobeProjection {
-            center,
-            radius,
-            yaw: -(state.globe_yaw as f32),
-            pitch: state.globe_pitch as f32,
-        };
-        for cell in coverage_cells(coverage.width, coverage.height, &coverage.counts) {
-            let projected = projection.project(cell.longitude, cell.latitude);
-            if projected.depth <= 0.0 {
-                continue;
-            }
-            let alpha = 0.3 + 0.7 * (cell.count as f32 / max_count).sqrt();
-            let c = settings.palette.accent;
-            draw.add_circle(
-                projected.point,
-                1.0 + (cell.count as f32).sqrt().min(3.0),
-                [c[0], c[1], c[2], alpha],
-            )
-            .filled(true)
-            .build();
-        }
-    } else {
-        let projection = MapViewport::default();
-        let half_lon = 180.0 / coverage.width as f32;
-        let half_lat = 90.0 / coverage.height as f32;
-        for cell in coverage_cells(coverage.width, coverage.height, &coverage.counts) {
-            let selected =
-                bounds.is_some_and(|b| b.contains(cell.latitude as f64, cell.longitude as f64));
-            let c = if selected {
-                settings.palette.accent
-            } else {
-                settings.palette.heatmap_low
-            };
-            let alpha = 0.25 + 0.75 * (cell.count as f32 / max_count).sqrt();
-            let first = projection.project(
-                min,
-                [width, height],
-                cell.longitude - half_lon,
-                cell.latitude + half_lat,
-            );
-            let last = projection.project(
-                min,
-                [width, height],
-                cell.longitude + half_lon,
-                cell.latitude - half_lat,
-            );
-            draw.add_rect(
-                first,
-                [last[0] + 0.4, last[1] + 0.4],
-                [c[0], c[1], c[2], alpha],
-            )
-            .filled(true)
-            .build();
-        }
-        let mouse = ui.io().mouse_pos();
-        if ui.is_item_hovered() && ui.is_mouse_clicked(dear_app::imgui::MouseButton::Left) {
-            state.drag_start = Some(mouse);
-        }
-        if let Some(start) = state.drag_start {
-            let clamped = [
-                mouse[0].clamp(min[0], max[0]),
-                mouse[1].clamp(min[1], max[1]),
-            ];
-            if ui.is_mouse_down(dear_app::imgui::MouseButton::Left) {
-                draw.add_rect(
-                    [start[0].min(clamped[0]), start[1].min(clamped[1])],
-                    [start[0].max(clamped[0]), start[1].max(clamped[1])],
-                    settings.palette.accent,
+    let grid = muted_geo_color(settings.palette.border, 0.42);
+    let shore = muted_geo_color(settings.palette.muted, 0.7);
+    let projection = MapViewport::default();
+    for lon in (-180..=180).step_by(30) {
+        let x = projection.project(min, [width, height], lon as f32, 0.0)[0];
+        draw.add_line([x, min[1]], [x, max[1]], grid).build();
+    }
+    for lat in (-90..=90).step_by(30) {
+        let y = projection.project(min, [width, height], 0.0, lat as f32)[1];
+        draw.add_line([min[0], y], [max[0], y], grid).build();
+    }
+    for path in coastlines() {
+        for segment in path.windows(2) {
+            if (segment[0][0] - segment[1][0]).abs() <= 180.0 {
+                draw.add_line(
+                    projection.project(min, [width, height], segment[0][0], segment[0][1]),
+                    projection.project(min, [width, height], segment[1][0], segment[1][1]),
+                    shore,
                 )
-                .thickness(2.0)
                 .build();
-            } else {
-                if (start[0] - clamped[0]).abs() > 3.0 && (start[1] - clamped[1]).abs() > 3.0 {
-                    let first = projection.unproject(min, [width, height], start);
-                    let last = projection.unproject(min, [width, height], clamped);
-                    state.west = format!("{:.3}", first[0].min(last[0]));
-                    state.east = format!("{:.3}", first[0].max(last[0]));
-                    state.north = format!("{:.3}", first[1].max(last[1]));
-                    state.south = format!("{:.3}", first[1].min(last[1]));
-                }
-                state.drag_start = None;
             }
         }
     }
-    item_tip(ui,settings.tutorial_tips,"Coverage count is the number of products touching a map cell.","Drag on the globe to rotate it, or drag a rectangle on the world map to set geographic bounds. Brighter cells are covered by more selected products.");
+    draw.add_rect(min, max, settings.palette.border).build();
+    for lon in [-180, -90, 0, 90] {
+        let x = projection.project(min, [width, height], lon as f32, 0.0)[0];
+        draw.add_text(
+            [x + 3.0, max[1] - ui.text_line_height() - 2.0],
+            settings.palette.muted,
+            format!("{lon}"),
+        );
+    }
+    for lat in [-60, 0, 60] {
+        let y = projection.project(min, [width, height], 0.0, lat as f32)[1];
+        draw.add_text(
+            [min[0] + 4.0, y - ui.text_line_height() - 2.0],
+            settings.palette.muted,
+            format!("{lat}"),
+        );
+    }
+    let max_count = coverage.counts.iter().copied().max().unwrap_or(1).max(1) as f32;
+    for cell in coverage_cells(coverage.width, coverage.height, &coverage.counts) {
+        let point = projection.project(min, [width, height], cell.longitude, cell.latitude);
+        let alpha = 0.35 + 0.65 * (cell.count as f32 / max_count).sqrt();
+        let c = settings.palette.accent;
+        draw.add_circle(
+            point,
+            1.4 + (cell.count as f32).sqrt().min(2.0),
+            [c[0], c[1], c[2], alpha],
+        )
+        .filled(true)
+        .build();
+    }
+}
+
+fn muted_geo_color(color: [f32; 4], opacity: f32) -> [f32; 4] {
+    [color[0], color[1], color[2], color[3] * opacity]
+}
+
+fn draw_globe_coverage(
+    ui: &Ui,
+    coverage: &CoveragePreview,
+    settings: &Settings,
+    label: &str,
+    yaw: f32,
+    diameter: f32,
+) {
+    ui.text(label);
+    let min = ui.cursor_screen_pos();
+    ui.dummy([diameter, diameter]);
+    let center = [min[0] + diameter * 0.5, min[1] + diameter * 0.5];
+    let radius = diameter * 0.44;
+    let draw = ui.get_window_draw_list();
+    draw.add_circle(center, radius, settings.palette.panel)
+        .filled(true)
+        .build();
+    draw.add_circle(center, radius, settings.palette.border)
+        .build();
+    let projection = GlobeProjection {
+        center,
+        radius,
+        yaw,
+        pitch: 0.0,
+    };
+    let grid = muted_geo_color(settings.palette.border, 0.42);
+    let shore = muted_geo_color(settings.palette.muted, 0.7);
+    for lon in (-150..=180).step_by(30) {
+        let mut last = None;
+        for lat in (-90..=90).step_by(3) {
+            let point = projection.project(lon as f32, lat as f32);
+            if point.depth >= 0.0 {
+                if let Some(previous) = last {
+                    draw.add_line(previous, point.point, grid).build();
+                }
+                last = Some(point.point);
+            } else {
+                last = None;
+            }
+        }
+    }
+    for lat in (-60..=60).step_by(30) {
+        let mut last = None;
+        for lon in (-180..=180).step_by(3) {
+            let point = projection.project(lon as f32, lat as f32);
+            if point.depth >= 0.0 {
+                if let Some(previous) = last {
+                    draw.add_line(previous, point.point, grid).build();
+                }
+                last = Some(point.point);
+            } else {
+                last = None;
+            }
+        }
+    }
+    for path in coastlines() {
+        for segment in path.windows(2) {
+            let a = projection.project(segment[0][0], segment[0][1]);
+            let b = projection.project(segment[1][0], segment[1][1]);
+            if a.depth >= 0.0 && b.depth >= 0.0 {
+                draw.add_line(a.point, b.point, shore).build();
+            }
+        }
+    }
+    draw.add_text(
+        [center[0] - 5.0, center[1] - radius + 3.0],
+        settings.palette.muted,
+        "N",
+    );
+    draw.add_text(
+        [
+            center[0] - 4.0,
+            center[1] + radius - ui.text_line_height() - 2.0,
+        ],
+        settings.palette.muted,
+        "S",
+    );
+    let max_count = coverage.counts.iter().copied().max().unwrap_or(1).max(1) as f32;
+    for cell in coverage_cells(coverage.width, coverage.height, &coverage.counts) {
+        let point = projection.project(cell.longitude, cell.latitude);
+        if point.depth <= 0.0 {
+            continue;
+        }
+        let alpha = 0.35 + 0.65 * (cell.count as f32 / max_count).sqrt();
+        let c = settings.palette.accent;
+        draw.add_circle(
+            point.point,
+            1.2 + (cell.count as f32).sqrt().min(2.0),
+            [c[0], c[1], c[2], alpha],
+        )
+        .filled(true)
+        .build();
+    }
+}
+
+struct CoveragePopupLayout {
+    size: [f32; 2],
+    map_width: f32,
+    globe_diameter: f32,
+}
+
+fn coverage_popup_layout(display: [f32; 2], padding: [f32; 2]) -> CoveragePopupLayout {
+    let max_height = (display[1] - 40.0).max(200.0);
+    let max_width = (display[0] - 40.0).max(200.0);
+    let scale = ((max_height - 120.0) / 400.0)
+        .min((max_width - 2.0 * padding[0] - 12.0) / 420.0)
+        .clamp(0.25, 1.0);
+    let map_width = 420.0 * scale;
+    let globe_diameter = 190.0 * scale;
+    CoveragePopupLayout {
+        size: [
+            map_width + 2.0 * padding[0] + 12.0,
+            map_width * 0.5 + globe_diameter + 120.0,
+        ],
+        map_width,
+        globe_diameter,
+    }
+}
+
+fn draw_coverage_popup(ui: &Ui, state: &State, settings: &Settings, layout: &CoveragePopupLayout) {
+    if let Some(coverage) = &state.coverage {
+        ui.text(format!(
+            "{} products, {} sampled points",
+            coverage.products, coverage.sampled_points
+        ));
+        draw_world_coverage(ui, coverage, settings, layout.map_width);
+        let table_width = layout.globe_diameter * 2.0 + 24.0;
+        ui.set_cursor_pos_x(
+            ui.cursor_pos()[0] + (ui.content_region_avail()[0] - table_width).max(0.0) * 0.5,
+        );
+        if let Some(_table) = ui.begin_table_with_sizing(
+            "subset_coverage_hemispheres",
+            2,
+            TableFlags::NONE,
+            [table_width, 0.0],
+            0.0,
+        ) {
+            for label in ["0 deg center", "180 deg center"] {
+                ui.table_setup_column_fixed_width(
+                    label,
+                    TableColumnFlags::NONE,
+                    layout.globe_diameter + 8.0,
+                );
+            }
+            ui.table_next_row();
+            ui.table_next_column();
+            draw_globe_coverage(
+                ui,
+                coverage,
+                settings,
+                "0 deg center",
+                0.0,
+                layout.globe_diameter,
+            );
+            ui.table_next_column();
+            draw_globe_coverage(
+                ui,
+                coverage,
+                settings,
+                "180 deg center",
+                std::f32::consts::PI,
+                layout.globe_diameter,
+            );
+        }
+    } else if state.coverage_job.is_busy() {
+        ui.text("Sampling selected coverage...");
+    } else if let Some(error) = &state.coverage_error {
+        ui.text_wrapped(error);
+    } else {
+        ui.text("No coverage preview is available yet.");
+    }
 }
 pub(super) fn draw_icon(draw: &DrawListMut<'_>, min: [f32; 2], max: [f32; 2], color: [f32; 4]) {
     let x = (min[0] + max[0]) * 0.5;
@@ -371,6 +487,7 @@ pub(super) fn draw_icon(draw: &DrawListMut<'_>, min: [f32; 2], max: [f32; 2], co
         .build();
 }
 pub(super) fn draw(lab: &mut PluginLab, ui: &Ui, context: PluginContext<'_>) -> Option<Selection> {
+    const COVERAGE_POPUP: &str = "Coverage preview###subset_coverage_preview";
     let state = &mut lab.spatiotemporal_subset;
     state.is_busy();
     if context.settings.dataset_sources.is_empty() {
@@ -386,6 +503,7 @@ pub(super) fn draw(lab: &mut PluginLab, ui: &Ui, context: PluginContext<'_>) -> 
         .map(|s| s.name.as_str())
         .collect::<Vec<_>>();
     state.source = state.source.min(labels.len() - 1);
+    let mut show_preview = false;
     let products = if let Some(_table) = ui.begin_table("subset_inputs", 2) {
         ui.table_setup_column_stretch_weight("Source and ranges", TableColumnFlags::NONE, 1.0);
         ui.table_setup_column_stretch_weight("Variables", TableColumnFlags::NONE, 1.0);
@@ -452,6 +570,7 @@ pub(super) fn draw(lab: &mut PluginLab, ui: &Ui, context: PluginContext<'_>) -> 
                 state.variables.clear();
                 state.enabled.clear();
                 state.coverage = None;
+                state.coverage_error = None;
                 let path = first.clone();
                 let rules = context.settings.dataset_rules.clone();
                 state.inspection.start(path.clone(), move |_| {
@@ -460,20 +579,27 @@ pub(super) fn draw(lab: &mut PluginLab, ui: &Ui, context: PluginContext<'_>) -> 
             }
         }
         editable_bounds(ui, state, context.settings.tutorial_tips);
+        show_preview = ui.button("Preview selected coverage");
+        item_tip(
+            ui,
+            context.settings.tutorial_tips,
+            "Open the coverage preview.",
+            "Open a world map and two globe hemispheres for the selected products.",
+        );
         let left_height = ui.cursor_screen_pos()[1] - left_top;
         ui.table_next_column();
         let right_top = ui.cursor_screen_pos()[1];
         ui.text("Variables");
-        ui.separator();
         let header_height = ui.cursor_screen_pos()[1] - right_top;
         ui.child_window("subset_variable_panel")
             .size([0.0, (left_height - header_height).max(230.0)])
+            .border(true)
             .flags(WindowFlags::HORIZONTAL_SCROLLBAR)
             .build(ui, || {
                 if state.inspection.is_busy() {
                     ui.text("Inspecting representative product...");
                 } else if state.variables.is_empty() {
-                    ui.text_wrapped("No supported geographic numeric fields found. This first version accepts NetCDF regular grids and 2D swaths with identifiable latitude and longitude coordinates.");
+                    ui.text_wrapped("No supported geographic numeric fields found. The source needs numeric fields with identifiable latitude and longitude coordinates.");
                 } else {
                     let mut clipper = ListClipper::new(state.variables.len()).begin(ui);
                     while clipper.step() {
@@ -484,8 +610,10 @@ pub(super) fn draw(lab: &mut PluginLab, ui: &Ui, context: PluginContext<'_>) -> 
                                 variable.path, variable.shape
                             );
                             if ui.checkbox(label, &mut state.enabled[i]) {
+                                state.status = None;
                                 state.coverage = None;
                                 state.coverage_job.cancel();
+                                state.coverage_error = None;
                             }
                             item_tip(ui,context.settings.tutorial_tips,"Include this variable in the export.","Select fields sharing the same spatial coordinates and shape. The export checks each selected product for compatible fields.");
                         }
@@ -496,110 +624,239 @@ pub(super) fn draw(lab: &mut PluginLab, ui: &Ui, context: PluginContext<'_>) -> 
     } else {
         selected_products(&context, state)
     };
-    if state.coverage_job.is_busy() {
-        ui.text("Sampling combined coverage...");
-    } else if ui.button("Preview selected coverage") {
-        if let Some(choice) = selected_variables(state).first().cloned() {
-            let paths = products.as_ref().clone();
-            let max_points = context.settings.spatiotemporal_subset_preview_max_points;
-            state.coverage_job.start((), move |_| {
-                preview_subset_coverage(&paths, &choice, max_points)
-            });
-            state.coverage = None;
-            state.status = None;
-        } else {
-            state.status = Some(Err("Select at least one variable".into()));
+    if show_preview {
+        ui.open_popup(COVERAGE_POPUP);
+        state.coverage_error = None;
+        if state.coverage.is_none() && !state.coverage_job.is_busy() {
+            if products.is_empty() {
+                state.coverage_error = Some("Select at least one indexed product".into());
+            } else if let Some(choice) = selected_variables(state).first().cloned() {
+                let paths = products.as_ref().clone();
+                let max_points = context.settings.spatiotemporal_subset_preview_max_points;
+                state.coverage_job.start((), move |_| {
+                    preview_subset_coverage(&paths, &choice, max_points)
+                });
+            } else {
+                state.coverage_error = Some("Select at least one variable".into());
+            }
         }
     }
-    draw_map(ui, state, context.settings);
+    let mut popup_open = true;
+    if let Some(_popup) = ui
+        .begin_modal_popup_config(COVERAGE_POPUP)
+        .opened(&mut popup_open)
+        .flags(
+            WindowFlags::NO_SCROLLBAR | WindowFlags::NO_SCROLL_WITH_MOUSE | WindowFlags::NO_RESIZE,
+        )
+        .begin()
+    {
+        let display = ui.io().display_size();
+        let layout = coverage_popup_layout(display, ui.clone_style().window_padding());
+        ui.set_window_size(layout.size);
+        ui.set_window_pos([
+            (display[0] - layout.size[0]) * 0.5,
+            (display[1] - layout.size[1]) * 0.5,
+        ]);
+        draw_coverage_popup(ui, state, context.settings, &layout);
+    }
     ui.separator();
-    ui.text("Export view");
-    if ui.radio_button_bool("Gridded mosaic", state.mode == SubsetMode::Mosaic) {
-        state.mode = SubsetMode::Mosaic;
-    }
-    ui.same_line();
-    if ui.radio_button_bool("Native products", state.mode == SubsetMode::Native) {
-        state.mode = SubsetMode::Native;
-    }
-    item_tip(ui,context.settings.tutorial_tips,"Native keeps separate cropped products; mosaic averages overlap into one grid.","Choose Native products to retain each product's coordinates and time samples in one NetCDF file. Choose Gridded mosaic for one coverage-wide mean per variable and a sample-count field.");
-    if state.mode == SubsetMode::Mosaic {
-        ui.input_text("Grid resolution (degrees)", &mut state.resolution)
-            .build();
-    }
-    ui.text("New NetCDF file");
-    if file_path_field(
-        ui,
-        "subset_new_file",
-        &mut state.output,
-        ui.content_region_avail()[0],
-    ) {
-        *context.picker_request = Some((FilePickerTarget::SubsetOutput, state.output.clone()));
-    }
-    item_tip(ui,context.settings.tutorial_tips,"Existing output files are protected.","Enter an output .nc filename or absolute path. The exporter writes a new NetCDF-4 file and preserves existing files.");
-    if state.export_job.is_busy() {
-        ui.text("Exporting in bounded chunks...");
-    }
-    if let Some(status) = &state.status {
-        match status {
-            Ok(s) => ui.text_wrapped(s),
-            Err(e) => ui.text_wrapped(format!("Could not export: {e}")),
+    if let Some(_table) = ui.begin_table("subset_export_panels", 2) {
+        ui.table_setup_column_fixed_width("Export view", TableColumnFlags::NONE, 180.0);
+        ui.table_setup_column_stretch_weight("Output", TableColumnFlags::NONE, 1.0);
+        ui.table_next_row();
+        ui.table_next_column();
+        ui.text("Export view");
+        dataset_manipulation::segmented_control(
+            ui,
+            "subset_export_mode",
+            &mut state.mode,
+            &[
+                (
+                    SubsetMode::Native,
+                    "Native products",
+                    dataset_manipulation::SegmentIcon::Native,
+                    "Keep cropped products separate with their coordinates, footprints, scan direction, time samples, and all channels.",
+                ),
+                (
+                    SubsetMode::TimeSeries,
+                    "Combined time series",
+                    dataset_manipulation::SegmentIcon::TimeSeries,
+                    "Combine grids or swaths along one time axis. Swaths keep per-sample coordinates; products with no time coordinate use a named index dimension.",
+                ),
+                (
+                    SubsetMode::Mosaic,
+                    "Gridded mosaic",
+                    dataset_manipulation::SegmentIcon::Mosaic,
+                    "Average overlapping samples separately for every channel and write sample counts.",
+                ),
+            ],
+            dataset_manipulation::SegmentLayout::Vertical,
+            Some(180.0),
+            context.settings.tutorial_tips,
+            context.settings.palette.accent,
+            context.settings.palette.border,
+        );
+        ui.table_next_column();
+        ui.text("New NetCDF file");
+        if state.mode == SubsetMode::Mosaic {
+            ui.input_text("Grid resolution (degrees)", &mut state.resolution)
+                .build();
+            let methods = [
+                MosaicMethod::Mean,
+                MosaicMethod::Newest,
+                MosaicMethod::Oldest,
+                MosaicMethod::Minimum,
+                MosaicMethod::Maximum,
+            ];
+            let mut selected = methods
+                .iter()
+                .position(|&method| method == state.mosaic_method)
+                .unwrap_or(0);
+            if ui.combo_simple_string(
+                "Mosaic method",
+                &mut selected,
+                &["Mean", "Newest", "Oldest", "Minimum", "Maximum"],
+            ) {
+                state.mosaic_method = methods[selected];
+            }
+            item_tip(ui, context.settings.tutorial_tips,
+                "Choose how overlapping valid samples become one cell value.",
+                "Mean averages all valid samples. Newest and Oldest use indexed product order and CF time within a product. Minimum and Maximum choose value extremes. Counts always show all valid samples.");
         }
-    }
-    let _disabled = ui.begin_disabled_with_cond(state.export_job.is_busy());
-    if ui.button("Export NetCDF-4") {
-        let result = (|| {
-            let parse_date = |text: &str| -> Result<Option<String>, String> {
-                if text.trim().is_empty() {
-                    return Ok(None);
-                }
-                let digits = date_query(text).ok_or("Use dates in YYYY-MM-DD form")?;
-                if digits.len() != 8 {
-                    return Err("Use dates in YYYY-MM-DD form".into());
-                }
-                Ok(Some(digits))
-            };
-            let from = parse_date(&state.from_date)?;
-            let through = parse_date(&state.through_date)?;
-            if from
-                .as_ref()
-                .zip(through.as_ref())
-                .is_some_and(|(a, b)| a > b)
+        if state.mode == SubsetMode::TimeSeries {
+            ui.input_text("Group name (optional)", &mut state.series_group)
+                .build();
+            item_tip(
+                ui,
+                context.settings.tutorial_tips,
+                "Place the combined data in a named group.",
+                "Leave this empty to write at the NetCDF root.",
+            );
+            if !selected_variables(state)
+                .first()
+                .is_some_and(|variable| variable.time.is_some())
             {
-                return Err("Start date must be before end date".into());
+                ui.input_text("First dimension name", &mut state.series_dimension)
+                    .build();
+                item_tip(ui,context.settings.tutorial_tips,"Name the leading index dimension.","The source has no CF time coordinate, so this dimension contains sample indexes, not timestamps.");
+            } else {
+                let selected = selected_variables(state);
+                let name = selected
+                    .first()
+                    .and_then(|variable| variable.time.as_deref())
+                    .unwrap_or("time");
+                ui.text_disabled(format!(
+                    "Leading dimension: {} (from source)",
+                    name.rsplit('/').next().unwrap_or(name)
+                ));
             }
-            let bounds = state.bounds()?;
-            let variables = selected_variables(state);
-            if products.is_empty() || variables.is_empty() {
-                return Err("Select products and variables".into());
-            }
-            let output = PathBuf::from(state.output.trim());
-            if output.as_os_str().is_empty()
-                || output.extension().and_then(|s| s.to_str()) != Some("nc")
-            {
-                return Err("Choose a new .nc output file".into());
-            }
-            let resolution = state
-                .resolution
-                .trim()
-                .parse::<f64>()
-                .map_err(|_| "Invalid grid resolution")?;
-            Ok(SubsetRequest {
-                products: (*products).clone(),
-                variables,
-                bounds,
-                from_date: state.from_date.clone(),
-                through_date: state.through_date.clone(),
-                mode: state.mode,
-                resolution,
-                output,
+        }
+        if file_path_field(
+            ui,
+            "subset_new_file",
+            &mut state.output,
+            ui.content_region_avail()[0],
+        ) {
+            *context.picker_request = Some((FilePickerTarget::SubsetOutput, state.output.clone()));
+        }
+        item_tip(ui,context.settings.tutorial_tips,"Existing output files are protected.","Enter an output .nc filename or absolute path. The exporter writes a new NetCDF-4 file and preserves existing files.");
+        ui.spacing();
+        let exporting = state.export_job.is_busy();
+        let export_clicked = {
+            let _disabled = ui.begin_disabled_with_cond(exporting);
+            let palette = &context.settings.palette;
+            let _button = ui.push_style_color(StyleColor::Button, palette.accent);
+            let _hover = ui.push_style_color(
+                StyleColor::ButtonHovered,
+                mix_color(palette.accent, palette.text, 0.18),
+            );
+            let _active = ui.push_style_color(
+                StyleColor::ButtonActive,
+                mix_color(palette.accent, palette.panel, 0.2),
+            );
+            ui.button(if exporting {
+                "Exporting NetCDF-4..."
+            } else {
+                "Export NetCDF-4"
             })
-        })();
-        match result {
-            Ok(request) => {
-                state.export_job.start((), move |_| export_subset(&request));
-                state.status = None;
+        };
+        item_tip(
+            ui,
+            context.settings.tutorial_tips,
+            "Export the selected products and variables to a new NetCDF-4 file.",
+            "The output file is created at the path above. Existing files are protected.",
+        );
+        if export_clicked {
+            let result = (|| {
+                let parse_date = |text: &str| -> Result<Option<String>, String> {
+                    if text.trim().is_empty() {
+                        return Ok(None);
+                    }
+                    let digits = date_query(text).ok_or("Use dates in YYYY-MM-DD form")?;
+                    if digits.len() != 8 {
+                        return Err("Use dates in YYYY-MM-DD form".into());
+                    }
+                    Ok(Some(digits))
+                };
+                let from = parse_date(&state.from_date)?;
+                let through = parse_date(&state.through_date)?;
+                if from
+                    .as_ref()
+                    .zip(through.as_ref())
+                    .is_some_and(|(a, b)| a > b)
+                {
+                    return Err("Start date must be before end date".into());
+                }
+                let bounds = state.bounds()?;
+                let variables = selected_variables(state);
+                if products.is_empty() {
+                    return Err("Select at least one indexed product".into());
+                }
+                if variables.is_empty() {
+                    return Err("Select at least one variable from the Variables list".into());
+                }
+                let output = PathBuf::from(state.output.trim());
+                if output.as_os_str().is_empty()
+                    || output.extension().and_then(|s| s.to_str()) != Some("nc")
+                {
+                    return Err("Choose a new .nc output file".into());
+                }
+                let resolution = state
+                    .resolution
+                    .trim()
+                    .parse::<f64>()
+                    .map_err(|_| "Invalid grid resolution")?;
+                Ok(SubsetRequest {
+                    products: (*products).clone(),
+                    variables,
+                    bounds,
+                    from_date: state.from_date.clone(),
+                    through_date: state.through_date.clone(),
+                    mode: state.mode,
+                    series_group: state.series_group.trim().to_owned(),
+                    series_dimension: state.series_dimension.trim().to_owned(),
+                    mosaic_method: state.mosaic_method,
+                    resolution,
+                    output,
+                    geolocation_rules: context.settings.dataset_rules.clone(),
+                })
+            })();
+            match result {
+                Ok(request) => {
+                    state.export_job.start((), move |_| export_subset(&request));
+                    state.status = None;
+                }
+                Err(e) => state.status = Some(Err(e)),
             }
-            Err(e) => state.status = Some(Err(e)),
+        }
+        if exporting {
+            ui.text("Exporting in bounded chunks...");
+        }
+        if let Some(status) = &state.status {
+            match status {
+                Ok(s) => ui.text_wrapped(s),
+                Err(e) => ui.text_wrapped(format!("Could not export: {e}")),
+            }
         }
     }
     None
@@ -609,6 +866,73 @@ pub(super) fn draw(lab: &mut PluginLab, ui: &Ui, context: PluginContext<'_>) -> 
 mod tests {
     use super::*;
     use dear_app::imgui::{Condition, Context};
+
+    #[test]
+    fn coverage_popup_content_fits_without_scrolling() {
+        let settings = Settings::load().unwrap();
+        for display in [[1100.0, 800.0], [800.0, 600.0], [500.0, 450.0]] {
+            let mut context = Context::create();
+            context.set_ini_filename(None::<String>).unwrap();
+            context.io_mut().set_display_size(display);
+            context.io_mut().set_delta_time(1.0 / 60.0);
+            context
+                .font_atlas()
+                .try_claim_legacy_renderer()
+                .unwrap()
+                .build();
+            let mut state = State::default();
+            let mut counts = vec![0_u16; 360 * 180];
+            counts[90 * 360 + 180] = 2;
+            state.coverage = Some(CoveragePreview {
+                width: 360,
+                height: 180,
+                counts,
+                products: 2,
+                sampled_points: 50,
+            });
+            for frame in 0..3 {
+                let ui = context.frame();
+                ui.window("Subset")
+                    .size(display, Condition::Always)
+                    .build(|| {
+                        if frame == 0 {
+                            ui.open_popup("Coverage preview###subset_coverage_preview");
+                        }
+                        if let Some(_popup) = ui
+                            .begin_modal_popup_config("Coverage preview###subset_coverage_preview")
+                            .flags(WindowFlags::NO_SCROLLBAR | WindowFlags::NO_SCROLL_WITH_MOUSE)
+                            .begin()
+                        {
+                            let layout =
+                                coverage_popup_layout(display, ui.clone_style().window_padding());
+                            ui.set_window_size(layout.size);
+                            ui.set_window_pos([
+                                (display[0] - layout.size[0]) * 0.5,
+                                (display[1] - layout.size[1]) * 0.5,
+                            ]);
+                            draw_coverage_popup(ui, &state, &settings, &layout);
+                            if frame > 0 {
+                                assert!(
+                                    ui.content_region_avail()[1] >= 0.0,
+                                    "content exceeds popup at {display:?}"
+                                );
+                                assert_eq!(
+                                    ui.scroll_max_x(),
+                                    0.0,
+                                    "horizontal scroll at {display:?}"
+                                );
+                                assert_eq!(
+                                    ui.scroll_max_y(),
+                                    0.0,
+                                    "vertical scroll at {display:?}"
+                                );
+                            }
+                        }
+                    });
+                context.end_frame();
+            }
+        }
+    }
 
     #[test]
     fn controls_and_coverage_render_without_loaded_inspector_files() {
@@ -625,6 +949,7 @@ mod tests {
             .unwrap()
             .build();
         let mut lab = PluginLab::default();
+        lab.spatiotemporal_subset.mode = SubsetMode::TimeSeries;
         let mut counts = vec![0_u16; 360 * 180];
         counts[90 * 360 + 180] = 2;
         lab.spatiotemporal_subset.coverage = Some(CoveragePreview {
@@ -640,6 +965,7 @@ mod tests {
         ui.window("Subset")
             .size([1000.0, 750.0], Condition::Always)
             .build(|| {
+                ui.open_popup("Coverage preview###subset_coverage_preview");
                 assert!(draw(
                     &mut lab,
                     ui,
@@ -654,6 +980,7 @@ mod tests {
                     }
                 )
                 .is_none());
+                assert!(ui.is_popup_open("Coverage preview###subset_coverage_preview"));
             });
         context.end_frame();
     }

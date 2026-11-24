@@ -5,6 +5,7 @@
 application
   title str = "H5Jive"
     ?descr "Application window title"
+
   default_view str = "data"
     ?descr "View selected at startup"
     !options ["spatial_3d", "slice_2d", "profiles_1d", "world_map", "globe", "data"]
@@ -12,6 +13,7 @@ application
     !condition ({.} == "spatial_3d" || {.} == "slice_2d" || {.} == "profiles_1d" || {.} == "world_map" || {.} == "globe" || {.} == "data")
     ?rationale "Selects the viewer panel opened when the application starts."
     !setup
+
   tutorial_tips bool = true
     ?descr "Show extra guidance in control tooltips; turn off from Help or local overrides"
     !setup
@@ -23,6 +25,7 @@ graphics
     !labels ["Automatic", "Metal", "Vulkan", "OpenGL", "Vulkan + OpenGL"]
     !condition ({.} == "auto" || {.} == "metal" || {.} == "vulkan" || {.} == "gl" || {.} == "vulkan,gl")
     !setup
+
   forwarded_x11_backend str = "vulkan,gl"
     ?descr "WGPU backends for SSH X11 forwarding on Linux when backend is auto"
     !options ["gl", "vulkan", "vulkan,gl"]
@@ -41,38 +44,51 @@ layout
   sidebar_min_width int = 180
     ?descr "Smallest draggable sidebar width in pixels"
     !condition ({.} >= 120)
+
   sidebar_max_width int = 800
     ?descr "Largest draggable sidebar width in pixels"
     !condition ({.} > {.sidebar_min_width})
+
   sidebar_width int = 300
     ?descr "Initial sidebar width in pixels"
     !condition ({.} >= {.sidebar_min_width} && {.} <= {.sidebar_max_width})
     !setup
+
   viewer_min_width int = 280
     !condition ({.} >= 160)
+
   details_fraction float = 0.40
     ?descr "Initial share of the sidebar given to details"
     !condition ({.} > 0 && {.} < 1)
+
   panel_min_height int = 80
     !condition ({.} >= 40)
+
   splitter_width int = 8
     !condition ({.} >= 3 && {.} <= 24)
+
   view_button_height int = 38
     !condition ({.} >= 20 && {.} <= 80)
+
   view_button_gap int = 8
     !condition ({.} >= 0 && {.} <= 32)
+
   refresh_button_width int = 130
     !condition ({.} >= 80 && {.} <= 240)
+
   refresh_button_height int = 70
     !condition ({.} >= 24 && {.} <= 120)
+
   details_max_width int = 420
     !condition ({.} >= 160)
 
 tree
   show_dataset_shape bool = true
+
   max_depth int = 24
     ?descr "HDF5 group depth to display, up to the compiled resource limit"
     !condition ({.} >= 1)
+
   max_objects int = 10000
     ?descr "HDF5 objects to list, up to the compiled resource limit"
     !condition ({.} >= 1)
@@ -84,6 +100,7 @@ data
     !labels ["First index", "Middle index", "Last index"]
     !condition ({.} == "start" || {.} == "middle" || {.} == "end")
     !setup
+
   region_cache_entries int = 4
     !condition ({.} >= 1 && {.} <= 64)
 
@@ -96,6 +113,7 @@ statistics
   sample_values int = 1000000
     ?descr "Reservoir sample for quartiles and outliers, up to the compiled resource limit"
     !condition ({.} >= 1)
+
   histogram_bins int = 32
     !condition ({.} >= 4 && {.} <= 512)
 
@@ -103,23 +121,35 @@ views
   ?descr "Per-view interaction and rendering settings."
   ?rationale "Each named viewer has a dedicated schema for its options, validation, and setup controls."
   data : data_view_settings
+
   slice_2d : slice_2d_view_settings
+
   profiles_1d : profiles_1d_view_settings
+
   spatial_3d : spatial_3d_view_settings
+
   world_map : world_map_view_settings
+
   globe : globe_view_settings
 
 plugins
   ?descr "Built-in plugins; each plugin has its own validated DIPL settings."
   path_comparison_enabled bool = true
     ?descr "Show the A/B path comparison plugin in Plugin Lab."
+
   path_comparison : path_comparison_plugin_settings
+
   value_comparison_enabled bool = true
     ?descr "Show the dataset value comparison plugin in Plugin Lab."
+
   value_comparison : value_comparison_plugin_settings
+
   dataset_manipulation_enabled bool = true
     ?descr "Show the dataset manipulation plugin in Plugin Lab."
+
   dataset_manipulation : dataset_manipulation_plugin_settings
+
   spatiotemporal_subset_enabled bool = true
     ?descr "Show the spatiotemporal subset plugin in Plugin Lab."
+
   spatiotemporal_subset : spatiotemporal_subset_plugin_settings

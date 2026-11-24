@@ -371,12 +371,8 @@ impl App {
         };
         let key = self.ensure_geo_data(source.as_ref(), options, max_points);
         let available = ui.content_region_avail();
-        let legend_width = if key.is_some() {
-            self.settings.heatmap_legend_width.min(available[0] * 0.23)
-        } else {
-            0.0
-        };
-        let legend_gap = if key.is_some() { PANEL_GAP } else { 0.0 };
+        let legend_width = self.settings.heatmap_legend_width.min(available[0] * 0.23);
+        let legend_gap = PANEL_GAP;
         let controls_height = if self.map_footer_height > 0.0 {
             self.map_footer_height
         } else {

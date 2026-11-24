@@ -32,6 +32,11 @@ cargo doc --workspace --no-deps
 ./h5jive.sh --build
 ```
 
+When the `snt` CLI with `dip format` is on `PATH`, the H5Jive build script
+checks and, when needed, formats the build and runtime settings (including
+`DIPfile` and local overrides) before generating compiled settings. Builds
+without that formatter skip this step.
+
 Run the reproducible demo generator with:
 
 ```sh

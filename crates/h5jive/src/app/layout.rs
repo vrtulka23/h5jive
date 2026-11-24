@@ -157,6 +157,10 @@ impl App {
                         self.show_section_help = true;
                     }
                     item_tip(ui, tutorial_tips, "", "Open guidance for the active view.");
+                    if ui.menu_item("Register datasets in DIPL...") {
+                        self.show_dataset_registration_help = true;
+                    }
+                    item_tip(ui, tutorial_tips, "", "See how to register a Dataset Browser source and format.");
                     ui.separator();
                     if ui.menu_item_enabled_selected_no_shortcut(
                         "Tutorial tips",
@@ -343,6 +347,7 @@ impl App {
                 let tree_height = (panel_space - details_height).max(1.0);
                 let prior_selection = self.selection.clone();
                 let mut reload_requested = false;
+                let mut picker_slot = None;
                 ui.child_window("file_tree")
                     .size([0.0, tree_height])
                     .build(ui, || {
@@ -362,14 +367,16 @@ impl App {
                                             if self.cell_edit_job.is_some() {
                                                 ui.text("Applying cell changes...");
                                             } else if let Some(file) = self.files.get(index) {
-                                                draw_file_root(
+                                                if draw_file_root(
                                                     ui,
                                                     file,
                                                     index,
                                                     &mut self.selection,
                                                     self.settings.tutorial_tips,
                                                     &self.settings.palette,
-                                                );
+                                                ) {
+                                                    picker_slot = Some(index);
+                                                }
                                                 ui.separator();
                                                 for entry in &file.tree.children {
                                                     reload_requested |= draw_entry(
@@ -387,9 +394,12 @@ impl App {
                                                     );
                                                 }
                                             } else {
-                                                ui.text_wrapped(format!(
-                                                    "Load {label} from the Files menu or Dataset browser."
-                                                ));
+                                                if ui.selectable_config(format!("Choose a file for {label}...##empty_file_{index}")).build() {
+                                                    picker_slot = Some(index);
+                                                }
+                                                item_tip(ui, self.settings.tutorial_tips,
+                                                    "Choose a file",
+                                                    "Open the file picker for this tab.");
                                             }
                                         });
                                 }
@@ -397,6 +407,9 @@ impl App {
                             self.startup_tab = None;
                         }
                     });
+                if let Some(slot) = picker_slot {
+                    self.open_file_picker(slot);
+                }
                 if reload_requested && prior_selection == self.selection {
                     self.reload_selected_dataset();
                 }
@@ -905,7 +918,35 @@ impl App {
                 ui.close_current_popup();
             }
         }
+        self.draw_dataset_registration_help(ui);
         self.draw_about_dialog(ui);
+    }
+
+    fn draw_dataset_registration_help(&mut self, ui: &Ui) {
+        const POPUP: &str = "Register datasets in DIPL###dataset_registration_help";
+        if self.show_dataset_registration_help {
+            ui.open_popup(POPUP);
+            self.show_dataset_registration_help = false;
+        }
+        let mut open = true;
+        if let Some(_popup) = ui.begin_modal_popup_config(POPUP).opened(&mut open).begin() {
+            ui.set_window_size_with_cond([680.0, 485.0], Condition::FirstUseEver);
+            ui.child_window("dataset_registration_help_content")
+                .size([0.0, 0.0])
+                .build(ui, || {
+                    ui.text("Register a Dataset Browser source");
+                    ui.separator();
+                    ui.text_wrapped("1. Add a DIPL file under settings/dataset/sources/ (settings/runtime/dataset/sources/ in a source checkout). Give dataset_sources a unique ID, a local root directory, and a link to a dataset_formats entry.");
+                    ui.spacing();
+                    ui.text("dataset_sources[my_data] : dataset_source\n  name = \"My data\"\n  root = \"/data/my_data\"\n  format link = {?dataset_formats[era5_single_levels]}\n  tags = \"example, local\"\n  product_regex = \"^(?P<year>[0-9]{4})_(?P<month>[0-9]{2})[.]nc$\"");
+                    ui.spacing();
+                    ui.text_wrapped("2. The regex matches file paths relative to root. Named year, month, day, and orbit captures populate the Browser columns. Use an existing format when its coordinate rules fit your products.");
+                    ui.spacing();
+                    ui.text_wrapped("3. Register the new source file in settings/DIPfile under code[]. For a new format, also add dataset/formats/<id>.dip using the dataset_format schema, register that file under code[], and point the source's format link to dataset_formats[<id>]. A format can define coordinate groups, latitude/longitude and bounds paths, a time coordinate name, and scan direction flags.");
+                    ui.spacing();
+                    ui.text_wrapped("4. Restart H5Jive, select the source in Dataset Browser, and click Refresh index. Use h5jive --settings-help 'dataset_sources[my_data].product_regex' for schema guidance. For an existing source, change only its root in settings/overrides.dip; that file is preserved by the installer.");
+                });
+        };
     }
 
     fn draw_about_dialog(&mut self, ui: &Ui) {
@@ -1022,7 +1063,10 @@ fn make_file_picker_state(
         filename,
         entries: Vec::new(),
         selected: None,
+        pending_delete: None,
         error: None,
+        creating_folder: false,
+        new_folder_name: String::new(),
     };
     match std::fs::read_dir(&directory) {
         Ok(entries) => {
@@ -1069,6 +1113,45 @@ fn make_file_picker_state(
     state
 }
 
+fn create_file_picker_folder(directory: &std::path::Path, name: &str) -> Result<PathBuf, String> {
+    let name = name.trim();
+    if name.is_empty() || name == "." || name == ".." || name.contains(['/', '\\']) {
+        return Err("Enter a folder name without path separators".into());
+    }
+    let path = directory.join(name);
+    std::fs::create_dir(&path).map_err(|error| format!("Could not create folder: {error}"))?;
+    Ok(path)
+}
+
+fn delete_file_picker_selection(
+    picker: &FilePickerState,
+    path: &std::path::Path,
+    loaded: &[PathBuf],
+    loading: &[Option<PathBuf>; 2],
+) -> Result<(), String> {
+    if picker.pending_delete.as_deref() != Some(path)
+        || picker.selected.as_deref() != Some(path)
+        || !picker
+            .entries
+            .iter()
+            .any(|entry| entry.path == path && !entry.is_directory)
+    {
+        return Err("Select a file in the current folder before deleting it".into());
+    }
+    if loaded.iter().any(|current| same_file(current, path))
+        || loading
+            .iter()
+            .flatten()
+            .any(|current| same_file(current, path))
+    {
+        return Err("Close this file in H5Jive before deleting it".into());
+    }
+    if !path.is_file() {
+        return Err("The selected file is no longer available; refresh the folder".into());
+    }
+    std::fs::remove_file(path).map_err(|error| format!("Could not delete file: {error}"))
+}
+
 pub(super) fn is_supported_input_file(path: &std::path::Path) -> bool {
     matches!(
         path.extension()
@@ -1081,7 +1164,10 @@ pub(super) fn is_supported_input_file(path: &std::path::Path) -> bool {
 
 #[cfg(test)]
 mod file_picker_tests {
-    use super::{is_supported_input_file, make_file_picker_state, FilePickerTarget};
+    use super::{
+        create_file_picker_folder, delete_file_picker_selection, is_supported_input_file,
+        make_file_picker_state, FilePickerTarget,
+    };
     use std::path::Path;
 
     #[test]
@@ -1115,6 +1201,60 @@ mod file_picker_tests {
             make_file_picker_state(FilePickerTarget::SubsetOutput, folder, "new.nc".into());
         assert_eq!(picker.filename, "new.nc");
         assert!(picker.target.is_save());
+    }
+
+    #[test]
+    fn new_folder_is_created_and_visible_to_shared_picker() {
+        let root = std::env::temp_dir().join(format!(
+            "h5jive-picker-test-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir(&root).unwrap();
+        assert!(create_file_picker_folder(&root, "../bad").is_err());
+        let created = create_file_picker_folder(&root, " New folder ").unwrap();
+        assert_eq!(created.file_name().unwrap(), "New folder");
+        assert!(created.is_dir());
+        assert!(create_file_picker_folder(&root, "New folder").is_err());
+        let picker =
+            make_file_picker_state(FilePickerTarget::SubsetOutput, root.clone(), String::new());
+        assert!(picker
+            .entries
+            .iter()
+            .any(|entry| entry.path == created && entry.is_directory));
+        std::fs::remove_dir(created).unwrap();
+        std::fs::remove_dir(root).unwrap();
+    }
+
+    #[test]
+    fn selected_file_requires_confirmation_and_cannot_be_open_in_h5jive() {
+        let root = std::env::temp_dir().join(format!(
+            "h5jive-delete-test-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir(&root).unwrap();
+        let file = root.join("sample.nc");
+        std::fs::write(&file, b"temporary test file").unwrap();
+        let mut picker =
+            make_file_picker_state(FilePickerTarget::SubsetOutput, root.clone(), String::new());
+        picker.selected = Some(file.clone());
+        assert!(delete_file_picker_selection(&picker, &file, &[], &[None, None]).is_err());
+        assert!(file.exists());
+        picker.pending_delete = Some(file.clone());
+        assert!(
+            delete_file_picker_selection(&picker, &file, &[file.clone()], &[None, None]).is_err()
+        );
+        assert!(file.exists());
+        delete_file_picker_selection(&picker, &file, &[], &[None, None]).unwrap();
+        assert!(!file.exists());
+        std::fs::remove_dir(root).unwrap();
     }
 }
 
@@ -1270,8 +1410,85 @@ impl App {
                 "Rescan this folder if a file was added outside H5Jive.",
             );
             ui.same_line_with_spacing(0.0, PANEL_GAP);
+            if ui.button_with_size("##file_picker_new_folder", [ui.frame_height(); 2]) {
+                picker.creating_folder = !picker.creating_folder;
+                picker.error = None;
+            }
+            draw_file_picker_new_folder_icon(ui, &self.settings.palette);
+            item_tip(
+                ui,
+                self.settings.tutorial_tips,
+                "Create a folder",
+                "Create a new folder here and open it in the picker.",
+            );
+            let selected_file = picker.selected.as_ref().filter(|path| {
+                picker
+                    .entries
+                    .iter()
+                    .any(|entry| &entry.path == *path && !entry.is_directory)
+            });
+            ui.same_line_with_spacing(0.0, PANEL_GAP);
+            let _delete_disabled = ui.begin_disabled_with_cond(selected_file.is_none());
+            if ui.button("Delete selected file") {
+                picker.pending_delete = selected_file.cloned();
+                picker.error = None;
+            }
+            drop(_delete_disabled);
+            item_tip(
+                ui,
+                self.settings.tutorial_tips,
+                "Delete the selected file",
+                "Select a file in the list, then confirm its deletion. Folders cannot be deleted here.",
+            );
+            ui.same_line_with_spacing(0.0, PANEL_GAP);
             ui.align_text_to_frame_padding();
             ui.text_wrapped(picker.directory.display().to_string());
+            if picker.creating_folder {
+                ui.set_next_item_width((ui.content_region_avail()[0] - 150.0).max(120.0));
+                ui.input_text("##file_picker_folder_name", &mut picker.new_folder_name)
+                    .build();
+                ui.same_line();
+                if ui.button("Create##file_picker_folder") {
+                    match create_file_picker_folder(&picker.directory, &picker.new_folder_name) {
+                        Ok(path) => navigate = Some(path),
+                        Err(error) => picker.error = Some(error),
+                    }
+                }
+                ui.same_line();
+                if ui.button("Cancel##file_picker_folder") {
+                    picker.creating_folder = false;
+                    picker.new_folder_name.clear();
+                    picker.error = None;
+                }
+            }
+            if let Some(path) = picker.pending_delete.clone() {
+                ui.separator();
+                ui.text_wrapped(format!("Permanently delete {}?", path.display()));
+                if ui.button("Delete file##file_picker_confirm_delete") {
+                    match delete_file_picker_selection(
+                        picker,
+                        &path,
+                        &self.file_paths,
+                        &self.file_open_paths,
+                    ) {
+                        Ok(()) => {
+                            if path
+                                .file_name()
+                                .is_some_and(|name| name == picker.filename.as_str())
+                            {
+                                picker.filename.clear();
+                            }
+                            navigate = Some(picker.directory.clone());
+                        }
+                        Err(error) => picker.error = Some(error),
+                    }
+                    picker.pending_delete = None;
+                }
+                ui.same_line();
+                if ui.button("Keep file##file_picker_cancel_delete") {
+                    picker.pending_delete = None;
+                }
+            }
             if let Some(error) = &picker.error {
                 ui.text_wrapped(error);
             }
@@ -1314,6 +1531,8 @@ impl App {
                         );
                         if clicked {
                             picker.selected = Some(entry.path.clone());
+                            picker.pending_delete = None;
+                            picker.error = None;
                         }
                         if hovered && ui.is_mouse_double_clicked(dear_app::imgui::MouseButton::Left)
                         {
@@ -1465,6 +1684,7 @@ impl App {
                     loaded_a |= slot == 0;
                     self.file_open_jobs[slot] = None;
                     let path = self.file_open_paths[slot].take().unwrap();
+                    let different_file = self.file_paths.get(slot) != Some(&path);
                     if slot < self.files.len() {
                         self.files[slot] = file;
                         self.file_paths[slot] = path;
@@ -1476,6 +1696,9 @@ impl App {
                     self.plugins.invalidate();
                     self.file_error = None;
                     self.reset_file_selection();
+                    if different_file {
+                        self.switch_view(ViewMode::Data);
+                    }
                 }
                 Some(Ok(Err(error))) => {
                     self.file_open_jobs[slot] = None;
@@ -1581,6 +1804,42 @@ fn draw_file_picker_refresh_icon(ui: &Ui, palette: &Palette) {
             .thickness(1.9)
             .build();
     }
+}
+
+fn draw_file_picker_new_folder_icon(ui: &Ui, palette: &Palette) {
+    let min = ui.item_rect_min();
+    let max = ui.item_rect_max();
+    let center = [(min[0] + max[0]) * 0.5, (min[1] + max[1]) * 0.5];
+    let draw = ui.get_window_draw_list();
+    draw.add_rect(
+        [center[0] - 8.0, center[1] - 3.0],
+        [center[0] + 8.0, center[1] + 6.0],
+        palette.text,
+    )
+    .rounding(2.0)
+    .thickness(1.5)
+    .build();
+    draw.add_line(
+        [center[0] - 7.0, center[1] - 4.0],
+        [center[0] - 1.0, center[1] - 4.0],
+        palette.text,
+    )
+    .thickness(1.5)
+    .build();
+    draw.add_line(
+        [center[0] + 4.0, center[1] - 7.0],
+        [center[0] + 4.0, center[1] + 1.0],
+        palette.accent,
+    )
+    .thickness(1.7)
+    .build();
+    draw.add_line(
+        [center[0], center[1] - 3.0],
+        [center[0] + 8.0, center[1] - 3.0],
+        palette.accent,
+    )
+    .thickness(1.7)
+    .build();
 }
 
 fn draw_file_picker_icon(ui: &Ui, position: [f32; 2], is_directory: bool, palette: &Palette) {

@@ -315,6 +315,7 @@ fn read_dataset_rules(dip: &Project) -> Result<Vec<GeolocationRule>, Box<dyn std
             longitude: field("longitude")?,
             latitude_bounds: field("latitude_bounds")?,
             longitude_bounds: field("longitude_bounds")?,
+            time_coordinate: field("time_coordinate")?,
             scan_direction,
         });
     }

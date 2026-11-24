@@ -609,7 +609,7 @@ pub(super) fn draw_icon(draw: &DrawListMut<'_>, min: [f32; 2], max: [f32; 2], co
 }
 
 #[derive(Clone, Copy)]
-enum SegmentIcon {
+pub(super) enum SegmentIcon {
     Slice,
     Add,
     Subtract,
@@ -617,10 +617,13 @@ enum SegmentIcon {
     Divide,
     File,
     NewFile,
+    Native,
+    TimeSeries,
+    Mosaic,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
-enum SegmentLayout {
+pub(super) enum SegmentLayout {
     Horizontal,
     Vertical,
 }
@@ -684,15 +687,48 @@ fn draw_segment_icon(ui: &Ui, icon: SegmentIcon, color: [f32; 4]) {
                     .build();
             }
         }
+        SegmentIcon::Native => {
+            for shift in [-2.5, 2.5] {
+                draw.add_rect(
+                    [x - 6.0 + shift, y - 6.0 + shift],
+                    [x + 3.0 + shift, y + 5.0 + shift],
+                    color,
+                )
+                .thickness(1.4)
+                .build();
+            }
+        }
+        SegmentIcon::TimeSeries => {
+            for shift in [-4.0, 0.0, 4.0] {
+                draw.add_circle([x + shift, y], 1.5, color)
+                    .filled(true)
+                    .build();
+            }
+            draw.add_line([x - 6.0, y + 5.0], [x + 6.0, y + 5.0], color)
+                .thickness(1.4)
+                .build();
+        }
+        SegmentIcon::Mosaic => {
+            for row in 0..2 {
+                for column in 0..2 {
+                    let left = x - 6.0 + column as f32 * 7.0;
+                    let top = y - 6.0 + row as f32 * 7.0;
+                    draw.add_rect([left, top], [left + 5.0, top + 5.0], color)
+                        .thickness(1.4)
+                        .build();
+                }
+            }
+        }
     }
 }
 
-fn segmented_control<T: Copy + PartialEq>(
+pub(super) fn segmented_control<T: Copy + PartialEq>(
     ui: &Ui,
     id: &str,
     selected: &mut T,
     options: &[(T, &str, SegmentIcon, &str)],
     layout: SegmentLayout,
+    max_width: Option<f32>,
     tutorial_tips: bool,
     accent: [f32; 4],
     border: [f32; 4],
@@ -704,7 +740,9 @@ fn segmented_control<T: Copy + PartialEq>(
     let mut group_max = [0.0; 2];
     let _rounding = ui.push_style_var(StyleVar::FrameRounding(0.0));
     let _spacing = ui.push_style_var(StyleVar::ItemSpacing([0.0, 0.0]));
-    let vertical_width = ui.content_region_avail()[0].max(1.0);
+    let vertical_width = ui.content_region_avail()[0]
+        .min(max_width.unwrap_or(f32::INFINITY))
+        .max(1.0);
     for (index, &(value, label, icon, tip)) in options.iter().enumerate() {
         if index > 0 && layout == SegmentLayout::Horizontal {
             ui.same_line_with_spacing(0.0, 0.0);
@@ -828,6 +866,7 @@ pub(super) fn draw(lab: &mut PluginLab, ui: &Ui, context: PluginContext<'_>) -> 
                 ),
             ],
             SegmentLayout::Vertical,
+            None,
             context.settings.tutorial_tips,
             context.settings.palette.accent,
             context.settings.palette.border,
@@ -935,6 +974,7 @@ pub(super) fn draw(lab: &mut PluginLab, ui: &Ui, context: PluginContext<'_>) -> 
                 ),
             ],
             SegmentLayout::Vertical,
+            None,
             context.settings.tutorial_tips,
             context.settings.palette.accent,
             context.settings.palette.border,
@@ -977,8 +1017,22 @@ pub(super) fn draw(lab: &mut PluginLab, ui: &Ui, context: PluginContext<'_>) -> 
                 Err(error) => ui.text_wrapped(format!("Could not save dataset: {error}")),
             }
         }
-        let _disabled = ui.begin_disabled_with_cond(state.job.is_busy());
-        if ui.button("Create dataset") {
+        ui.spacing();
+        let create_clicked = {
+            let _disabled = ui.begin_disabled_with_cond(state.job.is_busy());
+            let palette = &context.settings.palette;
+            let _button = ui.push_style_color(StyleColor::Button, palette.accent);
+            let _hover = ui.push_style_color(
+                StyleColor::ButtonHovered,
+                mix_color(palette.accent, palette.text, 0.18),
+            );
+            let _active = ui.push_style_color(
+                StyleColor::ButtonActive,
+                mix_color(palette.accent, palette.panel, 0.2),
+            );
+            ui.button("Create dataset")
+        };
+        if create_clicked {
             let ranges = if state.operation == Operation::Slice {
                 state
                     .ranges

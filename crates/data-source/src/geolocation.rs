@@ -214,6 +214,7 @@ pub struct GeolocationRule {
     pub longitude: String,
     pub latitude_bounds: String,
     pub longitude_bounds: String,
+    pub time_coordinate: String,
     pub scan_direction: Option<ScanDirectionRule>,
 }
 
@@ -356,12 +357,44 @@ impl File {
                 };
                 let latitude_bounds = bounds(&latitude, "latitude_bounds");
                 let longitude_bounds = bounds(&longitude, "longitude_bounds");
+                let attribute = |name: &str| {
+                    attributes
+                        .iter()
+                        .find(|attribute| attribute.name == name)
+                        .map(|attribute| attribute.value.as_str())
+                };
+                let scan_direction = attribute("scan_direction")
+                    .and_then(|name| resolve_variable(self, path, name))
+                    .filter(|scan| {
+                        self.dataset_info(scan).ok().is_some_and(|info| {
+                            info.numeric && compatible_shape(&info.shape, &shape)
+                        })
+                    })
+                    .map(|scan| {
+                        let codes = |key: &str| {
+                            attribute(key)
+                                .unwrap_or("")
+                                .split(|c: char| c == ',' || c.is_whitespace())
+                                .filter_map(|code| code.parse::<i64>().ok())
+                                .collect::<Vec<_>>()
+                        };
+                        ScanDirection {
+                            path: scan,
+                            forward_values: codes("scan_forward_values"),
+                            backward_values: codes("scan_backward_values"),
+                            default_filter: match attribute("scan_default_filter") {
+                                Some("forward") => ScanFilter::Forward,
+                                Some("backward") => ScanFilter::Backward,
+                                _ => ScanFilter::Both,
+                            },
+                        }
+                    });
                 Some(Geolocation {
                     latitude,
                     longitude,
                     latitude_bounds,
                     longitude_bounds,
-                    scan_direction: None,
+                    scan_direction,
                 })
             }
         }))
@@ -369,7 +402,7 @@ impl File {
 }
 
 impl GeolocationRule {
-    fn matches(&self, filename: &str, attributes: &[AttributeValue]) -> bool {
+    pub(crate) fn matches(&self, filename: &str, attributes: &[AttributeValue]) -> bool {
         let mut matched = 0;
         for (name, pattern) in [
             ("platform", &self.platform),
@@ -445,7 +478,11 @@ fn glob_matches(pattern: &str, value: &str) -> bool {
 }
 
 fn compatible_shape(coordinate: &[usize], values: &[usize]) -> bool {
-    coordinate == values
+    (coordinate.len() == 1
+        && values.len() >= 2
+        && (coordinate[0] == values[if values.len() == 2 { 0 } else { 1 }]
+            || coordinate[0] == values[if values.len() == 2 { 1 } else { 2 }]))
+        || coordinate == values
         || (values.len() == 3 && coordinate == &values[1..])
         || (values.len() == 4 && (coordinate == &values[..3] || coordinate == &values[1..3]))
 }
@@ -520,7 +557,9 @@ mod tests {
         assert!(compatible_shape(&[8, 32, 48], &[8, 32, 48]));
         assert!(compatible_shape(&[32, 48], &[8, 32, 48]));
         assert!(!compatible_shape(&[8, 32], &[8, 32, 48]));
-        assert!(!compatible_shape(&[32], &[32, 48]));
+        assert!(compatible_shape(&[32], &[32, 48]));
+        assert!(compatible_shape(&[48], &[8, 32, 48]));
+        assert!(compatible_shape(&[32], &[1, 32, 48, 64]));
         assert!(compatible_shape(&[1, 219, 3], &[1, 219, 3, 1024]));
         assert!(compatible_shape(&[219, 3], &[1, 219, 3, 1024]));
         assert!(!compatible_shape(&[219, 1024], &[1, 219, 3, 1024]));
@@ -556,6 +595,7 @@ mod tests {
             longitude: "longitude".into(),
             latitude_bounds: "latitude_bounds".into(),
             longitude_bounds: "longitude_bounds".into(),
+            time_coordinate: String::new(),
             scan_direction: None,
         };
         let geo = file.geolocation_with_rules(path, &[rule]).unwrap().unwrap();
@@ -602,6 +642,7 @@ mod tests {
             longitude: "longitude".into(),
             latitude_bounds: "latitude_bounds".into(),
             longitude_bounds: "longitude_bounds".into(),
+            time_coordinate: String::new(),
             scan_direction: None,
         };
         let attrs = |platform: &str, product_type: &str| {
