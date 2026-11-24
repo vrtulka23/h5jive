@@ -102,7 +102,7 @@ jobs:
             -DBUILD_TESTING=OFF -DHDF5_BUILD_TOOLS=OFF \
             -DHDF5_BUILD_CPP_LIB=OFF -DHDF5_BUILD_HL_LIB=ON \
             -DHDF5_ENABLE_THREADSAFE=ON \
-            -DHDF5_ALLOW_UNSUPPORTED=ON \
+            -DALLOW_UNSUPPORTED=ON \
             -DHDF5_ENABLE_Z_LIB_SUPPORT=ON -DHDF5_ENABLE_SZIP_SUPPORT=ON \
             -DHDF5_ENABLE_ROS3_VFD=OFF
           cmake --build "$RUNNER_TEMP/hdf5-build" --parallel 4
