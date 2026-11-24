@@ -239,7 +239,7 @@ fn upload_volume_raster(
         return None;
     }
     let texture = gpu.device().create_texture(&wgpu::TextureDescriptor {
-        label: Some("Exact 3D volume ray cast"),
+        label: Some("Exact 3D projection ray cast"),
         size: wgpu::Extent3d {
             width,
             height,

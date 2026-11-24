@@ -1,13 +1,13 @@
 export const viewPages = [
   {
     slug: '3d',
-    title: '3D volume',
+    title: '3D projection',
     kicker: 'Look inside the array',
     summary: 'Explore a numeric volume as voxels, with a perspective camera that makes its depth easier to read.',
-    image: 'view-3d-profile.png',
+    image: 'view-3d-volume.png',
     imageWidth: 2546,
     imageHeight: 1430,
-    alt: 'H5Jive showing a three-dimensional volume',
+    alt: 'H5Jive showing a three-dimensional projection',
     caption: 'SEE THE VOLUME IN THREE DIMENSIONS',
     points: [
       ['Shape the volume', 'Choose the three displayed axes, pin other dimensions, and narrow the index ranges to focus on a region.'],

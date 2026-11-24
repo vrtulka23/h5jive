@@ -1,4 +1,4 @@
-?descr "Exact 3D volume rendering and opacity defaults."
+?descr "Exact 3D projection rendering and opacity defaults."
 default_opacity float = 1.0
   ?descr "Initial opacity of ordinary voxels."
   !condition ({.} >= 0 && {.} <= 1)

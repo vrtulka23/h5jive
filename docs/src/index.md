@@ -2,7 +2,7 @@
 
 H5Jive is a native desktop application for exploring scientific datasets.
 It combines a navigable file tree, dataset details, and linked views for tables,
-profiles, 2D slices, 3D volumes, and geolocated data.
+profiles, 2D slices, 3D projections, and geolocated data.
 
 Use this guide to install and run the application, inspect datasets, configure
 the viewer, or work on the Rust codebase. For project overview and current

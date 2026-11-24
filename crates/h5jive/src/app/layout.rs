@@ -727,13 +727,13 @@ impl App {
                 && key.path == working.path
                 && key.slice.axes == working.slice.axes
         }) else {
-            return Some("3D volume");
+            return Some("3D projection");
         };
         Some(
             match volume_key_cells(working).cmp(&volume_key_cells(previous)) {
-                std::cmp::Ordering::Less => "3D volume (refining resolution)",
-                std::cmp::Ordering::Greater => "3D volume (reducing detail)",
-                std::cmp::Ordering::Equal => "3D region",
+                std::cmp::Ordering::Less => "3D projection (refining resolution)",
+                std::cmp::Ordering::Greater => "3D projection (reducing detail)",
+                std::cmp::Ordering::Equal => "3D projection region",
             },
         )
     }

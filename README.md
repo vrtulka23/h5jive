@@ -12,7 +12,7 @@
 
 H5Jive is a native desktop explorer for HDF5 and NetCDF data. Browse local
 products, inspect dataset metadata and statistics, and view tables, profiles,
-2D slices, 3D volumes, and geolocated satellite swaths on a map or globe.
+2D slices, 3D projections, and geolocated satellite swaths on a map or globe.
 The Rust UI uses Dear ImGui. On Linux, H5Jive supports X11, including
 [SSH X11 forwarding](docs/src/getting-started.md#run-over-ssh-with-x11-forwarding)
 when the forwarded X server supports OpenGL.

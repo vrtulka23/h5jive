@@ -25,5 +25,5 @@ required by the ordinary test suite.
 - [Data table](data.md)
 - [1D profiles](profiles-1d.md)
 - [2D slice](slice-2d.md)
-- [3D volume](volume-3d.md)
+- [3D projection](volume-3d.md)
 - [World map and globe](geospatial.md)

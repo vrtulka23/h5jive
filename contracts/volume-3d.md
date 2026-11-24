@@ -1,4 +1,4 @@
-# 3D volume contract
+# 3D projection contract
 
 - The axes, volume, range controls, and tooltips use the same selected slice,
   pinned index, camera, and coordinate system. Dragging to rotate updates the
