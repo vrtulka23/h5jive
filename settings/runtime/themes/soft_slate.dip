@@ -17,6 +17,14 @@ themes[soft_slate] : appearance_profile
 
   accent = "#A5480A"
 
+  notice_info = "#6AA6FF"
+
+  notice_success = "#62C982"
+
+  notice_warning = "#F0AE4F"
+
+  notice_error = "#EB6B6B"
+
   heatmap_low = "#3B659E"
 
   heatmap_mid = "#DAE7E3"

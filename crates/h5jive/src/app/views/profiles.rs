@@ -62,6 +62,7 @@ impl App {
             }
         });
         let tutorial_tips = self.settings.tutorial_tips;
+        let error_color = self.settings.palette.heatmap_high;
         let Some(draft) = self.draft_profile.as_mut() else {
             return;
         };
@@ -133,6 +134,11 @@ impl App {
                 "Comma-separated indexes on the comparison axis, for example: 0, 3, 7",
                 "Enter the lines you want to compare, then click Update.",
             );
+            if let Some(axis) = draft.y_axis {
+                if let Err(error) = parse_profile_indexes(&draft.y_indexes, shape[axis]) {
+                    ui.text_colored(error_color, error);
+                }
+            }
         }
         for (axis, &length) in shape.iter().enumerate() {
             if axis == draft.x_axis || draft.y_axis == Some(axis) {
@@ -167,7 +173,6 @@ impl App {
         };
         self.poll_profile(selection, shape, &slice);
         let Some((_, result)) = self.profile_cache.as_ref() else {
-            ui.text("Loading profile...");
             return;
         };
         let (x_len, line_indexes) = match result {

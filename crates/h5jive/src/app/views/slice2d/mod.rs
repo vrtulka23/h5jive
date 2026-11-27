@@ -513,14 +513,13 @@ impl App {
                     XAxis::X1,
                     YAxis::Y1,
                 );
-                ui.get_window_draw_list().add_text(
-                    [pos[0] + 10.0, pos[1] + 10.0],
-                    self.settings.palette.text,
-                    match tile {
-                        Some(Err(error)) => error.as_str(),
-                        _ => "Loading 2D tile...",
-                    },
-                );
+                if let Some(Err(error)) = tile {
+                    ui.get_window_draw_list().add_text(
+                        [pos[0] + 10.0, pos[1] + 10.0],
+                        self.settings.palette.text,
+                        error,
+                    );
+                }
             }
         } else if visible_count > max_cells {
             let pos = plot_ui.plot_to_pixels_axes(
@@ -654,13 +653,7 @@ impl App {
                         error,
                     );
                 }
-                None => {
-                    ui.get_window_draw_list().add_text(
-                        [pos[0] + 10.0, pos[1] + 10.0],
-                        self.settings.palette.text,
-                        "Loading full image...",
-                    );
-                }
+                None => {}
             }
             self.draw_cached_heatmap_tiles(
                 ui,

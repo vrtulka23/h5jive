@@ -242,14 +242,15 @@ impl App {
             return;
         }
         let request = self.pending_export.take().unwrap();
-        let message = match save_view_image(&request) {
-            Ok(()) => format!("Saved {}", request.path.display()),
-            Err(error) => format!("Could not save view: {error}"),
-        };
-        self.export_dialog = Some(ExportDialog {
-            path: request.path.display().to_string(),
-            message: Some(message),
-        });
+        match save_view_image(&request) {
+            Ok(()) => self.show_notice(
+                NoticeKind::Success,
+                format!("Saved {}", request.path.display()),
+            ),
+            Err(error) => {
+                self.show_notice(NoticeKind::Error, format!("Could not save view: {error}"))
+            }
+        }
     }
 }
 

@@ -32,7 +32,29 @@ before changing a cross-cutting flow.
    empty normal text if the control has no existing tooltip. Keep tips focused
    on the action the user can take. Use `item_plain_tip` or `show_plain_tip`
    for other tooltips so their text has the same padding.
-   Keep short loading, error, and actionable empty-state messages in place.
+   Add transient application state notices with `App::show_notice` or the
+   shared `NoticeCenter` and route all of them through the top-center status
+   stack in `layout.rs` and `draw_notice_bubble` in `ui.rs`. This covers file
+   opens, dataset scans and metadata, exports, searches, edits, view jobs, and
+   plugin jobs. Derive loading text from active work; do not render separate
+   loading, progress, or job-completion text inline. Emit an Error notice when
+   background work fails or a worker disconnects, even when a persistent panel
+   error remains as an actionable fallback. Loading bubbles appear only while
+   work is active. Info bubbles (neutral status) last 5 seconds, Success bubbles
+   (completed operations) last 4 seconds, and Warning bubbles (recoverable
+   problems) last 10 seconds. Error bubbles stay until their `[x]` control is
+   clicked or the app programmatically dismisses them when their condition is
+   resolved. Use the palette notice colors, not hardcoded colors, for blue
+   loading/info, green success, amber warnings, and red errors. Do not add
+   another notice field, toast, or overlay. Keep dialog/form validation,
+   file-picker validation, and
+   persistent actionable empty/error states inline. Figure-local render-quality
+   badges such as Preview, Settled, Updating, Overview, Refining, or resolution
+   details belong to the visualization itself; keep them only when they
+   describe the displayed data rather than duplicating app-wide work. Loading
+   and notices stack through this same mechanism, oldest first so new bubbles
+   append at the bottom; bubbles must remain visible and dismissible above
+   modal overlays.
 6. Run `cargo fmt --all`, `cargo check -p h5jive`, and relevant tests. Run the
    full suite with `cargo test -p h5jive -- --test-threads=1` because DIPL and
    Dear ImGui tests share process state.

@@ -33,41 +33,6 @@ fn resolve_numeric_match(dialog: &FindReplaceDialog) -> Result<h5jive_data::Nume
     }
 }
 
-fn draw_inline_spinner(ui: &Ui, palette: &Palette) {
-    let size = ui.frame_height();
-    ui.dummy([size, size]);
-    let min = ui.item_rect_min();
-    let max = ui.item_rect_max();
-    let center = [(min[0] + max[0]) * 0.5, (min[1] + max[1]) * 0.5];
-    let radius = size * 0.34;
-    let draw = ui.get_foreground_draw_list();
-    let rotation = ui.time() as f32 * 4.0;
-    for index in 0..10 {
-        let angle = rotation + index as f32 * std::f32::consts::TAU / 10.0;
-        let direction = [angle.cos(), angle.sin()];
-        let alpha = 0.25 + 0.75 * (index as f32 + 1.0) / 10.0;
-        let color = [
-            palette.accent[0],
-            palette.accent[1],
-            palette.accent[2],
-            alpha,
-        ];
-        draw.add_line(
-            [
-                center[0] + direction[0] * radius * 0.45,
-                center[1] + direction[1] * radius * 0.45,
-            ],
-            [
-                center[0] + direction[0] * radius,
-                center[1] + direction[1] * radius,
-            ],
-            color,
-        )
-        .thickness(2.0)
-        .build();
-    }
-}
-
 impl App {
     pub(super) fn draw_find_replace_action(
         &mut self,
@@ -168,18 +133,25 @@ impl App {
             self.find_replace_dialog = None;
             return;
         }
+        let mut search_error = None;
         if let Some(receiver) = &dialog.search_job {
             match receiver.try_recv() {
                 Ok(result) => {
+                    if let Err(error) = &result {
+                        search_error = Some(format!("Search failed: {error}"));
+                    }
                     dialog.summary = Some(result);
                     dialog.search_job = None;
                 }
                 Err(mpsc::TryRecvError::Disconnected) => {
-                    dialog.message = Some("Search stopped unexpectedly.".into());
+                    search_error = Some("Search stopped unexpectedly.".into());
                     dialog.search_job = None;
                 }
                 Err(mpsc::TryRecvError::Empty) => {}
             }
+        }
+        if let Some(message) = search_error {
+            self.notices.error(message);
         }
         if dialog.open_requested {
             ui.open_popup(POPUP);
@@ -272,8 +244,6 @@ impl App {
                     "Scan the whole dataset and show the first matches.",
                 );
                 if searching {
-                    ui.same_line_with_spacing(0.0, PANEL_GAP);
-                    draw_inline_spinner(ui, &palette);
                     ui.same_line_with_spacing(0.0, PANEL_GAP);
                     if draw_accent_button(ui, &palette, "Cancel search", [0.0, 0.0]) {
                         dialog.cancel.store(true, Ordering::Relaxed);
@@ -432,21 +402,11 @@ impl App {
                                         );
                                     }
                                 }
-                                Err(error) => ui.text_wrapped(error),
+                                Err(_) => ui.text_wrapped(
+                                    "Search failed. See the error notice for details.",
+                                ),
                             }
-                        } else if dialog.search_job.is_some() {
-                            let child_min = ui.cursor_screen_pos();
-                            let child_avail = ui.content_region_avail();
-                            draw_loading_indicator(
-                                ui,
-                                [
-                                    child_min[0] + child_avail[0] * 0.5,
-                                    child_min[1] + child_avail[1] * 0.5,
-                                ],
-                                "Scanning matches...",
-                                &palette,
-                            );
-                        } else {
+                        } else if dialog.search_job.is_none() {
                             ui.text_wrapped("Run Find all to list matches here.");
                         }
                     });
@@ -598,19 +558,25 @@ impl App {
                         self.plugins.invalidate();
                     }
                     Err(error) => {
-                        self.file_error = Some(format!(
-                            "Could not reopen file after replacing values: {error}"
-                        ));
+                        self.show_notice(
+                            NoticeKind::Error,
+                            format!("Could not reopen file after replacing values: {error}"),
+                        );
                     }
                 }
-                self.cell_edit_message = Some(match outcome.error {
-                    Some(error) => format!("Replace stopped: {error}"),
-                    None => format!("Replaced {} values.", outcome.replaced),
-                });
+                match outcome.error {
+                    Some(error) => {
+                        self.show_notice(NoticeKind::Error, format!("Replace stopped: {error}"))
+                    }
+                    None => self.show_notice(
+                        NoticeKind::Success,
+                        format!("Replaced {} values.", outcome.replaced),
+                    ),
+                }
             }
             Err(mpsc::TryRecvError::Disconnected) => {
                 self.bulk_replace_job = None;
-                self.cell_edit_message = Some("Replace worker stopped unexpectedly.".into());
+                self.show_notice(NoticeKind::Error, "Replace worker stopped unexpectedly.");
             }
             Err(mpsc::TryRecvError::Empty) => {}
         }

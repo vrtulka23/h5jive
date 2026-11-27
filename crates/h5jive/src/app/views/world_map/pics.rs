@@ -112,7 +112,7 @@ mod tests {
     use dear_app::imgui::{Condition, Context};
 
     #[test]
-    fn pics_overlay_and_shared_spinner_draw_in_one_frame() {
+    fn pics_overlay_draws_in_one_frame() {
         let settings = Settings::load().unwrap();
         let mut context = Context::create();
         context.set_ini_filename(None::<String>).unwrap();
@@ -140,6 +140,5 @@ mod tests {
                     &settings.palette,
                 );
             });
-        draw_loading_indicator(&ui, [400.0, 15.0], "Loading map + stats", &settings.palette);
     }
 }

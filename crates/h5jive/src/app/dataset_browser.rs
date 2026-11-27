@@ -18,7 +18,6 @@ struct SourceIndex {
     availability_job: Option<mpsc::Receiver<bool>>,
     last_availability_check: Option<std::time::Instant>,
     metadata_job: Option<mpsc::Receiver<(String, Result<[String; 4], String>)>>,
-    metadata_status: Option<String>,
 }
 
 pub(super) struct DatasetBrowser {
@@ -73,7 +72,6 @@ impl DatasetBrowser {
                     availability_job: None,
                     last_availability_check: None,
                     metadata_job: None,
-                    metadata_status: None,
                 }
             })
             .collect();
@@ -113,7 +111,7 @@ impl DatasetBrowser {
             .collect()
     }
 
-    pub fn poll(&mut self, sources: &[DatasetSource]) {
+    pub fn poll(&mut self, sources: &[DatasetSource], notices: &mut NoticeCenter) {
         for (number, (index, config)) in self.sources.iter_mut().zip(sources).enumerate() {
             if let Some(job) = &index.metadata_job {
                 match job.try_recv() {
@@ -144,15 +142,15 @@ impl DatasetBrowser {
                             self.dirty = true;
                             self.products_revision = self.products_revision.wrapping_add(1);
                         }
-                        index.metadata_status = Some("Product metadata read".into());
+                        notices.info("Product metadata read.");
                         index.metadata_job = None;
                     }
                     Ok((_, Err(error))) => {
-                        index.metadata_status = Some(error);
+                        notices.error(format!("Could not read product metadata: {error}"));
                         index.metadata_job = None;
                     }
                     Err(mpsc::TryRecvError::Disconnected) => {
-                        index.metadata_status = Some("Metadata reader stopped".into());
+                        notices.error("Metadata reader stopped unexpectedly.");
                         index.metadata_job = None;
                     }
                     Err(mpsc::TryRecvError::Empty) => {}
@@ -164,7 +162,10 @@ impl DatasetBrowser {
                         index.available = Some(available);
                         index.availability_job = None;
                     }
-                    Err(mpsc::TryRecvError::Disconnected) => index.availability_job = None,
+                    Err(mpsc::TryRecvError::Disconnected) => {
+                        notices.warning("Dataset source availability check stopped unexpectedly.");
+                        index.availability_job = None;
+                    }
                     Err(mpsc::TryRecvError::Empty) => {}
                 }
             }
@@ -192,7 +193,10 @@ impl DatasetBrowser {
                             Ok((products, cache_error)) => {
                                 index.products = products;
                                 self.products_revision = self.products_revision.wrapping_add(1);
-                                index.error = cache_error;
+                                index.error = None;
+                                if let Some(error) = cache_error {
+                                    notices.warning(error);
+                                }
                                 if number == self.selected_source
                                     && self.selected_product.as_ref().is_some_and(|selected| {
                                         !index
@@ -205,7 +209,10 @@ impl DatasetBrowser {
                                 }
                                 self.dirty = true;
                             }
-                            Err(error) => index.error = Some(error),
+                            Err(error) => {
+                                notices.error(format!("Index scan failed: {error}"));
+                                index.error = Some(error);
+                            }
                         }
                         index.scanning = false;
                         index.receiver = None;
@@ -214,6 +221,7 @@ impl DatasetBrowser {
                     }
                     Err(mpsc::TryRecvError::Empty) => break,
                     Err(mpsc::TryRecvError::Disconnected) => {
+                        notices.error("Dataset index scan stopped unexpectedly.");
                         index.error = Some("Scan worker stopped unexpectedly".into());
                         index.scanning = false;
                         index.receiver = None;
@@ -268,7 +276,6 @@ impl DatasetBrowser {
             let result = read_product_metadata(&path);
             let _ = sender.send((relative, result));
         });
-        index.metadata_status = None;
         index.metadata_job = Some(receiver);
     }
 
@@ -299,7 +306,6 @@ impl DatasetBrowser {
         height: f32,
         tutorial_tips: bool,
     ) -> Option<(usize, PathBuf)> {
-        self.poll(sources);
         if sources.is_empty() {
             ui.text("No datasets are registered in DIPL.");
             return None;
@@ -466,7 +472,6 @@ impl DatasetBrowser {
                 }
                 ui.spacing();
                 if index.scanning {
-                    ui.text(format!("Scanning: {} files visited", index.visited));
                     if ui.button("Cancel scan") {
                         if let Some(cancel) = &index.cancel {
                             cancel.store(true, Ordering::Relaxed);
@@ -688,11 +693,11 @@ impl DatasetBrowser {
                     }) {
                         ui.same_line();
                         let pending = self.sources[source_number].metadata_job.is_some();
-                        if pending {
-                            ui.text("Reading metadata...");
-                        } else if ui.button("Read product metadata") {
+                        let _disabled = ui.begin_disabled_with_cond(pending);
+                        if ui.button("Read product metadata") {
                             self.read_selected_metadata(source_number, source, relative.clone());
                         }
+                        drop(_disabled);
                         if !pending {
                             item_tip(
                                 ui,
@@ -701,9 +706,6 @@ impl DatasetBrowser {
                                 "Read missing date or orbit fields from the product file.",
                             );
                         }
-                    }
-                    if let Some(status) = &self.sources[source_number].metadata_status {
-                        ui.text_disabled(status);
                     }
                 } else {
                     ui.text("Select a product to assign it to file A or B.");
@@ -794,7 +796,6 @@ mod tests {
             availability_job: None,
             last_availability_check: None,
             metadata_job: None,
-            metadata_status: None,
         });
         browser.rebuild_visible();
         assert_eq!(browser.filtered.len(), 70_001);
@@ -844,7 +845,6 @@ mod tests {
             availability_job: None,
             last_availability_check: None,
             metadata_job: None,
-            metadata_status: None,
         });
         for (label, name, date, orbit) in [
             ("all", "", "", ""),
@@ -953,13 +953,13 @@ mod tests {
             overpass: OverpassDiscovery::default(),
         };
         let mut browser = DatasetBrowser::new(&[source.clone()]);
-        browser.poll(&[source.clone()]);
+        browser.poll(&[source.clone()], &mut NoticeCenter::default());
         assert!(!browser.sources[0].scanning);
         assert!(browser.sources[0].products.is_empty());
         assert!(!source.cache_path.exists());
         browser.refresh(0, &source);
         for _ in 0..100 {
-            browser.poll(&[source.clone()]);
+            browser.poll(&[source.clone()], &mut NoticeCenter::default());
             if !browser.sources[0].scanning {
                 break;
             }

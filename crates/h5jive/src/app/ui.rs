@@ -413,17 +413,6 @@ mod navigation_tests {
     }
 
     #[test]
-    fn loading_indicator_stays_centered_as_label_width_changes() {
-        let center = [640.0, 15.0];
-        for width in [55.0, 180.0, 330.0] {
-            let (min, max) = loading_indicator_bounds(center, width);
-            assert_eq!((min[0] + max[0]) * 0.5, center[0]);
-            assert_eq!((min[1] + max[1]) * 0.5, center[1]);
-            assert_eq!(max[0] - min[0], width + 42.0);
-        }
-    }
-
-    #[test]
     fn selected_group_and_dataset_render_without_scope_errors() {
         let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../examples/arrays/space_demo.hdf5");
@@ -689,6 +678,70 @@ mod navigation_tests {
     }
 }
 
+#[cfg(test)]
+mod notice_tests {
+    use super::*;
+    use dear_app::imgui::{Condition, Context, MouseButton};
+
+    #[test]
+    fn error_notice_dismisses_over_modal_popup() {
+        let palette = Settings::load().unwrap().palette;
+        let mut context = Context::create();
+        context.set_ini_filename(None::<String>).unwrap();
+        context.io_mut().set_display_size([800.0, 600.0]);
+        context.io_mut().set_delta_time(1.0 / 60.0);
+        context
+            .font_atlas()
+            .try_claim_legacy_renderer()
+            .unwrap()
+            .build();
+        let message =
+            "A long error message that forces the notice to use its maximum width. ".repeat(8);
+        let draw = |context: &mut Context, open_dialog: bool| {
+            let ui = context.frame();
+            let mut result = (0.0, false);
+            ui.window("Notice host")
+                .position([0.0, 0.0], Condition::Always)
+                .size([800.0, 600.0], Condition::Always)
+                .build(|| {
+                    if open_dialog {
+                        ui.open_popup("Modal dialog");
+                    }
+                    if let Some(_popup) = ui.begin_modal_popup_config("Modal dialog").begin() {
+                        ui.text("Dialog content");
+                    }
+                    result = draw_notice_bubble(
+                        &ui,
+                        "error",
+                        400.0,
+                        40.0,
+                        &message,
+                        NoticeKind::Error,
+                        &palette,
+                        520.0,
+                    );
+                });
+            context.end_frame();
+            result
+        };
+
+        let (height, _) = draw(&mut context, true);
+        assert!(height > 0.0);
+        let close = [400.0 + 260.0 - 21.0, 40.0 + height * 0.5];
+        context.io_mut().add_mouse_pos_event(close);
+        draw(&mut context, false);
+        context
+            .io_mut()
+            .add_mouse_button_event(MouseButton::Left, true);
+        draw(&mut context, false);
+        context
+            .io_mut()
+            .add_mouse_button_event(MouseButton::Left, false);
+        let (_, dismissed) = draw(&mut context, false);
+        assert!(dismissed, "error notice should dismiss over a modal popup");
+    }
+}
+
 pub(super) fn draw_update_button(ui: &Ui, settings: &Settings, pending: bool) -> bool {
     draw_update_button_with_height(ui, settings, pending, settings.update_button_height)
 }
@@ -801,33 +854,53 @@ pub(super) fn draw_workspace_mode_icon(
     }
 }
 
-fn loading_indicator_bounds(center: [f32; 2], text_width: f32) -> ([f32; 2], [f32; 2]) {
-    let half_width = (text_width + 42.0) * 0.5;
-    (
-        [center[0] - half_width, center[1] - 12.5],
-        [center[0] + half_width, center[1] + 12.5],
-    )
+fn wrap_notice_text(ui: &Ui, text: &str, max_width: f32) -> Vec<String> {
+    fn push_word(ui: &Ui, lines: &mut Vec<String>, line: &mut String, word: &str, max_width: f32) {
+        if line.is_empty() {
+            if ui.calc_text_size(word)[0] <= max_width {
+                line.push_str(word);
+                return;
+            }
+        } else {
+            let candidate = format!("{line} {word}");
+            if ui.calc_text_size(&candidate)[0] <= max_width {
+                *line = candidate;
+                return;
+            }
+            lines.push(std::mem::take(line));
+        }
+        for character in word.chars() {
+            let mut candidate = line.clone();
+            candidate.push(character);
+            if !line.is_empty() && ui.calc_text_size(&candidate)[0] > max_width {
+                lines.push(std::mem::take(line));
+            }
+            line.push(character);
+        }
+    }
+
+    let max_width = max_width.max(1.0);
+    let mut lines = Vec::new();
+    for paragraph in text.split('\n') {
+        if paragraph.is_empty() {
+            lines.push(String::new());
+            continue;
+        }
+        let mut line = String::new();
+        for word in paragraph.split_whitespace() {
+            push_word(ui, &mut lines, &mut line, word, max_width);
+        }
+        if !line.is_empty() {
+            lines.push(line);
+        }
+    }
+    if lines.is_empty() {
+        lines.push(String::new());
+    }
+    lines
 }
 
-pub(super) fn draw_loading_indicator(ui: &Ui, center: [f32; 2], label: &str, palette: &Palette) {
-    let draw = ui.get_foreground_draw_list();
-    let text_size = ui.calc_text_size(label);
-    let (min, max) = loading_indicator_bounds(center, text_size[0]);
-    let spinner_center = [min[0] + 16.0, center[1]];
-    let rounding = ui.clone_style().frame_rounding();
-    draw.add_rect(min, max, palette.panel)
-        .rounding(rounding)
-        .filled(true)
-        .build();
-    draw.add_rect(min, max, palette.accent)
-        .rounding(rounding)
-        .thickness(1.5)
-        .build();
-    draw.add_text(
-        [min[0] + 32.0, center[1] - text_size[1] * 0.5],
-        palette.text,
-        label,
-    );
+fn draw_notice_spinner(ui: &Ui, draw: &DrawListMut<'_>, center: [f32; 2], palette: &Palette) {
     let rotation = ui.time() as f32 * 4.0;
     for index in 0..10 {
         let angle = rotation + index as f32 * std::f32::consts::TAU / 10.0;
@@ -841,12 +914,12 @@ pub(super) fn draw_loading_indicator(ui: &Ui, center: [f32; 2], label: &str, pal
         ];
         draw.add_line(
             [
-                spinner_center[0] + direction[0] * 5.0,
-                spinner_center[1] + direction[1] * 5.0,
+                center[0] + direction[0] * 4.0,
+                center[1] + direction[1] * 4.0,
             ],
             [
-                spinner_center[0] + direction[0] * 9.0,
-                spinner_center[1] + direction[1] * 9.0,
+                center[0] + direction[0] * 7.0,
+                center[1] + direction[1] * 7.0,
             ],
             color,
         )
@@ -855,33 +928,158 @@ pub(super) fn draw_loading_indicator(ui: &Ui, center: [f32; 2], label: &str, pal
     }
 }
 
-pub(super) fn draw_error_indicator(ui: &Ui, top_right: [f32; 2], label: &str, palette: &Palette) {
-    let draw = ui.get_foreground_draw_list();
-    let text_size = ui.calc_text_size(label);
-    let height = 25.0;
-    let width = text_size[0] + 42.0;
-    let min = [top_right[0] - width, top_right[1] - height * 0.5];
-    let max = [top_right[0], top_right[1] + height * 0.5];
-    let color = [0.95, 0.38, 0.33, 1.0];
-    let rounding = ui.clone_style().frame_rounding();
-    draw.add_rect(min, max, palette.panel)
-        .rounding(rounding)
-        .filled(true)
-        .build();
-    draw.add_rect(min, max, color)
-        .rounding(rounding)
-        .thickness(1.5)
-        .build();
-    draw.add_text(
-        [min[0] + 14.0, top_right[1] - text_size[1] * 0.5],
+fn draw_notice_success_mark(draw: &DrawListMut<'_>, center: [f32; 2], color: [f32; 4]) {
+    draw.add_line(
+        [center[0] - 5.0, center[1]],
+        [center[0] - 1.0, center[1] + 4.0],
         color,
-        "!",
-    );
-    draw.add_text(
-        [min[0] + 32.0, top_right[1] - text_size[1] * 0.5],
-        palette.text,
-        label,
-    );
+    )
+    .thickness(2.0)
+    .build();
+    draw.add_line(
+        [center[0] - 1.0, center[1] + 4.0],
+        [center[0] + 6.0, center[1] - 4.0],
+        color,
+    )
+    .thickness(2.0)
+    .build();
+}
+
+pub(super) fn draw_notice_bubble(
+    ui: &Ui,
+    id: &str,
+    center_x: f32,
+    top: f32,
+    label: &str,
+    kind: NoticeKind,
+    palette: &Palette,
+    max_width: f32,
+) -> (f32, bool) {
+    const PADDING_X: f32 = 12.0;
+    const PADDING_Y: f32 = 7.0;
+    const ICON_WIDTH: f32 = 18.0;
+    const LINE_GAP: f32 = 2.0;
+    const CLOSE_SIZE: f32 = 18.0;
+    const CLOSE_GAP: f32 = 4.0;
+    const ROUNDING: f32 = 10.0;
+
+    let color = match kind {
+        NoticeKind::Loading | NoticeKind::Info => palette.notice_info,
+        NoticeKind::Success => palette.notice_success,
+        NoticeKind::Warning => palette.notice_warning,
+        NoticeKind::Error => palette.notice_error,
+    };
+    let icon = match kind {
+        NoticeKind::Loading | NoticeKind::Success => "",
+        NoticeKind::Info => "i",
+        NoticeKind::Warning | NoticeKind::Error => "!",
+    };
+    let close_width = if kind == NoticeKind::Error {
+        CLOSE_SIZE + CLOSE_GAP
+    } else {
+        0.0
+    };
+    let text_width = (max_width - 2.0 * PADDING_X - ICON_WIDTH - close_width).max(1.0);
+    let lines = wrap_notice_text(ui, label, text_width);
+    let line_height = ui.text_line_height();
+    let text_height =
+        lines.len() as f32 * line_height + lines.len().saturating_sub(1) as f32 * LINE_GAP;
+    let height = text_height + 2.0 * PADDING_Y;
+    let content_width = lines
+        .iter()
+        .map(|line| ui.calc_text_size(line)[0])
+        .fold(0.0, f32::max);
+    let width = (content_width + ICON_WIDTH + close_width + 2.0 * PADDING_X)
+        .max(90.0)
+        .min(max_width);
+    let min = [center_x - width * 0.5, top];
+    let max = [min[0] + width, top + height];
+    let mut flags = WindowFlags::NO_TITLE_BAR
+        | WindowFlags::NO_RESIZE
+        | WindowFlags::NO_MOVE
+        | WindowFlags::NO_SCROLLBAR
+        | WindowFlags::NO_SCROLL_WITH_MOUSE
+        | WindowFlags::NO_COLLAPSE
+        | WindowFlags::NO_BACKGROUND
+        | WindowFlags::NO_SAVED_SETTINGS
+        | WindowFlags::NO_FOCUS_ON_APPEARING
+        | WindowFlags::NO_BRING_TO_FRONT_ON_FOCUS
+        | WindowFlags::NO_NAV;
+    if kind != NoticeKind::Error {
+        flags |= WindowFlags::NO_INPUTS;
+    }
+
+    let mut dismissed = false;
+    ui.window(format!("##notice_bubble_{id}"))
+        .position(min, Condition::Always)
+        .size([width, height], Condition::Always)
+        .flags(flags)
+        .build(|| {
+            let draw = ui.get_foreground_draw_list();
+            draw.add_rect(min, max, palette.panel)
+                .rounding(ROUNDING)
+                .filled(true)
+                .build();
+            draw.add_rect(min, max, color)
+                .rounding(ROUNDING)
+                .thickness(1.5)
+                .build();
+            let icon_center = [min[0] + PADDING_X + ICON_WIDTH * 0.5, min[1] + height * 0.5];
+            match kind {
+                NoticeKind::Loading => draw_notice_spinner(ui, &draw, icon_center, palette),
+                NoticeKind::Success => draw_notice_success_mark(&draw, icon_center, color),
+                NoticeKind::Info | NoticeKind::Warning | NoticeKind::Error => {
+                    let icon_size = ui.calc_text_size(icon);
+                    draw.add_text(
+                        [min[0] + PADDING_X, min[1] + (height - icon_size[1]) * 0.5],
+                        color,
+                        icon,
+                    );
+                }
+            }
+            let mut y = min[1] + PADDING_Y;
+            for line in lines {
+                draw.add_text([min[0] + PADDING_X + ICON_WIDTH, y], palette.text, line);
+                y += line_height + LINE_GAP;
+            }
+            if kind == NoticeKind::Error {
+                let close_min = [
+                    max[0] - PADDING_X - CLOSE_SIZE,
+                    min[1] + (height - CLOSE_SIZE) * 0.5,
+                ];
+                let popup_open =
+                    ui.is_popup_open_with_flags("", dear_app::imgui::PopupQueryFlags::ANY_POPUP);
+                let hovered = if popup_open {
+                    let mouse = ui.io().mouse_pos();
+                    let inside = mouse[0] >= close_min[0]
+                        && mouse[0] <= close_min[0] + CLOSE_SIZE
+                        && mouse[1] >= close_min[1]
+                        && mouse[1] <= close_min[1] + CLOSE_SIZE;
+                    dismissed = inside && ui.is_mouse_released(dear_app::imgui::MouseButton::Left);
+                    inside
+                } else {
+                    ui.set_cursor_screen_pos(close_min);
+                    dismissed = ui.invisible_button(
+                        format!("##notice_dismiss_{id}"),
+                        [CLOSE_SIZE, CLOSE_SIZE],
+                    );
+                    ui.is_item_hovered()
+                };
+                if hovered {
+                    ui.set_mouse_cursor(Some(MouseCursor::Hand));
+                }
+                let close_size = ui.calc_text_size("x");
+                draw.add_text(
+                    [
+                        close_min[0] + (CLOSE_SIZE - close_size[0]) * 0.5,
+                        close_min[1] + (CLOSE_SIZE - close_size[1]) * 0.5,
+                    ],
+                    if hovered { palette.text } else { palette.muted },
+                    "x",
+                );
+            }
+        });
+    (height, dismissed)
 }
 
 pub(crate) fn draw_view_icon(

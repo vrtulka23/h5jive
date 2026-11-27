@@ -32,7 +32,6 @@ pub(super) struct State {
     resolution: String,
     pub(super) output: String,
     export_job: BackgroundJob<(), String>,
-    status: Option<Result<String, String>>,
 }
 impl Default for State {
     fn default() -> Self {
@@ -62,7 +61,6 @@ impl Default for State {
             resolution: "1".into(),
             output: "subset.nc".into(),
             export_job: BackgroundJob::default(),
-            status: None,
         }
     }
 }
@@ -78,13 +76,12 @@ impl State {
         self.coverage_job.cancel();
         self.coverage_error = None;
     }
-    pub fn is_busy(&mut self) -> bool {
+    pub fn poll(&mut self, notices: &mut NoticeCenter) -> bool {
         let mut changed = false;
         if let Some((_, result)) = self.inspection.poll("Product inspection stopped") {
             match result {
                 Ok(vars) => {
                     self.enabled = vec![false; vars.len()];
-                    self.status = None;
                     if !vars.is_empty() {
                         if vars[0].shape.len() == 4 {
                             self.mode = SubsetMode::Native;
@@ -94,7 +91,7 @@ impl State {
                     changed = true;
                 }
                 Err(e) => {
-                    self.status = Some(Err(e));
+                    notices.error(e);
                     changed = true;
                 }
             }
@@ -107,19 +104,41 @@ impl State {
                     changed = true;
                 }
                 Err(e) => {
+                    notices.error(format!("Coverage preview stopped: {e}"));
                     self.coverage_error = Some(e);
                     changed = true;
                 }
             }
         }
         if let Some((_, result)) = self.export_job.poll("Export worker stopped") {
-            self.status = Some(result);
+            match result {
+                Ok(message) => notices.success(message),
+                Err(error) => notices.error(format!("Could not export: {error}")),
+            }
             changed = true;
         }
         changed
             || self.inspection.is_busy()
             || self.coverage_job.is_busy()
             || self.export_job.is_busy()
+    }
+
+    pub fn is_busy(&self) -> bool {
+        self.inspection.is_busy() || self.coverage_job.is_busy() || self.export_job.is_busy()
+    }
+
+    pub fn active_task_labels(&self) -> Vec<&'static str> {
+        let mut labels = Vec::new();
+        if self.inspection.is_busy() {
+            labels.push("product inspection");
+        }
+        if self.coverage_job.is_busy() {
+            labels.push("coverage preview");
+        }
+        if self.export_job.is_busy() {
+            labels.push("subset export");
+        }
+        labels
     }
     fn bounds(&self) -> Result<SubsetBounds, String> {
         let parse = |s: &str| {
@@ -468,8 +487,6 @@ fn draw_coverage_popup(ui: &Ui, state: &State, settings: &Settings, layout: &Cov
                 layout.globe_diameter,
             );
         }
-    } else if state.coverage_job.is_busy() {
-        ui.text("Sampling selected coverage...");
     } else if let Some(error) = &state.coverage_error {
         ui.text_wrapped(error);
     } else {
@@ -489,7 +506,6 @@ pub(super) fn draw_icon(draw: &DrawListMut<'_>, min: [f32; 2], max: [f32; 2], co
 pub(super) fn draw(lab: &mut PluginLab, ui: &Ui, context: PluginContext<'_>) -> Option<Selection> {
     const COVERAGE_POPUP: &str = "Coverage preview###subset_coverage_preview";
     let state = &mut lab.spatiotemporal_subset;
-    state.is_busy();
     if context.settings.dataset_sources.is_empty() {
         ui.text_wrapped(
             "Register a dataset source in Dataset Browser settings to use this plugin.",
@@ -514,7 +530,6 @@ pub(super) fn draw(lab: &mut PluginLab, ui: &Ui, context: PluginContext<'_>) -> 
         ui.set_next_item_width(ui.content_region_avail()[0].max(1.0));
         if ui.combo_simple_string("##subset_source", &mut state.source, &labels) {
             state.invalidate();
-            state.status = None;
         }
         item_tip(ui,context.settings.tutorial_tips,"Use products already indexed by Dataset Browser.","Choose a registered Dataset Browser source. Product discovery and coordinates are shared with the Browser.");
         let revision = context.browser.products_revision();
@@ -610,7 +625,6 @@ pub(super) fn draw(lab: &mut PluginLab, ui: &Ui, context: PluginContext<'_>) -> 
                                 variable.path, variable.shape
                             );
                             if ui.checkbox(label, &mut state.enabled[i]) {
-                                state.status = None;
                                 state.coverage = None;
                                 state.coverage_job.cancel();
                                 state.coverage_error = None;
@@ -787,7 +801,7 @@ pub(super) fn draw(lab: &mut PluginLab, ui: &Ui, context: PluginContext<'_>) -> 
             "The output file is created at the path above. Existing files are protected.",
         );
         if export_clicked {
-            let result = (|| {
+            let result: Result<SubsetRequest, String> = (|| {
                 let parse_date = |text: &str| -> Result<Option<String>, String> {
                     if text.trim().is_empty() {
                         return Ok(None);
@@ -844,18 +858,8 @@ pub(super) fn draw(lab: &mut PluginLab, ui: &Ui, context: PluginContext<'_>) -> 
             match result {
                 Ok(request) => {
                     state.export_job.start((), move |_| export_subset(&request));
-                    state.status = None;
                 }
-                Err(e) => state.status = Some(Err(e)),
-            }
-        }
-        if exporting {
-            ui.text("Exporting in bounded chunks...");
-        }
-        if let Some(status) = &state.status {
-            match status {
-                Ok(s) => ui.text_wrapped(s),
-                Err(e) => ui.text_wrapped(format!("Could not export: {e}")),
+                Err(e) => context.notices.error(format!("Could not export: {e}")),
             }
         }
     }
@@ -976,7 +980,8 @@ mod tests {
                         selection: None,
                         write_allowed: [true, true],
                         browser: &browser,
-                        picker_request: &mut picker_request
+                        picker_request: &mut picker_request,
+                        notices: &mut NoticeCenter::default(),
                     }
                 )
                 .is_none());

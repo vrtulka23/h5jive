@@ -31,6 +31,22 @@ muted str
 accent str
   !format "#[0-9A-Fa-f]{6}"
 
+notice_info str
+  ?descr "Loading and informational notice bubbles"
+  !format "#[0-9A-Fa-f]{6}"
+
+notice_success str
+  ?descr "Successful operation notice bubbles"
+  !format "#[0-9A-Fa-f]{6}"
+
+notice_warning str
+  ?descr "Warning notice bubbles"
+  !format "#[0-9A-Fa-f]{6}"
+
+notice_error str
+  ?descr "Error notice bubbles"
+  !format "#[0-9A-Fa-f]{6}"
+
 heatmap_low str
   !format "#[0-9A-Fa-f]{6}"
 

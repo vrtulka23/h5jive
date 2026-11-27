@@ -21,15 +21,8 @@ impl App {
             Kind::Dataset { .. } => {}
         }
         self.poll_statistics(&selection);
-        if self.attributes_cache.is_none() {
-            self.attributes_cache = Some(
-                self.files[selection.file]
-                    .attributes(&selection.path)
-                    .map_err(|err| err.to_string()),
-            );
-        }
+        self.ensure_attributes_loaded(&selection);
         let Some(result) = &self.statistics_cache else {
-            ui.text("Calculating statistics...");
             return;
         };
         let statistics = match result {

@@ -95,21 +95,27 @@ impl App {
             .and_then(|job| job.receiver.try_recv().ok());
         if let Some(rgba) = ready {
             if let Some(VolumeRasterJob { key, .. }) = self.volume_raster_job.take() {
-                if let Some(raster) = upload_volume_raster(gpu, &key, &rgba) {
-                    if let Some(old) = self.volume_raster.take() {
-                        let has_full_overview = self
-                            .applied_volume
-                            .as_ref()
-                            .is_some_and(|slice| raster_has_full_overview(&old.0, &key, slice));
-                        let is_wider = self
-                            .volume_overview_raster
-                            .as_ref()
-                            .is_none_or(|(cached, _)| old.0.scale[0] < cached.scale[0]);
-                        if has_full_overview && is_wider {
-                            self.volume_overview_raster = Some(old);
+                match upload_volume_raster(gpu, &key, &rgba) {
+                    Ok(raster) => {
+                        if let Some(old) = self.volume_raster.take() {
+                            let has_full_overview = self
+                                .applied_volume
+                                .as_ref()
+                                .is_some_and(|slice| raster_has_full_overview(&old.0, &key, slice));
+                            let is_wider = self
+                                .volume_overview_raster
+                                .as_ref()
+                                .is_none_or(|(cached, _)| old.0.scale[0] < cached.scale[0]);
+                            if has_full_overview && is_wider {
+                                self.volume_overview_raster = Some(old);
+                            }
                         }
+                        self.volume_raster = Some((key, raster));
                     }
-                    self.volume_raster = Some((key, raster));
+                    Err(error) => {
+                        self.notices
+                            .error(format!("Could not display the 3D render: {error}"));
+                    }
                 }
             }
         } else if self.volume_raster_job.as_ref().is_some_and(|job| {
@@ -118,6 +124,8 @@ impl App {
                 Err(mpsc::TryRecvError::Disconnected)
             )
         }) {
+            self.notices
+                .error("Could not render 3D view: worker stopped unexpectedly.");
             self.volume_raster_job = None;
         }
     }
@@ -233,10 +241,10 @@ fn upload_volume_raster(
     gpu: &mut GpuApi<'_>,
     key: &VolumeRasterKey,
     rgba: &[u8],
-) -> Option<RegisteredVolumeRaster> {
+) -> Result<RegisteredVolumeRaster, String> {
     let [width, height] = key.render_size;
     if rgba.len() != width as usize * height as usize * 4 {
-        return None;
+        return Err("the rendered image size did not match the requested size".to_owned());
     }
     let texture = gpu.device().create_texture(&wgpu::TextureDescriptor {
         label: Some("Exact 3D projection ray cast"),
@@ -265,9 +273,13 @@ fn upload_volume_raster(
         texture.size(),
     );
     let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
-    let handle = gpu.register_external_texture(&view).ok()?;
-    let id = gpu.resolve_external_texture(handle).ok()?;
-    Some(RegisteredVolumeRaster {
+    let handle = gpu
+        .register_external_texture(&view)
+        .map_err(|_| "the GPU could not register the rendered texture".to_owned())?;
+    let id = gpu
+        .resolve_external_texture(handle)
+        .map_err(|_| "the GPU could not resolve the rendered texture".to_owned())?;
+    Ok(RegisteredVolumeRaster {
         _texture: texture,
         _view: view,
         _handle: handle,

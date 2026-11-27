@@ -104,17 +104,28 @@ impl State {
         self.job.is_busy()
     }
 
+    pub fn active_task_labels(&self) -> Vec<&'static str> {
+        if self.job.is_busy() {
+            vec!["value comparison"]
+        } else {
+            Vec::new()
+        }
+    }
+
     pub fn take_redraw(&mut self) -> bool {
         std::mem::take(&mut self.needs_redraw)
     }
 
-    pub fn poll(&mut self) {
+    pub fn poll(&mut self, notices: &mut NoticeCenter) {
         let Some((key, result)) = self
             .job
             .poll("Value comparison worker stopped unexpectedly")
         else {
             return;
         };
+        if let Err(error) = &result {
+            notices.error(format!("Could not compare datasets: {error}"));
+        }
         self.preview = Some((key, result));
         self.needs_redraw = true;
     }
@@ -722,7 +733,7 @@ pub(super) fn draw(
             );
         }
         Some((_, Err(error))) => ui.text_wrapped(format!("Could not compare datasets: {error}")),
-        None => ui.text("Loading comparison preview..."),
+        None => {}
     }
     None
 }
@@ -938,7 +949,8 @@ mod tests {
                         None,
                         [true, true],
                         &browser,
-                        &mut picker_request
+                        &mut picker_request,
+                        &mut NoticeCenter::default(),
                     )
                     .is_none());
             });

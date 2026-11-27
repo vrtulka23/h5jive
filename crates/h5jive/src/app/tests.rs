@@ -5,14 +5,18 @@ use super::{
     load_heatmap_overview_with_cancel, load_heatmap_tile, load_map_data, load_profile,
     load_profile_preview_with_cancel, overview_sample_index, parse_input_spec,
     parse_profile_indexes, parse_startup_args, profile_needs_preview, resolve_startup_selection,
-    scan_heatmap_range, settings_help, AttributeValue, ColormapPreset, File, GeoViewControls,
-    MapViewport, PinnedDefault, ProfileBin, ProfileData, ProfileLine, ProfileSlice, ScanFilter,
-    Selection, Settings, SpecialValue, TableSlice, ThemeColors, ValueVisibility, ViewMode,
-    WorkspaceMode,
+    scan_heatmap_range, settings_help, AppNotice, AttributeValue, ColormapPreset, File,
+    GeoViewControls, MapViewport, NoticeCenter, NoticeKind, PinnedDefault, ProfileBin, ProfileData,
+    ProfileLine, ProfileSlice, ScanFilter, Selection, Settings, SpecialValue, TableSlice,
+    ThemeColors, ValueVisibility, ViewMode, WorkspaceMode,
 };
 use h5jive_data::ScanDirectionClass;
 use scinumtools3::Project;
-use std::{path::Path, sync::OnceLock};
+use std::{
+    path::Path,
+    sync::OnceLock,
+    time::{Duration, Instant},
+};
 
 fn copy_settings_for_schema_test(from: &Path, to: &Path) {
     std::fs::create_dir_all(to).unwrap();
@@ -34,6 +38,44 @@ fn copy_settings_for_schema_test(from: &Path, to: &Path) {
 fn test_settings() -> &'static Settings {
     static SETTINGS: OnceLock<Settings> = OnceLock::new();
     SETTINGS.get_or_init(|| Settings::load().unwrap())
+}
+
+#[test]
+fn notices_auto_dismiss_info_and_warnings_while_errors_persist() {
+    let started_at = Instant::now();
+    let info = AppNotice::started_at(0, NoticeKind::Info, "Saved".into(), started_at);
+    let success = AppNotice::started_at(1, NoticeKind::Success, "Saved".into(), started_at);
+    let warning = AppNotice::started_at(2, NoticeKind::Warning, "Careful".into(), started_at);
+    let error = AppNotice::started_at(3, NoticeKind::Error, "Failed".into(), started_at);
+    let info_deadline = info.expires_at().unwrap();
+    let success_deadline = success.expires_at().unwrap();
+    let warning_deadline = warning.expires_at().unwrap();
+
+    assert!(!info.is_expired(started_at));
+    assert!(!info.is_expired(info_deadline - Duration::from_millis(1)));
+    assert!(info.is_expired(info_deadline));
+    assert!(info_deadline > success_deadline);
+    assert!(warning_deadline > info_deadline);
+    assert_eq!(success_deadline - started_at, Duration::from_secs(4));
+    assert_eq!(info_deadline - started_at, Duration::from_secs(5));
+    assert_eq!(warning_deadline - started_at, Duration::from_secs(10));
+    assert!(error.expires_at().is_none());
+    assert!(!error.is_expired(started_at + Duration::from_secs(86_400)));
+}
+
+#[test]
+fn notices_append_new_messages_and_keep_existing_positions() {
+    let mut notices = NoticeCenter::default();
+    notices.error("first");
+    notices.warning("second");
+    notices.error("first");
+    notices.info("third");
+
+    let messages = notices
+        .iter()
+        .map(|notice| notice.message.as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(messages, ["first", "second", "third"]);
 }
 
 #[test]

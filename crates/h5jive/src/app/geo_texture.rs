@@ -27,12 +27,17 @@ impl App {
             return;
         }
         self.earth_texture = None;
+        let texture = upload_earth_texture(
+            gpu,
+            NATURAL_EARTH_TEXTURE_BMP,
+            "Natural Earth II shaded relief and water",
+        );
+        if let Err(error) = &texture {
+            self.notices
+                .error(format!("Could not prepare the Earth texture: {error}"));
+        }
         self.earth_texture = Some(EarthTexture {
-            texture: upload_earth_texture(
-                gpu,
-                NATURAL_EARTH_TEXTURE_BMP,
-                "Natural Earth II shaded relief and water",
-            ),
+            texture: texture.ok(),
             generation: gpu.generation(),
         });
     }
@@ -49,8 +54,9 @@ fn upload_earth_texture(
     gpu: &mut GpuApi<'_>,
     bitmap: &[u8],
     label: &'static str,
-) -> Option<RegisteredEarthTexture> {
-    let (width, height, rgba) = decode_bmp24(bitmap).ok()?;
+) -> Result<RegisteredEarthTexture, String> {
+    let (width, height, rgba) = decode_bmp24(bitmap)
+        .map_err(|_| "the embedded Earth bitmap could not be decoded".to_owned())?;
     let texture = gpu.device().create_texture(&wgpu::TextureDescriptor {
         label: Some(label),
         size: wgpu::Extent3d {
@@ -76,9 +82,13 @@ fn upload_earth_texture(
         texture.size(),
     );
     let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
-    let handle = gpu.register_external_texture(&view).ok()?;
-    let id = gpu.resolve_external_texture(handle).ok()?;
-    Some(RegisteredEarthTexture {
+    let handle = gpu
+        .register_external_texture(&view)
+        .map_err(|_| "the GPU could not register the Earth texture".to_owned())?;
+    let id = gpu
+        .resolve_external_texture(handle)
+        .map_err(|_| "the GPU could not resolve the Earth texture".to_owned())?;
+    Ok(RegisteredEarthTexture {
         _texture: texture,
         _view: view,
         handle,

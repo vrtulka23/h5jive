@@ -145,16 +145,24 @@ impl App {
             }
             _ => return None,
         };
+        let cache_key = (selection.file, selection.path.clone());
+        if !self.tree_geolocation_cache.contains_key(&cache_key) {
+            let result = self.files[selection.file]
+                .geolocation_with_rules(&selection.path, &self.settings.dataset_rules);
+            if let Err(error) = &result {
+                self.show_notice(
+                    NoticeKind::Error,
+                    format!("Could not read dataset geolocation: {error}"),
+                );
+            }
+            self.tree_geolocation_cache
+                .insert(cache_key.clone(), result.ok().flatten());
+        }
         let geolocation = self
             .tree_geolocation_cache
-            .entry((selection.file, selection.path.clone()))
-            .or_insert_with(|| {
-                self.files[selection.file]
-                    .geolocation_with_rules(&selection.path, &self.settings.dataset_rules)
-                    .ok()
-                    .flatten()
-            })
-            .clone()?;
+            .get(&cache_key)
+            .cloned()
+            .flatten()?;
         Some(GeoSource {
             selection,
             shape,
@@ -199,14 +207,21 @@ impl App {
                                 }
                                 self.map_cache = Some((running.clone(), Ok(data)));
                             }
-                            Err(error) => self.map_cache = Some((running.clone(), Err(error))),
+                            Err(error) => {
+                                self.notices
+                                    .error(format!("Could not load map data: {error}"));
+                                self.map_cache = Some((running.clone(), Err(error)));
+                            }
                         }
                         completed = true;
                         break;
                     }
                     Err(mpsc::TryRecvError::Empty) => break,
                     Err(mpsc::TryRecvError::Disconnected) => {
-                        self.map_cache = Some((running.clone(), Err("Map worker stopped".into())));
+                        let error = "Map worker stopped unexpectedly";
+                        self.notices
+                            .error(format!("Could not load map data: {error}"));
+                        self.map_cache = Some((running.clone(), Err(error.into())));
                         completed = true;
                         break;
                     }

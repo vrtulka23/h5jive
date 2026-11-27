@@ -12,6 +12,38 @@ impl SpecialValue {
 }
 
 impl App {
+    pub(super) fn ensure_attributes_loaded(&mut self, selection: &Selection) {
+        if self.attributes_cache.is_some() {
+            return;
+        }
+        let result = self.files[selection.file]
+            .attributes(&selection.path)
+            .map_err(|err| err.to_string());
+        if let Err(error) = &result {
+            self.show_notice(
+                NoticeKind::Error,
+                format!("Could not read dataset attributes: {error}"),
+            );
+        }
+        self.attributes_cache = Some(result);
+    }
+
+    pub(super) fn ensure_coordinates_loaded(&mut self, selection: &Selection) {
+        if self.coordinates_cache.is_some() {
+            return;
+        }
+        let result = self.files[selection.file]
+            .coordinate_axes(&selection.path)
+            .map_err(|err| err.to_string());
+        if let Err(error) = &result {
+            self.show_notice(
+                NoticeKind::Error,
+                format!("Could not read coordinate metadata: {error}"),
+            );
+        }
+        self.coordinates_cache = Some(result);
+    }
+
     pub(super) fn cached_coordinate_label(&self, axis: usize, index: usize) -> String {
         self.coordinate_value_cache
             .get(&(axis, index))
@@ -56,13 +88,7 @@ impl App {
         &mut self,
         selection: &Selection,
     ) -> Option<&[CoordinateAxis]> {
-        if self.coordinates_cache.is_none() {
-            self.coordinates_cache = Some(
-                self.files[selection.file]
-                    .coordinate_axes(&selection.path)
-                    .map_err(|err| err.to_string()),
-            );
-        }
+        self.ensure_coordinates_loaded(selection);
         self.coordinates_cache
             .as_ref()?
             .as_ref()
@@ -93,15 +119,27 @@ impl App {
             if self.coordinate_value_cache.len() + count > 8192 {
                 self.coordinate_value_cache.clear();
             }
-            let rank = self.files[selection.file]
-                .dataset_info(&variable)
-                .ok()
-                .map_or(1, |info| info.shape.len());
+            let rank = match self.files[selection.file].dataset_info(&variable) {
+                Ok(info) => info.shape.len(),
+                Err(error) => {
+                    self.show_notice(
+                        NoticeKind::Error,
+                        format!("Could not inspect coordinate variable {variable}: {error}"),
+                    );
+                    1
+                }
+            };
             let values = if rank == 2 {
                 self.files[selection.file].region(&variable, &[0, start], &[1, count])
             } else {
                 self.files[selection.file].region(&variable, &[start], &[count])
             };
+            if let Err(error) = &values {
+                self.show_notice(
+                    NoticeKind::Error,
+                    format!("Could not read coordinate values from {variable}: {error}"),
+                );
+            }
             for offset in 0..count {
                 let value = values.as_ref().ok().and_then(|region| {
                     region.data.get(offset).map(|&value| {

@@ -29,6 +29,12 @@ state. Share stateless data and drawing helpers when behavior overlaps.
    Use `app::BackgroundJob` for keyed worker tasks: start them outside the
    frame loop, poll results during frames, and cancel stale previews when
    selection or input changes. Keep write jobs alive until they finish.
+   Report start failures, completion messages (use Success), worker disconnects,
+   and all other transient operation status through `PluginContext.notices`. Implement
+   `active_task_labels()` for every long-running plugin job so the global
+   loading bubble includes it. Do not add a plugin status/message/error field or
+   render loading, progress, or completion text inline; keep only persistent
+   form validation and actionable empty/error states in the plugin panel.
    For map or globe previews, use `core::MapViewport`,
    `core::GlobeProjection`, and `core::coverage_cells` for geographic geometry.
    Use `h5jive-data` geolocation discovery and `select_geographic_axes` for
@@ -53,7 +59,9 @@ state. Share stateless data and drawing helpers when behavior overlaps.
 5. Update `plugins/README.md` so the catalog lists the new plugin and its
    switch. Add its help text to the plugin registry so the top Help menu can
    explain the active plugin in a popup. Keep general instructions out of the
-   plugin controls and viewer; retain loading, error, and empty-state feedback.
+   plugin controls and viewer. Use the shared notice stack for transient
+   loading, success, warning, and error messages, and keep persistent
+   validation and actionable empty/error states in place.
    Give new interactive plugin controls a short Tutorial tip and keep any
    existing normal tooltip visible when Tutorial tips are off. Follow the
    shared `app/tutorial_tips.rs` helpers for tutorial and plain tooltips.

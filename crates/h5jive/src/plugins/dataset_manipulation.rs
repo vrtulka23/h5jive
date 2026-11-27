@@ -70,7 +70,6 @@ pub(super) struct State {
     output_path: String,
     pub(super) new_file: String,
     job: BackgroundJob<Destination, String>,
-    status: Option<Result<String, String>>,
     reload: bool,
 }
 
@@ -90,7 +89,6 @@ impl Default for State {
             output_path: "/result".into(),
             new_file: String::new(),
             job: BackgroundJob::default(),
-            status: None,
             reload: false,
         }
     }
@@ -110,14 +108,29 @@ impl State {
         }
         self.choices.clear();
     }
-    pub fn is_busy(&mut self) -> bool {
+    pub fn poll(&mut self, notices: &mut NoticeCenter) -> bool {
         let mut updated = false;
         if let Some((destination, result)) = self.job.poll("Dataset operation worker stopped") {
             self.reload = destination != Destination::NewFile;
-            self.status = Some(result);
+            match result {
+                Ok(message) => notices.success(message),
+                Err(error) => notices.error(format!("Could not save dataset: {error}")),
+            }
             updated = true;
         }
         self.job.is_busy() || updated
+    }
+
+    pub fn is_busy(&self) -> bool {
+        self.job.is_busy()
+    }
+
+    pub fn active_task_labels(&self) -> Vec<&'static str> {
+        if self.job.is_busy() {
+            vec!["dataset write"]
+        } else {
+            Vec::new()
+        }
     }
     pub fn take_reload(&mut self) -> bool {
         std::mem::take(&mut self.reload)
@@ -829,7 +842,7 @@ pub(super) fn draw(lab: &mut PluginLab, ui: &Ui, context: PluginContext<'_>) -> 
         ui.table_next_row();
         ui.table_next_column();
         ui.text("Operation");
-        if segmented_control(
+        let _ = segmented_control(
             ui,
             "manipulation_operation",
             &mut state.operation,
@@ -870,9 +883,7 @@ pub(super) fn draw(lab: &mut PluginLab, ui: &Ui, context: PluginContext<'_>) -> 
             context.settings.tutorial_tips,
             context.settings.palette.accent,
             context.settings.palette.border,
-        ) {
-            state.status = None;
-        }
+        );
         ui.table_next_column();
         if dataset_picker(
             ui,
@@ -885,7 +896,6 @@ pub(super) fn draw(lab: &mut PluginLab, ui: &Ui, context: PluginContext<'_>) -> 
             context.settings.tutorial_tips,
         ) {
             state.ranges.clear();
-            state.status = None;
             let shape = &state.choices[state.left].shape;
             if state.choices[state.right].shape != *shape {
                 state.right = state
@@ -1008,15 +1018,6 @@ pub(super) fn draw(lab: &mut PluginLab, ui: &Ui, context: PluginContext<'_>) -> 
             "Use an absolute path such as /processed/slice. Existing datasets are never replaced.",
         );
         ui.text_disabled("Source attributes are not copied to the result.");
-        if state.job.is_busy() {
-            ui.text("Writing dataset...");
-        }
-        if let Some(status) = &state.status {
-            match status {
-                Ok(message) => ui.text_wrapped(message),
-                Err(error) => ui.text_wrapped(format!("Could not save dataset: {error}")),
-            }
-        }
         ui.spacing();
         let create_clicked = {
             let _disabled = ui.begin_disabled_with_cond(state.job.is_busy());
@@ -1108,12 +1109,11 @@ pub(super) fn draw(lab: &mut PluginLab, ui: &Ui, context: PluginContext<'_>) -> 
                         Ok(()) => {
                             let spec_destination = spec.destination;
                             state.job.start(spec_destination, move |_| run(spec));
-                            state.status = None;
                         }
-                        Err(error) => state.status = Some(Err(error)),
+                        Err(error) => context.notices.error(error),
                     }
                 }
-                Err(error) => state.status = Some(Err(error)),
+                Err(error) => context.notices.error(error),
             }
         }
     }
@@ -1422,6 +1422,7 @@ mod tests {
                         write_allowed: [true, true],
                         browser: &browser,
                         picker_request: &mut picker_request,
+                        notices: &mut NoticeCenter::default(),
                     }
                 )
                 .is_none());
@@ -1445,6 +1446,7 @@ mod tests {
                         write_allowed: [true, true],
                         browser: &browser,
                         picker_request: &mut picker_request,
+                        notices: &mut NoticeCenter::default(),
                     },
                 );
             });

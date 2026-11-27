@@ -25,7 +25,8 @@ impl App {
                 self.load_file_slot(0);
             }
         }
-        self.dataset_browser.poll(&self.settings.dataset_sources);
+        self.dataset_browser
+            .poll(&self.settings.dataset_sources, &mut self.notices);
         let palette = self.settings.palette.clone();
         let control_bg = mix_color(palette.panel, [1.0, 1.0, 1.0, 1.0], 0.055);
         let control_hover = mix_color(control_bg, palette.accent, 0.25);
@@ -119,10 +120,6 @@ impl App {
                         self.load_file_slot(1);
                     }
                     item_tip(ui, tutorial_tips, "", "Load A first, then B for comparisons.");
-                    if let Some(error) = &self.file_error {
-                        ui.separator();
-                        ui.text_wrapped(error);
-                    }
                     ui.separator();
                     if self.workspace_mode == WorkspaceMode::DataInspector
                         && ui.menu_item("Save current view...")
@@ -168,16 +165,17 @@ impl App {
                         self.settings.tutorial_tips,
                         true,
                     ) {
-                        self.tutorial_tips_error = self
+                        if let Err(error) = self
                             .settings
                             .set_tutorial_tips(!self.settings.tutorial_tips)
-                            .err()
-                            .map(|error| format!("Could not save Tutorial tips: {error}"));
+                        {
+                            self.show_notice(
+                                NoticeKind::Error,
+                                format!("Could not save Tutorial tips: {error}"),
+                            );
+                        }
                     }
                     item_tip(ui, tutorial_tips, "Show extra guidance when hovering controls. This choice is saved in DIPL overrides.", "Uncheck this to keep only normal tooltips.");
-                    if let Some(error) = &self.tutorial_tips_error {
-                        ui.text_wrapped(error);
-                    }
                     ui.separator();
                     if ui.menu_item("About H5Jive") {
                         self.show_about = true;
@@ -301,15 +299,13 @@ impl App {
                 });
         }
         let menu_height = menu_height + mode_bar_height;
-        let top_menu_height = menu_height - mode_bar_height;
         let panel_height = (size[1] - menu_height).max(1.0);
         if self.workspace_mode == WorkspaceMode::DatasetBrowser {
             self.view_rect = [0.0; 4];
             self.draw_dataset_browser(ui, menu_height, panel_height, flags);
             self.draw_help_dialogs(ui);
             self.draw_file_picker(ui);
-            self.draw_global_loading_overlay(ui, size, top_menu_height);
-            self.draw_global_error_overlay(ui, size, menu_height);
+            self.draw_global_status_overlays(ui, size);
             self.draw_file_drop_overlay(ui, size);
             return;
         }
@@ -318,8 +314,7 @@ impl App {
             self.draw_workspace_placeholder(ui, plot_ui, menu_height, panel_height, flags);
             self.draw_help_dialogs(ui);
             self.draw_file_picker(ui);
-            self.draw_global_loading_overlay(ui, size, top_menu_height);
-            self.draw_global_error_overlay(ui, size, menu_height);
+            self.draw_global_status_overlays(ui, size);
             self.draw_file_drop_overlay(ui, size);
             return;
         }
@@ -365,9 +360,7 @@ impl App {
                                     ui.child_window(format!("file_tree_slot_{index}"))
                                         .size([0.0, 0.0])
                                         .build(ui, || {
-                                            if self.cell_edit_job.is_some() || self.bulk_replace_job.is_some() {
-                                                ui.text("Applying data changes...");
-                                            } else if let Some(file) = self.files.get(index) {
+                                            if let Some(file) = self.files.get(index) {
                                                 if draw_file_root(
                                                     ui,
                                                     file,
@@ -518,8 +511,7 @@ impl App {
         self.draw_pending_selection_dialog(ui);
         self.draw_file_picker(ui);
         self.draw_export_dialog(ui);
-        self.draw_global_loading_overlay(ui, size, top_menu_height);
-        self.draw_global_error_overlay(ui, size, menu_height);
+        self.draw_global_status_overlays(ui, size);
         self.draw_file_drop_overlay(ui, size);
     }
 
@@ -581,24 +573,24 @@ impl App {
         }
     }
 
-    fn draw_global_loading_overlay(&self, ui: &Ui, size: [f32; 2], menu_height: f32) {
-        let mut tasks = Vec::new();
+    fn global_loading_label(&self) -> Option<String> {
+        let mut tasks: Vec<String> = Vec::new();
         for (slot, job) in self.file_open_jobs.iter().enumerate() {
             if job.is_some() {
-                tasks.push(if slot == 0 { "file A" } else { "file B" });
+                tasks.push(if slot == 0 { "file A" } else { "file B" }.to_owned());
             }
         }
         if let Some(label) = self.map_loading_label() {
-            tasks.push(label);
+            tasks.push(label.to_owned());
         }
         if let Some(label) = self.heatmap_tile_loading_label() {
-            tasks.push(label);
+            tasks.push(label.to_owned());
         }
         if let Some(label) = self.volume_loading_label() {
-            tasks.push(label);
+            tasks.push(label.to_owned());
         }
         if let Some(label) = self.volume_raster_loading_label() {
-            tasks.push(label);
+            tasks.push(label.to_owned());
         }
         if self.profile_job.is_some() {
             let has_overview = self.profile_cache.as_ref().is_some_and(|(_, result)| {
@@ -606,79 +598,115 @@ impl App {
                     .as_ref()
                     .is_ok_and(|data| data.sample_positions.is_some())
             });
-            tasks.push(if has_overview {
-                "1D profile detail"
-            } else {
-                "1D profile"
-            });
+            tasks.push(
+                if has_overview {
+                    "1D profile detail"
+                } else {
+                    "1D profile"
+                }
+                .to_owned(),
+            );
         }
         for (active, label) in [
             (self.heatmap_overview_job.is_some(), "2D image"),
             (self.heatmap_range_job.is_some(), "2D range"),
             (self.statistics_job.is_busy(), "stats"),
             (self.distribution_job.is_busy(), "distribution"),
+            (self.cell_edit_job.is_some(), "cell edit"),
         ] {
             if active {
-                tasks.push(label);
+                tasks.push(label.to_owned());
             }
         }
-        tasks.extend(self.dataset_browser.active_task_labels());
-        if !tasks.is_empty() {
-            let mut grouped: Vec<(&str, usize)> = Vec::new();
-            for task in tasks {
-                if let Some((_, count)) = grouped.iter_mut().find(|(label, _)| *label == task) {
-                    *count += 1;
-                } else {
-                    grouped.push((task, 1));
-                }
-            }
-            let mut label = String::from("Loading ");
-            for (index, (task, count)) in grouped.iter().take(2).enumerate() {
-                if index > 0 {
-                    label.push_str(" + ");
-                }
-                label.push_str(task);
-                if *count > 1 {
-                    label.push_str(&format!(" ({count})"));
-                }
-            }
-            let remaining: usize = grouped.iter().skip(2).map(|(_, count)| count).sum();
-            if remaining > 0 {
-                label.push_str(&format!(" +{remaining}"));
-            }
-            draw_loading_indicator(
-                ui,
-                [size[0] * 0.5, menu_height * 0.5],
-                &label,
-                &self.settings.palette,
-            );
+        if let Some(job) = &self.bulk_replace_job {
+            let processed = job.progress.load(Ordering::Relaxed);
+            tasks.push(format!("bulk replace ({processed} cells)"));
         }
-    }
-
-    fn draw_global_error_overlay(&self, ui: &Ui, size: [f32; 2], menu_height: f32) {
-        if self.workspace_mode != WorkspaceMode::DataInspector || self.view != ViewMode::Profiles1d
+        if self
+            .find_replace_dialog
+            .as_ref()
+            .is_some_and(|dialog| dialog.search_job.is_some())
         {
-            return;
+            tasks.push("find matches".to_owned());
         }
-        if let Some(error) = self.profile_index_error() {
-            draw_error_indicator(
-                ui,
-                [size[0] - 10.0, menu_height + 18.0],
-                &format!("Profile indexes: {error}"),
-                &self.settings.palette,
-            );
+        tasks.extend(
+            self.dataset_browser
+                .active_task_labels()
+                .into_iter()
+                .map(str::to_owned),
+        );
+        tasks.extend(
+            self.plugins
+                .active_task_labels()
+                .into_iter()
+                .map(str::to_owned),
+        );
+        if tasks.is_empty() {
+            return None;
         }
+        let mut grouped: Vec<(String, usize)> = Vec::new();
+        for task in tasks {
+            if let Some((_, count)) = grouped
+                .iter_mut()
+                .find(|(label, _)| label.as_str() == task.as_str())
+            {
+                *count += 1;
+            } else {
+                grouped.push((task, 1));
+            }
+        }
+        let mut label = String::from("Loading ");
+        for (index, (task, count)) in grouped.iter().take(2).enumerate() {
+            if index > 0 {
+                label.push_str(" + ");
+            }
+            label.push_str(task);
+            if *count > 1 {
+                label.push_str(&format!(" ({count})"));
+            }
+        }
+        let remaining: usize = grouped.iter().skip(2).map(|(_, count)| count).sum();
+        if remaining > 0 {
+            label.push_str(&format!(" +{remaining}"));
+        }
+        Some(label)
     }
 
-    fn profile_index_error(&self) -> Option<String> {
-        let draft = self.draft_profile.as_ref()?;
-        let axis = draft.y_axis?;
-        let selection = self.selection.as_ref()?;
-        let entry = find_entry(&self.files[selection.file].tree, &selection.path)?;
-        let Kind::Dataset { shape, .. } = &entry.kind else {
-            return None;
-        };
-        parse_profile_indexes(&draft.y_indexes, *shape.get(axis)?).err()
+    fn draw_global_status_overlays(&mut self, ui: &Ui, size: [f32; 2]) {
+        let mut bubbles = Vec::new();
+        if let Some(label) = self.global_loading_label() {
+            bubbles.push(("loading".to_owned(), None, NoticeKind::Loading, label));
+        }
+        for notice in self.notices.iter() {
+            bubbles.push((
+                format!("notice-{}", notice.id()),
+                Some(notice.id()),
+                notice.kind,
+                notice.message.clone(),
+            ));
+        }
+        let max_width = (size[0] - 30.0).min(520.0).max(90.0);
+        let mut top = 8.0;
+        let mut dismissed = None;
+        for (id, notice_id, kind, message) in bubbles {
+            let (height, close_clicked) = draw_notice_bubble(
+                ui,
+                &id,
+                size[0] * 0.5,
+                top,
+                &message,
+                kind,
+                &self.settings.palette,
+                max_width,
+            );
+            if close_clicked {
+                dismissed = notice_id;
+            }
+            top += height + PANEL_GAP;
+        }
+        if let Some(id) = dismissed {
+            self.dismiss_notice(id);
+        }
     }
 
     fn heatmap_tile_loading_label(&self) -> Option<&'static str> {
@@ -815,6 +843,7 @@ impl App {
                     write_allowed,
                     &self.dataset_browser,
                     &mut picker_request,
+                    &mut self.notices,
                 ) {
                     if let Some(current) = &self.selection {
                         if (current.file != selection.file || current.path != selection.path)
@@ -842,9 +871,9 @@ impl App {
                         || self.bulk_replace_job.is_some()
                     {
                         self.plugins.invalidate();
-                        self.file_error = Some(
-                            "Apply or discard pending cell edits before synchronizing files."
-                                .into(),
+                        self.show_notice(
+                            NoticeKind::Warning,
+                            "Apply or discard pending cell edits before synchronizing files.",
                         );
                     } else if self.file_open_jobs.iter().all(Option::is_none) {
                         self.sync_restore_selection = self.selection.clone();
@@ -1343,10 +1372,6 @@ impl App {
                         ));
                     }
                 }
-                if let Some(error) = &self.file_error {
-                    ui.set_cursor_pos([BROWSER_PANEL_PADDING[0], ui.cursor_pos_y() + PANEL_GAP]);
-                    ui.text_wrapped(error);
-                }
                 self.browser_footer_height = (ui.cursor_pos_y() - footer_start).max(1.0);
             });
         if let Some((slot, path)) = open {
@@ -1666,7 +1691,10 @@ impl App {
         self.file_path_inputs[slot] = path.display().to_string();
         if slot == 1 && self.files.is_empty() {
             self.pending_browser_b = Some(path);
-            self.file_error = Some("File B is queued. Load File A to open it.".into());
+            self.show_notice(
+                NoticeKind::Warning,
+                "File B is queued. Load File A to open it.",
+            );
         } else {
             self.load_file_slot(slot);
         }
@@ -1677,27 +1705,38 @@ impl App {
             || self.bulk_replace_job.is_some()
             || self.pending_cell_edits.keys().any(|key| key.file == slot)
         {
-            self.file_error = Some(format!(
-                "File {} has pending or in-progress edits. Apply or discard them before replacing it.",
-                if slot == 0 { "A" } else { "B" }
-            ));
+            self.show_notice(
+                NoticeKind::Warning,
+                format!(
+                    "File {} has pending or in-progress edits. Apply or discard them before replacing it.",
+                    if slot == 0 { "A" } else { "B" }
+                ),
+            );
             return;
         }
         if self.plugins.is_syncing() {
-            self.file_error =
-                Some("Wait for synchronization to finish before opening files.".into());
+            self.show_notice(
+                NoticeKind::Warning,
+                "Wait for synchronization to finish before opening files.",
+            );
             return;
         }
         let path = self.file_path_inputs[slot].trim();
         if path.is_empty() {
-            self.file_error = Some(format!(
-                "Enter a path for input file {}.",
-                if slot == 0 { "A" } else { "B" }
-            ));
+            self.show_notice(
+                NoticeKind::Warning,
+                format!(
+                    "Enter a path for input file {}.",
+                    if slot == 0 { "A" } else { "B" }
+                ),
+            );
             return;
         }
         if slot == 1 && self.files.is_empty() {
-            self.file_error = Some("Load input file A before input file B.".into());
+            self.show_notice(
+                NoticeKind::Warning,
+                "Load input file A before input file B.",
+            );
             return;
         }
         let path = PathBuf::from(path);
@@ -1714,7 +1753,6 @@ impl App {
         });
         self.file_open_jobs[slot] = Some(receiver);
         self.file_open_paths[slot] = Some(path);
-        self.file_error = None;
     }
 
     fn poll_file_open_jobs(&mut self) {
@@ -1738,7 +1776,6 @@ impl App {
                     }
                     self.file_path_inputs[slot] = self.file_paths[slot].display().to_string();
                     self.plugins.invalidate();
-                    self.file_error = None;
                     self.reset_file_selection();
                     if different_file {
                         self.switch_view(ViewMode::Data);
@@ -1747,12 +1784,17 @@ impl App {
                 Some(Ok(Err(error))) => {
                     self.file_open_jobs[slot] = None;
                     self.file_open_paths[slot] = None;
-                    self.file_error = Some(error);
+                    self.sync_restore_selection = None;
+                    self.show_notice(NoticeKind::Error, error);
                 }
                 Some(Err(mpsc::TryRecvError::Disconnected)) => {
                     self.file_open_jobs[slot] = None;
                     self.file_open_paths[slot] = None;
-                    self.file_error = Some("File loading worker stopped unexpectedly.".into());
+                    self.sync_restore_selection = None;
+                    self.show_notice(
+                        NoticeKind::Error,
+                        "File loading worker stopped unexpectedly.",
+                    );
                 }
                 Some(Err(mpsc::TryRecvError::Empty)) | None => {}
             }
@@ -1777,8 +1819,6 @@ impl App {
                     self.refresh_selection();
                 }
             }
-        } else if self.file_error.is_some() && self.file_open_jobs.iter().all(Option::is_none) {
-            self.sync_restore_selection = None;
         }
     }
 

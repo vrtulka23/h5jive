@@ -3,14 +3,21 @@ use super::*;
 impl App {
     /// Invalidate the selected dataset's derived data without changing view controls.
     pub(super) fn reload_selected_dataset(&mut self) {
-        let Some(selection) = self.selection.as_ref() else {
+        let Some(selection) = self.selection.clone() else {
             return;
         };
         self.tree_geolocation_cache
             .remove(&(selection.file, selection.path.clone()));
-        self.axis_names = self.files[selection.file]
-            .axis_names(&selection.path)
-            .unwrap_or_default();
+        self.axis_names = match self.files[selection.file].axis_names(&selection.path) {
+            Ok(names) => names,
+            Err(error) => {
+                self.show_notice(
+                    NoticeKind::Error,
+                    format!("Could not reload dataset axis metadata: {error}"),
+                );
+                Vec::new()
+            }
+        };
         self.details_key = None;
         self.clear_selected_dataset_views();
         self.globe_auto_center_source = None;

@@ -71,6 +71,10 @@ impl App {
                 JobPoll::Ready(image) => {
                     let running = running.clone();
                     let image = image.map(Arc::new);
+                    if let Err(error) = &image {
+                        self.notices
+                            .error(format!("Could not load 2D tile: {error}"));
+                    }
                     if let Ok(data) = &image {
                         self.heatmap_tiles.retain(|(cached, _)| cached != &running);
                         self.heatmap_tiles.push((running.clone(), Arc::clone(data)));
@@ -81,7 +85,11 @@ impl App {
                     self.heatmap_cache = Some((running, image));
                     self.heatmap_tile_job = None;
                 }
-                JobPoll::Disconnected => self.heatmap_tile_job = None,
+                JobPoll::Disconnected => {
+                    self.notices
+                        .error("Could not load 2D tile: worker stopped unexpectedly.");
+                    self.heatmap_tile_job = None;
+                }
                 JobPoll::Pending => {}
             }
         }
@@ -161,11 +169,14 @@ impl App {
             .as_ref()
             .is_some_and(|(running, _)| running == &key)
         {
-            finish_keyed_result_job(
+            if let Some(error) = finish_keyed_result_job(
                 &mut self.heatmap_overview_job,
                 &mut self.heatmap_overview_cache,
                 "Overview worker stopped",
-            );
+            ) {
+                self.notices
+                    .error(format!("Could not load 2D overview: {error}"));
+            }
             return;
         }
         self.heatmap_overview_job = None;
@@ -225,11 +236,14 @@ impl App {
             .as_ref()
             .is_some_and(|(running, _)| running == &key)
         {
-            finish_keyed_result_job(
+            if let Some(error) = finish_keyed_result_job(
                 &mut self.heatmap_view_overview_job,
                 &mut self.heatmap_view_overview_cache,
                 "2D view worker stopped",
-            );
+            ) {
+                self.notices
+                    .error(format!("Could not load 2D view: {error}"));
+            }
             return;
         }
         if self.heatmap_view_overview_job.take().is_some() {
@@ -293,11 +307,14 @@ impl App {
             .as_ref()
             .is_some_and(|(running, _)| running == &key)
         {
-            finish_keyed_result_job(
+            if let Some(error) = finish_keyed_result_job(
                 &mut self.heatmap_range_job,
                 &mut self.heatmap_range_cache,
                 "Range worker stopped",
-            );
+            ) {
+                self.notices
+                    .error(format!("Could not scan 2D range: {error}"));
+            }
             return;
         }
         self.heatmap_range_job = None;
@@ -343,10 +360,16 @@ impl App {
                     self.profile_cache = Some((key, Ok(data)));
                 }
                 JobPoll::Ready(ProfileJobUpdate::Complete(result)) => {
+                    if let Err(error) = &result {
+                        self.notices
+                            .error(format!("Could not load profile: {error}"));
+                    }
                     self.profile_cache = Some((key, result));
                     self.profile_job = None;
                 }
                 JobPoll::Disconnected => {
+                    self.notices
+                        .error("Could not load profile: worker stopped unexpectedly.");
                     self.profile_cache = Some((key, Err("Profile worker stopped".into())));
                     self.profile_job = None;
                 }
@@ -430,6 +453,10 @@ impl App {
     pub(super) fn poll_statistics(&mut self, selection: &Selection) {
         if let Some((key, result)) = self.statistics_job.poll("Statistics worker stopped") {
             if &key == selection {
+                if let Err(error) = &result {
+                    self.notices
+                        .error(format!("Could not calculate statistics: {error}"));
+                }
                 self.statistics_cache = Some(result);
             }
         }
@@ -453,6 +480,10 @@ impl App {
     ) {
         if let Some((key, result)) = self.distribution_job.poll("Distribution worker stopped") {
             if &key == selection {
+                if let Err(error) = &result {
+                    self.notices
+                        .error(format!("Could not calculate distribution: {error}"));
+                }
                 self.distribution_cache = Some(result);
             }
         }
@@ -504,11 +535,19 @@ impl App {
             self.heatmap_navigation_at = None;
             self.volume_navigation_at = None;
             self.clear_selected_dataset_views();
-            self.axis_names = self
-                .selection_key
-                .as_ref()
-                .and_then(|selection| self.files[selection.file].axis_names(&selection.path).ok())
-                .unwrap_or_default();
+            self.axis_names = match self.selection_key.clone() {
+                Some(selection) => match self.files[selection.file].axis_names(&selection.path) {
+                    Ok(names) => names,
+                    Err(error) => {
+                        self.show_notice(
+                            NoticeKind::Error,
+                            format!("Could not read dataset axis metadata: {error}"),
+                        );
+                        Vec::new()
+                    }
+                },
+                None => Vec::new(),
+            };
         }
         let selected_shape = self.selection.as_ref().and_then(|selection| {
             let entry = find_entry(&self.files[selection.file].tree, &selection.path)?;
@@ -516,39 +555,45 @@ impl App {
                 Kind::Dataset {
                     shape,
                     numeric: true,
-                } if (1..=4).contains(&shape.len()) => Some(shape.as_slice()),
+                } if (1..=4).contains(&shape.len()) => Some(shape.clone()),
                 _ => None,
             }
         });
         if selection_changed {
-            let first_is_time = self
+            let mut first_is_time = self
                 .axis_names
                 .first()
-                .is_some_and(|name| name.to_ascii_lowercase().contains("time"))
-                || self.selection.as_ref().is_some_and(|selection| {
-                    self.files[selection.file]
-                        .coordinate_axes(&selection.path)
-                        .ok()
-                        .and_then(|axes| axes.into_iter().next())
+                .is_some_and(|name| name.to_ascii_lowercase().contains("time"));
+            if !first_is_time {
+                if let Some(selection) = self.selection.clone() {
+                    self.ensure_coordinates_loaded(&selection);
+                    first_is_time = self
+                        .coordinates_cache
+                        .as_ref()
+                        .and_then(|result| result.as_ref().ok())
+                        .and_then(|axes| axes.first())
                         .is_some_and(|axis| {
                             axis.name.to_ascii_lowercase().contains("time")
-                                || axis.units.is_some_and(|units| {
+                                || axis.units.as_ref().is_some_and(|units| {
                                     units.to_ascii_lowercase().contains("since")
                                 })
-                        })
-                });
-            self.draft_table = selected_shape.map(|shape| {
+                        });
+                }
+            }
+            self.draft_table = selected_shape.as_deref().map(|shape| {
                 TableSlice::with_leading_time(shape, first_is_time, self.settings.pinned_default)
             });
             self.applied_table = self.draft_table.clone();
-            self.draft_slice = selected_shape.map(|shape| {
+            self.draft_slice = selected_shape.as_deref().map(|shape| {
                 TableSlice::for_heatmap(shape, first_is_time, self.settings.pinned_default)
             });
             self.applied_slice = self.draft_slice.clone();
             self.draft_profile = selected_shape
+                .as_deref()
                 .map(|shape| ProfileSlice::new(shape, first_is_time, self.settings.pinned_default));
             self.applied_profile = self.draft_profile.clone();
             self.draft_volume = selected_shape
+                .as_deref()
                 .map(|shape| VolumeSlice::new(shape, first_is_time, self.settings.pinned_default));
             self.applied_volume = self.draft_volume.clone();
             self.draft_volume_opacity = self.volume_opacity;

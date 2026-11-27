@@ -6,13 +6,7 @@ impl App {
             ui.text_wrapped("Select a group or dataset to see its attributes.");
             return;
         };
-        if self.attributes_cache.is_none() {
-            self.attributes_cache = Some(
-                self.files[selection.file]
-                    .attributes(&selection.path)
-                    .map_err(|err| err.to_string()),
-            );
-        }
+        self.ensure_attributes_loaded(&selection);
         let Some(result) = &self.attributes_cache else {
             return;
         };

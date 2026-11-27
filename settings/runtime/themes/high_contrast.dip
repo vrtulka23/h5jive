@@ -17,6 +17,14 @@ themes[high_contrast] : appearance_profile
 
   accent = "#A5480A"
 
+  notice_info = "#66A3FF"
+
+  notice_success = "#55E07D"
+
+  notice_warning = "#FFC04D"
+
+  notice_error = "#FF4D57"
+
   heatmap_low = "#2868FF"
 
   heatmap_mid = "#FFFFFF"

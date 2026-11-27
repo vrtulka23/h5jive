@@ -4,25 +4,17 @@ impl App {
     pub(crate) fn draw_data_view(&mut self, ui: &Ui, plot_ui: &PlotUi<'_>, plot_ctx: &PlotContext) {
         let Some(selection) = self.selection.clone() else {
             if self.cell_edit_job.is_some() || self.bulk_replace_job.is_some() {
-                ui.text("Applying data changes...");
-                if let Some(job) = &self.bulk_replace_job {
-                    ui.text(format!(
-                        "{} cells processed",
-                        job.progress.load(Ordering::Relaxed)
-                    ));
-                }
-            } else {
-                ui.text("Select a dataset from the tree.");
-                if !self.pending_cell_edits.is_empty() {
-                    ui.text(format!(
-                        "{} staged changes remain in memory.",
-                        self.pending_cell_edits.len()
-                    ));
-                    if ui.button("Discard all staged changes") {
-                        self.pending_cell_edits.clear();
-                        self.cell_editor = None;
-                        self.cell_edit_message = None;
-                    }
+                return;
+            }
+            ui.text("Select a dataset from the tree.");
+            if !self.pending_cell_edits.is_empty() {
+                ui.text(format!(
+                    "{} staged changes remain in memory.",
+                    self.pending_cell_edits.len()
+                ));
+                if ui.button("Discard all staged changes") {
+                    self.pending_cell_edits.clear();
+                    self.cell_editor = None;
                 }
             }
             return;
@@ -90,7 +82,7 @@ impl App {
         ui.separator();
         if self.view == ViewMode::Data {
             self.draw_cell_edit_bar(ui, &selection);
-            if !self.pending_cell_edits.is_empty() || self.cell_edit_message.is_some() {
+            if !self.pending_cell_edits.is_empty() {
                 ui.separator();
             }
         }
@@ -237,6 +229,12 @@ impl App {
             let result = self.files[key.file]
                 .region(&key.path, &key.start, &key.count)
                 .map_err(|err| err.to_string());
+            if let Err(error) = &result {
+                self.show_notice(
+                    NoticeKind::Error,
+                    format!("Could not read table data: {error}"),
+                );
+            }
             if self.region_cache.len() >= self.settings.region_cache_entries {
                 let _ = self.region_cache.remove(0);
             }

@@ -17,6 +17,14 @@ themes[light] : appearance_profile
 
   accent = "#E99448"
 
+  notice_info = "#1F5FCC"
+
+  notice_success = "#1E8A45"
+
+  notice_warning = "#9A5D00"
+
+  notice_error = "#C03030"
+
   heatmap_low = "#2367B8"
 
   heatmap_mid = "#F7F7F2"

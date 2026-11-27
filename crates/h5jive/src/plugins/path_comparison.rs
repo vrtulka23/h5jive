@@ -719,7 +719,6 @@ pub(super) struct State {
     show_resolution_prompt: bool,
     sync_request: Option<SyncRequest>,
     sync_job: BackgroundJob<(), SyncOutcome>,
-    sync_message: Option<String>,
     reload: Option<(usize, PathBuf)>,
 }
 
@@ -751,6 +750,17 @@ impl State {
         self.reload.take()
     }
 
+    pub fn active_task_labels(&self) -> Vec<&'static str> {
+        let mut labels = Vec::new();
+        if self.job.is_busy() {
+            labels.push("path comparison");
+        }
+        if self.sync_job.is_busy() {
+            labels.push("path synchronization");
+        }
+        labels
+    }
+
     pub fn has_sync_request(&self) -> bool {
         self.sync_request.is_some()
     }
@@ -765,28 +775,39 @@ impl State {
         }
     }
 
-    pub(super) fn poll(&mut self) {
+    pub(super) fn poll(&mut self, notices: &mut NoticeCenter) {
         if let Some((_, result)) = self
             .sync_job
             .poll("Synchronization worker stopped unexpectedly")
         {
-            self.sync_message = Some(match result {
+            match result {
                 Ok(outcome) => {
                     let noun = if outcome.copied == 1 { "object" } else { "objects" };
                     self.reload = Some((outcome.destination, outcome.path));
                     match outcome.error {
-                        Some(error) => format!("{} {} {noun}; synchronization stopped: {error}", outcome.action, outcome.copied),
-                        None => format!("{} {} {noun}.", outcome.action, outcome.copied),
+                        Some(error) => notices.error(format!(
+                            "{} {} {noun}; synchronization stopped: {error}",
+                            outcome.action, outcome.copied
+                        )),
+                        None => notices.success(format!(
+                            "{} {} {noun}.",
+                            outcome.action, outcome.copied
+                        )),
                     }
                 }
-                Err(_) => "Synchronization worker stopped unexpectedly. Reload both files before trying again.".into(),
-            });
+                Err(_) => notices.error(
+                    "Synchronization worker stopped unexpectedly. Reload both files before trying again.",
+                ),
+            }
             self.needs_redraw = true;
         }
         if let Some((_, result)) = self.job.poll("Comparison worker stopped unexpectedly") {
             match result {
                 Ok(rows) => self.rows = Some(rows),
-                Err(error) => self.error = Some(error),
+                Err(error) => {
+                    notices.error(format!("Comparison failed: {error}"));
+                    self.error = Some(error);
+                }
             }
             self.needs_redraw = true;
         }
@@ -830,26 +851,19 @@ impl State {
                 action,
             })
         });
-        self.sync_message = None;
         self.pending_sync = None;
         self.pending_resolution = None;
     }
 }
 
 pub(super) fn draw(lab: &mut PluginLab, ui: &Ui, context: PluginContext<'_>) -> Option<Selection> {
-    lab.comparison.poll();
-    let (Some(a), Some(b)) = (context.files.first(), context.files.get(1)) else {
+    if context.files.len() < 2 {
         ui.spacing();
-        if lab.comparison.is_syncing() {
-            ui.text("Copying missing objects...");
-        } else {
-            ui.text_wrapped("Load files A and B from the Files menu to compare their paths.");
-        }
-        if let Some(message) = &lab.comparison.sync_message {
-            ui.text_wrapped(message);
-        }
+        ui.text_wrapped("Load files A and B from the Files menu to compare their paths.");
         return None;
-    };
+    }
+    let a = context.files.first().expect("checked A is loaded");
+    let b = context.files.get(1).expect("checked B is loaded");
     if lab.comparison.rows.is_none()
         && !lab.comparison.job.is_busy()
         && lab.comparison.error.is_none()
@@ -868,7 +882,6 @@ pub(super) fn draw(lab: &mut PluginLab, ui: &Ui, context: PluginContext<'_>) -> 
         return None;
     }
     let Some(rows) = &lab.comparison.rows else {
-        ui.text(format!("Comparing {} and {}...", a.name, b.name));
         return None;
     };
     let counts = [
@@ -986,11 +999,6 @@ pub(super) fn draw(lab: &mut PluginLab, ui: &Ui, context: PluginContext<'_>) -> 
     ui.spacing();
     if same_file {
         ui.text_wrapped("Synchronization requires two different files.");
-    } else if lab.comparison.sync_job.is_busy() {
-        ui.text("Copying missing objects...");
-    }
-    if let Some(message) = &lab.comparison.sync_message {
-        ui.text_wrapped(message);
     }
     let items = display_items(rows, lab.comparison.filter, &lab.comparison.expanded);
     let mut selected = None;
@@ -1555,6 +1563,7 @@ mod tests {
                         write_allowed: [true, true],
                         browser: &browser,
                         picker_request: &mut picker_request,
+                        notices: &mut NoticeCenter::default(),
                     }
                 )
                 .is_none());

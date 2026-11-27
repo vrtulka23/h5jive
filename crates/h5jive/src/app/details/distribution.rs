@@ -15,7 +15,6 @@ impl App {
         }
         self.poll_statistics(&selection);
         if self.statistics_cache.is_none() {
-            ui.text("Calculating statistics...");
             return;
         }
         let statistics = match self.statistics_cache.as_ref().unwrap() {
@@ -32,7 +31,6 @@ impl App {
         let statistics = statistics.clone();
         self.poll_distribution(&selection, &statistics);
         if self.distribution_cache.is_none() {
-            ui.text("Calculating distribution...");
             return;
         }
         match self.distribution_cache.as_ref().unwrap() {

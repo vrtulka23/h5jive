@@ -8,7 +8,7 @@ impl App {
             .filter(|key| key.file == selection.file && key.path == selection.path)
             .count();
         let elsewhere = self.pending_cell_edits.len() - count;
-        if count == 0 && elsewhere == 0 && self.cell_edit_message.is_none() {
+        if count == 0 && elsewhere == 0 {
             return;
         }
         if count > 0 {
@@ -50,7 +50,6 @@ impl App {
                 self.pending_cell_edits
                     .retain(|key, _| key.file != selection.file || key.path != selection.path);
                 self.cell_editor = None;
-                self.cell_edit_message = None;
             }
             if apply && !discard {
                 self.start_cell_edit_job(selection);
@@ -60,9 +59,6 @@ impl App {
                 "{elsewhere} pending {} in another dataset. Return there to apply or discard.",
                 if elsewhere == 1 { "change" } else { "changes" }
             ));
-        }
-        if let Some(message) = &self.cell_edit_message {
-            ui.text_wrapped(message);
         }
     }
 
@@ -120,10 +116,9 @@ impl App {
                                 },
                             );
                         }
-                        self.cell_edit_message = None;
                     }
                     Err(err) => {
-                        self.cell_edit_message = Some(err.to_string());
+                        self.show_notice(NoticeKind::Error, err.to_string());
                         self.cell_editor = Some(CellEditor {
                             focus: true,
                             ..editor
@@ -199,9 +194,8 @@ impl App {
                         text,
                         focus: true,
                     });
-                    self.cell_edit_message = None;
                 }
-                Err(err) => self.cell_edit_message = Some(err.to_string()),
+                Err(err) => self.show_notice(NoticeKind::Error, err.to_string()),
             }
         }
     }
@@ -259,9 +253,6 @@ impl App {
                 self.queued_selection = None;
                 ui.close_current_popup();
             }
-            if let Some(message) = &self.cell_edit_message {
-                ui.text_wrapped(message);
-            }
         }
     }
 
@@ -271,8 +262,10 @@ impl App {
             || self.plugins.is_busy()
             || self.file_open_jobs.iter().any(Option::is_some)
         {
-            self.cell_edit_message =
-                Some("Wait for file operations to finish before applying edits.".into());
+            self.show_notice(
+                NoticeKind::Error,
+                "Wait for file operations to finish before applying edits.",
+            );
             return;
         }
         let slot = selection.file;
@@ -281,7 +274,10 @@ impl App {
             other != slot
                 && std::fs::canonicalize(path).ok() == std::fs::canonicalize(&file_path).ok()
         }) {
-            self.cell_edit_message = Some("The same file is open in both slots. Replace the other slot before applying edits.".into());
+            self.show_notice(
+                NoticeKind::Error,
+                "The same file is open in both slots. Replace the other slot before applying edits.",
+            );
             return;
         }
         let mut entries = self
@@ -304,7 +300,7 @@ impl App {
             })
             .collect::<Vec<_>>();
         if let Err(err) = self.files[slot].release_for_edit() {
-            self.cell_edit_message = Some(err.to_string());
+            self.show_notice(NoticeKind::Error, err.to_string());
             return;
         }
         let path = selection.path.clone();
@@ -321,7 +317,6 @@ impl App {
             let _ = sender.send((outcome, reopened));
         });
         self.cell_editor = None;
-        self.cell_edit_message = Some("Applying changes...".into());
         self.cell_edit_job = Some(CellEditJob {
             file: slot,
             path,
@@ -358,20 +353,28 @@ impl App {
                         self.plugins.invalidate();
                     }
                     Err(err) => {
-                        self.file_error =
-                            Some(format!("Could not reopen file after editing: {err}"));
+                        self.show_notice(
+                            NoticeKind::Error,
+                            format!("Could not reopen file after editing: {err}"),
+                        );
                     }
                 }
                 let succeeded = outcome.error.is_none();
-                self.cell_edit_message = Some(match outcome.error {
-                    Some(err) => format!(
-                        "Applied {} of {} changes to {}: {err}",
-                        outcome.applied,
-                        job.keys.len(),
-                        job.path
+                match outcome.error {
+                    Some(err) => self.show_notice(
+                        NoticeKind::Error,
+                        format!(
+                            "Applied {} of {} changes to {}: {err}",
+                            outcome.applied,
+                            job.keys.len(),
+                            job.path
+                        ),
                     ),
-                    None => format!("Applied {} changes to {}", outcome.applied, job.path),
-                });
+                    None => self.show_notice(
+                        NoticeKind::Success,
+                        format!("Applied {} changes to {}", outcome.applied, job.path),
+                    ),
+                }
                 if succeeded {
                     if let Some(next) = self.queued_selection.take() {
                         self.selection = Some(next);
@@ -383,8 +386,9 @@ impl App {
             }
             Some(Err(mpsc::TryRecvError::Disconnected)) => {
                 self.cell_edit_job = None;
-                self.cell_edit_message = Some(
-                    "Edit worker stopped unexpectedly. Reload the file before retrying.".into(),
+                self.show_notice(
+                    NoticeKind::Error,
+                    "Edit worker stopped unexpectedly. Reload the file before retrying.",
                 );
             }
             Some(Err(mpsc::TryRecvError::Empty)) | None => {}

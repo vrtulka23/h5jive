@@ -17,6 +17,14 @@ themes[h5jive] : appearance_profile
 
   accent = "#A5480A"
 
+  notice_info = "#4E9BFF"
+
+  notice_success = "#5BD67D"
+
+  notice_warning = "#F4B13D"
+
+  notice_error = "#F16060"
+
   heatmap_low = "#267C9A"
 
   heatmap_mid = "#24C7D8"

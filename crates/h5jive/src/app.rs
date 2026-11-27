@@ -128,7 +128,7 @@ struct App {
     files: Vec<File>,
     file_paths: Vec<PathBuf>,
     file_path_inputs: [String; 2],
-    file_error: Option<String>,
+    notices: NoticeCenter,
     file_open_jobs: [Option<mpsc::Receiver<Result<File, String>>>; 2],
     file_open_paths: [Option<PathBuf>; 2],
     pending_browser_b: Option<PathBuf>,
@@ -159,7 +159,6 @@ struct App {
     find_replace_dialog: Option<FindReplaceDialog>,
     bulk_replace_job: Option<BulkReplaceJob>,
     table_scroll_to_row: Option<usize>,
-    cell_edit_message: Option<String>,
     queued_selection: Option<Selection>,
     heatmap_cache: Option<(HeatmapKey, Result<Arc<HeatmapImage>, String>)>,
     heatmap_tiles: Vec<(HeatmapKey, Arc<HeatmapImage>)>,
@@ -256,7 +255,6 @@ struct App {
     show_about: bool,
     show_section_help: bool,
     show_dataset_registration_help: bool,
-    tutorial_tips_error: Option<String>,
     settings: Settings,
     resource_monitor: ResourceMonitor,
     gpu_initialized: Arc<AtomicBool>,
@@ -294,7 +292,10 @@ impl Application for App {
         {
             DropAction::Open(slot, path) => self.open_dropped_file(slot, path),
             DropAction::UnknownPosition => {
-                self.file_error = Some("Could not determine the drop target. Use Browse A or Browse B to open the file.".into());
+                self.show_notice(
+                    NoticeKind::Error,
+                    "Could not determine the drop target. Use Browse A or Browse B to open the file.",
+                );
             }
             DropAction::None => {}
         }
@@ -315,6 +316,7 @@ impl Application for App {
                 .request_redraw_at(Instant::now() + Duration::from_millis(33));
         }
         self.advance_export();
+        self.expire_notices(Instant::now());
         self.ensure_earth_texture(frame.gpu());
         if self.view == ViewMode::Spatial3d {
             self.poll_volume_raster(frame.gpu());
@@ -338,9 +340,13 @@ impl Application for App {
                 std::time::Instant::now() + std::time::Duration::from_millis(80),
             );
         }
-        if self.plugins.is_busy()
+        if let Some(deadline) = self.next_notice_deadline() {
+            let _ = frame.wake_handle().request_redraw_at(deadline);
+        }
+        if self.plugins.poll(&mut self.notices)
             || self.cell_edit_job.is_some()
             || self.bulk_replace_job.is_some()
+            || self.file_open_jobs.iter().any(Option::is_some)
             || self
                 .find_replace_dialog
                 .as_ref()
@@ -503,7 +509,7 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
                 .get(1)
                 .map_or_else(String::new, |(path, _)| path.display().to_string()),
         ],
-        file_error: None,
+        notices: NoticeCenter::default(),
         file_open_jobs: [None, None],
         file_open_paths: [None, None],
         pending_browser_b: None,
@@ -534,7 +540,6 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
         find_replace_dialog: None,
         bulk_replace_job: None,
         table_scroll_to_row: None,
-        cell_edit_message: None,
         queued_selection: None,
         heatmap_cache: None,
         heatmap_tiles: Vec::new(),
@@ -628,7 +633,6 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
         show_about: false,
         show_section_help: false,
         show_dataset_registration_help: false,
-        tutorial_tips_error: None,
         settings,
     };
     match run_app(config, app) {

@@ -13,13 +13,7 @@ impl App {
             ui.text_wrapped("Select a dataset to see its coordinates.");
             return;
         }
-        if self.coordinates_cache.is_none() {
-            self.coordinates_cache = Some(
-                self.files[selection.file]
-                    .coordinate_axes(&selection.path)
-                    .map_err(|err| err.to_string()),
-            );
-        }
+        self.ensure_coordinates_loaded(&selection);
         match self.coordinates_cache.as_ref().unwrap() {
             Ok(axes) if axes.is_empty() => ui.text("Scalar dataset: no dimensions"),
             Ok(axes) => {

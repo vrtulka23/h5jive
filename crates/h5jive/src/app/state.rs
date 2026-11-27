@@ -19,20 +19,23 @@ pub(super) fn finish_keyed_result_job<K: Clone, T>(
     job: &mut Option<(K, Receiver<Result<T, String>>)>,
     cache: &mut Option<(K, Result<T, String>)>,
     stopped_message: &'static str,
-) {
+) -> Option<String> {
     match job
         .as_ref()
         .map(|(key, receiver)| (key.clone(), poll_job(receiver)))
     {
         Some((key, JobPoll::Ready(result))) => {
+            let notice = result.as_ref().err().cloned();
             *cache = Some((key, result));
             *job = None;
+            notice
         }
         Some((key, JobPoll::Disconnected)) => {
             *cache = Some((key, Err(stopped_message.into())));
             *job = None;
+            Some(stopped_message.into())
         }
-        Some((_, JobPoll::Pending)) | None => {}
+        Some((_, JobPoll::Pending)) | None => None,
     }
 }
 

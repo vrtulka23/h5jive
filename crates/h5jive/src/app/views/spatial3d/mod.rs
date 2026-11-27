@@ -35,6 +35,10 @@ impl App {
         if let Some((working, receiver)) = &self.volume_job {
             match receiver.try_recv() {
                 Ok(data) => {
+                    if let Err(error) = &data {
+                        self.notices
+                            .error(format!("Could not load 3D volume: {error}"));
+                    }
                     if working == &overview_key {
                         self.volume_overview_cache = Some((working.clone(), data.clone()));
                     } else if let Ok(volume) = &data {
@@ -57,7 +61,10 @@ impl App {
                     self.volume_job = None;
                 }
                 Err(mpsc::TryRecvError::Disconnected) => {
-                    let failure = (working.clone(), Err("3D worker stopped".into()));
+                    let error = "3D worker stopped unexpectedly";
+                    self.notices
+                        .error(format!("Could not load 3D volume: {error}"));
+                    let failure = (working.clone(), Err(error.into()));
                     if working == &overview_key {
                         self.volume_overview_cache = Some(failure.clone());
                     }
@@ -384,12 +391,6 @@ impl App {
                         "Updating"
                     };
                     render_status = Some((status, displayed.render_size, data.sampled));
-                } else {
-                    draw.add_text(
-                        [origin[0] + 8.0, origin[1] + 28.0],
-                        self.settings.palette.text,
-                        "Rendering voxel data...",
-                    );
                 }
             }
             None if self
@@ -409,11 +410,7 @@ impl App {
                         .unwrap(),
                 )
             }
-            None => draw.add_text(
-                [origin[0] + 8.0, origin[1] + 8.0],
-                self.settings.palette.text,
-                "Loading 3D preview...",
-            ),
+            None => {}
         }
         let axis_marks = self.volume_axis_marks(selection, &slice, shape, bounds, center, scale);
         for mark in &axis_marks {

@@ -60,15 +60,7 @@ pub(crate) fn draw_heatmap_legend(
                 label,
             );
         }
-    } else {
-        draw.add_text(
-            [origin[0], bar_top],
-            text_color,
-            if pending {
-                "Scanning range..."
-            } else {
-                "No finite values"
-            },
-        );
+    } else if !pending {
+        draw.add_text([origin[0], bar_top], text_color, "No finite values");
     }
 }

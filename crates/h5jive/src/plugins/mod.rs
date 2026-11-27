@@ -26,6 +26,7 @@ pub(super) struct PluginContext<'a> {
     pub write_allowed: [bool; 2],
     pub browser: &'a DatasetBrowser,
     pub picker_request: &'a mut Option<(FilePickerTarget, String)>,
+    pub notices: &'a mut NoticeCenter,
 }
 
 struct PluginDefinition {
@@ -161,17 +162,33 @@ impl PluginLab {
         self.spatiotemporal_subset.invalidate();
     }
 
-    pub fn is_busy(&mut self) -> bool {
-        self.comparison.poll();
-        self.value_comparison.poll();
-        let manipulation_busy = self.dataset_manipulation.is_busy();
-        let subset_busy = self.spatiotemporal_subset.is_busy();
+    pub fn poll(&mut self, notices: &mut NoticeCenter) -> bool {
+        self.comparison.poll(notices);
+        self.value_comparison.poll(notices);
+        let manipulation_busy = self.dataset_manipulation.poll(notices);
+        let subset_busy = self.spatiotemporal_subset.poll(notices);
         self.comparison.is_busy()
             || self.value_comparison.is_busy()
             || manipulation_busy
             || subset_busy
             || self.comparison.take_redraw()
             || self.value_comparison.take_redraw()
+    }
+
+    pub fn is_busy(&self) -> bool {
+        self.comparison.is_busy()
+            || self.value_comparison.is_busy()
+            || self.dataset_manipulation.is_busy()
+            || self.spatiotemporal_subset.is_busy()
+    }
+
+    pub fn active_task_labels(&self) -> Vec<&'static str> {
+        let mut labels = Vec::new();
+        labels.extend(self.comparison.active_task_labels());
+        labels.extend(self.value_comparison.active_task_labels());
+        labels.extend(self.dataset_manipulation.active_task_labels());
+        labels.extend(self.spatiotemporal_subset.active_task_labels());
+        labels
     }
 
     pub fn draw(
@@ -185,6 +202,7 @@ impl PluginLab {
         write_allowed: [bool; 2],
         browser: &DatasetBrowser,
         picker_request: &mut Option<(FilePickerTarget, String)>,
+        notices: &mut NoticeCenter,
     ) -> Option<Selection> {
         let available: Vec<_> = PLUGINS
             .iter()
@@ -268,6 +286,7 @@ impl PluginLab {
                         write_allowed,
                         browser,
                         picker_request,
+                        notices,
                     },
                 );
             });
