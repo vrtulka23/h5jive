@@ -2,24 +2,24 @@ use super::super::*;
 
 impl App {
     pub(crate) fn draw_data_view(&mut self, ui: &Ui, plot_ui: &PlotUi<'_>, plot_ctx: &PlotContext) {
-        let Some(selection) = self.selection.clone() else {
-            if self.cell_edit_job.is_some() || self.bulk_replace_job.is_some() {
+        let Some(selection) = self.session.selection.clone() else {
+            if self.dataset.cell_edit_job.is_some() || self.dataset.bulk_replace_job.is_some() {
                 return;
             }
             ui.text("Select a dataset from the tree.");
-            if !self.pending_cell_edits.is_empty() {
+            if !self.dataset.pending_cell_edits.is_empty() {
                 ui.text(format!(
                     "{} staged changes remain in memory.",
-                    self.pending_cell_edits.len()
+                    self.dataset.pending_cell_edits.len()
                 ));
                 if ui.button("Discard all staged changes") {
-                    self.pending_cell_edits.clear();
-                    self.cell_editor = None;
+                    self.dataset.pending_cell_edits.clear();
+                    self.dataset.cell_editor = None;
                 }
             }
             return;
         };
-        let file = &self.files[selection.file];
+        let file = &self.session.files[selection.file];
         let Some(entry) = find_entry(&file.tree, &selection.path) else {
             return;
         };
@@ -41,29 +41,31 @@ impl App {
                 return;
             }
         };
-        if !(1..=4).contains(&shape.len()) || self.view == ViewMode::Slice2d && shape.len() < 2 {
-            ui.text(if self.view == ViewMode::Slice2d {
+        if !(1..=4).contains(&shape.len())
+            || self.workspace.view == ViewMode::Slice2d && shape.len() < 2
+        {
+            ui.text(if self.workspace.view == ViewMode::Slice2d {
                 "Select a 2D, 3D, or 4D numeric dataset for the heatmap."
             } else {
                 "The data table supports 1D to 4D datasets."
             });
             return;
         }
-        let footer_height = if self.view == ViewMode::Slice2d {
-            self.slice_footer_height
+        let footer_height = if self.workspace.view == ViewMode::Slice2d {
+            self.heatmap.slice_footer_height
         } else {
-            self.table_footer_height
+            self.dataset.table_footer_height
         };
         let height =
             (ui.content_region_avail()[1] - footer_height).max(self.settings.panel_min_height);
         let origin = ui.cursor_screen_pos();
-        self.view_rect = [origin[0], origin[1], ui.content_region_avail()[0], height];
-        let panel_id = if self.view == ViewMode::Slice2d {
+        self.session.view_rect = [origin[0], origin[1], ui.content_region_avail()[0], height];
+        let panel_id = if self.workspace.view == ViewMode::Slice2d {
             "heatmap_panel"
         } else {
             "data_table_panel"
         };
-        let panel_flags = if self.view == ViewMode::Slice2d {
+        let panel_flags = if self.workspace.view == ViewMode::Slice2d {
             WindowFlags::NO_SCROLLBAR | WindowFlags::NO_SCROLL_WITH_MOUSE
         } else {
             WindowFlags::empty()
@@ -72,7 +74,7 @@ impl App {
             .size([0.0, height])
             .flags(panel_flags)
             .build(ui, || {
-                if self.view == ViewMode::Slice2d {
+                if self.workspace.view == ViewMode::Slice2d {
                     self.draw_heatmap(ui, plot_ui, plot_ctx, &selection, &shape);
                 } else {
                     self.draw_value_table(ui, &selection, &shape);
@@ -80,21 +82,21 @@ impl App {
             });
         let footer_start = ui.cursor_pos_y();
         ui.separator();
-        if self.view == ViewMode::Data {
+        if self.workspace.view == ViewMode::Data {
             self.draw_cell_edit_bar(ui, &selection);
-            if !self.pending_cell_edits.is_empty() {
+            if !self.dataset.pending_cell_edits.is_empty() {
                 ui.separator();
             }
         }
         self.draw_region_controls(ui, &selection, &shape);
-        if self.view == ViewMode::Data {
+        if self.workspace.view == ViewMode::Data {
             self.draw_find_replace_dialog(ui, &selection, &shape);
         }
         let measured = (ui.cursor_pos_y() - footer_start).max(1.0);
-        if self.view == ViewMode::Slice2d {
-            self.slice_footer_height = measured;
+        if self.workspace.view == ViewMode::Slice2d {
+            self.heatmap.slice_footer_height = measured;
         } else {
-            self.table_footer_height = measured;
+            self.dataset.table_footer_height = measured;
         }
     }
 
@@ -104,26 +106,30 @@ impl App {
             self.draw_dimension_controls(ui, shape);
             ui.table_next_column();
             {
-                let pending = if self.view == ViewMode::Slice2d {
-                    DraftPair::new(&self.draft_slice, &mut self.applied_slice).pending()
+                let pending = if self.workspace.view == ViewMode::Slice2d {
+                    DraftPair::new(&self.heatmap.draft_slice, &mut self.heatmap.applied_slice)
+                        .pending()
                 } else {
-                    DraftPair::new(&self.draft_table, &mut self.applied_table).pending()
+                    DraftPair::new(&self.dataset.draft_table, &mut self.dataset.applied_table)
+                        .pending()
                 };
                 if draw_update_button(ui, &self.settings, pending) {
-                    if self.view == ViewMode::Slice2d {
-                        DraftPair::new(&self.draft_slice, &mut self.applied_slice).apply();
+                    if self.workspace.view == ViewMode::Slice2d {
+                        DraftPair::new(&self.heatmap.draft_slice, &mut self.heatmap.applied_slice)
+                            .apply();
                     } else {
-                        DraftPair::new(&self.draft_table, &mut self.applied_table).apply();
-                        self.cell_editor = None;
+                        DraftPair::new(&self.dataset.draft_table, &mut self.dataset.applied_table)
+                            .apply();
+                        self.dataset.cell_editor = None;
                     }
-                    self.region_cache.clear();
-                    self.heatmap_cache = None;
-                    if self.view == ViewMode::Slice2d {
-                        self.heatmap_tiles.clear();
+                    self.dataset.region_cache.clear();
+                    self.heatmap.cache = None;
+                    if self.workspace.view == ViewMode::Slice2d {
+                        self.heatmap.tiles.clear();
                     }
                 }
             }
-            if self.view == ViewMode::Data {
+            if self.workspace.view == ViewMode::Data {
                 ui.spacing();
                 self.draw_find_replace_action(ui, selection, shape);
             }
@@ -131,24 +137,24 @@ impl App {
     }
     pub(crate) fn draw_dimension_controls(&mut self, ui: &Ui, shape: &[usize]) {
         let tutorial_tips = self.settings.tutorial_tips;
-        let pinned = if self.view == ViewMode::Slice2d {
-            self.draft_slice.as_ref()
+        let pinned = if self.workspace.view == ViewMode::Slice2d {
+            self.heatmap.draft_slice.as_ref()
         } else {
-            self.draft_table.as_ref()
+            self.dataset.draft_table.as_ref()
         }
         .map(|draft| draft.pinned.clone());
         let coordinate_labels = pinned
             .as_ref()
             .map(|pinned| self.pinned_coordinate_labels(pinned));
-        let draft = if self.view == ViewMode::Slice2d {
-            &mut self.draft_slice
+        let draft = if self.workspace.view == ViewMode::Slice2d {
+            &mut self.heatmap.draft_slice
         } else {
-            &mut self.draft_table
+            &mut self.dataset.draft_table
         };
         let Some(slice) = draft.as_mut() else {
             return;
         };
-        let labels = axis_option_labels(&self.axis_names, shape);
+        let labels = axis_option_labels(&self.dataset.axis_names, shape);
         let available_width = ui.content_region_avail()[0];
         let combo_width = if slice.row_axis.is_some() {
             ((available_width
@@ -203,7 +209,7 @@ impl App {
             }
             let mut index = slice.pinned[axis] as i32;
             ui.set_next_item_width((ui.content_region_avail()[0] * 0.65).max(60.0));
-            let name = axis_name(&self.axis_names, axis);
+            let name = axis_name(&self.dataset.axis_names, axis);
             ui.slider(
                 format!(
                     "{name} {}##pinned_axis_{axis}",
@@ -225,8 +231,13 @@ impl App {
         }
     }
     pub(crate) fn cached_region(&mut self, key: &RegionKey) -> Arc<Result<Region, String>> {
-        if !self.region_cache.iter().any(|(cached, _)| cached == key) {
-            let result = self.files[key.file]
+        if !self
+            .dataset
+            .region_cache
+            .iter()
+            .any(|(cached, _)| cached == key)
+        {
+            let result = self.session.files[key.file]
                 .region(&key.path, &key.start, &key.count)
                 .map_err(|err| err.to_string());
             if let Err(error) = &result {
@@ -235,13 +246,16 @@ impl App {
                     format!("Could not read table data: {error}"),
                 );
             }
-            if self.region_cache.len() >= self.settings.region_cache_entries {
-                let _ = self.region_cache.remove(0);
+            if self.dataset.region_cache.len() >= self.settings.region_cache_entries {
+                let _ = self.dataset.region_cache.remove(0);
             }
-            self.region_cache.push((key.clone(), Arc::new(result)));
+            self.dataset
+                .region_cache
+                .push((key.clone(), Arc::new(result)));
         }
         Arc::clone(
             &self
+                .dataset
                 .region_cache
                 .iter()
                 .find(|(cached, _)| cached == key)
@@ -250,7 +264,7 @@ impl App {
         )
     }
     pub(crate) fn draw_value_table(&mut self, ui: &Ui, selection: &Selection, shape: &[usize]) {
-        let Some(slice) = self.applied_table.clone() else {
+        let Some(slice) = self.dataset.applied_table.clone() else {
             return;
         };
         if shape.iter().any(|&size| size == 0) {
@@ -265,11 +279,11 @@ impl App {
         let columns = slice.columns(shape);
         let page_columns_limit = self.settings.table_columns_per_page;
         let pages = columns.div_ceil(page_columns_limit);
-        self.table_column_page = self.table_column_page.min(pages - 1);
+        self.dataset.table_column_page = self.dataset.table_column_page.min(pages - 1);
         if pages > 1 {
             if ui.small_button("Previous columns") {
-                self.table_column_page = self.table_column_page.saturating_sub(1);
-                self.region_cache.clear();
+                self.dataset.table_column_page = self.dataset.table_column_page.saturating_sub(1);
+                self.dataset.region_cache.clear();
             }
             item_tip(
                 ui,
@@ -280,13 +294,14 @@ impl App {
             ui.same_line();
             ui.text(format!(
                 "Columns page {} / {}",
-                self.table_column_page + 1,
+                self.dataset.table_column_page + 1,
                 pages
             ));
             ui.same_line();
             if ui.small_button("Next columns") {
-                self.table_column_page = (self.table_column_page + 1).min(pages - 1);
-                self.region_cache.clear();
+                self.dataset.table_column_page =
+                    (self.dataset.table_column_page + 1).min(pages - 1);
+                self.dataset.region_cache.clear();
             }
             item_tip(
                 ui,
@@ -295,7 +310,7 @@ impl App {
                 "Show the next group of table columns.",
             );
         }
-        let column_start = self.table_column_page * page_columns_limit;
+        let column_start = self.dataset.table_column_page * page_columns_limit;
         let page_columns = (columns - column_start).min(page_columns_limit);
         let axes = self.coordinate_axes_for(selection);
         let row_axis = slice.row_axis.unwrap_or(slice.column_axis);
@@ -360,7 +375,7 @@ impl App {
             outer_size,
             0.0,
         ) {
-            if let Some(row) = self.table_scroll_to_row.take() {
+            if let Some(row) = self.dataset.table_scroll_to_row.take() {
                 ui.set_scroll_y(row as f32 * row_height);
             }
             ui.table_setup_column_fixed_width("Row", TableColumnFlags::NONE, row_width);

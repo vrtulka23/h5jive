@@ -20,6 +20,7 @@ pub(super) struct PendingExport {
 impl App {
     pub(super) fn open_export_dialog(&mut self) {
         let stem = self
+            .session
             .selection
             .as_ref()
             .and_then(|selection| selection.path.rsplit('/').find(|part| !part.is_empty()))
@@ -34,15 +35,15 @@ impl App {
                 }
             })
             .collect::<String>();
-        let filename = format!("h5jive-{stem}-{}.png", self.view.key());
-        self.export_dialog = Some(ExportDialog {
+        let filename = format!("h5jive-{stem}-{}.png", self.workspace.view.key());
+        self.session.export_dialog = Some(ExportDialog {
             path: filename,
             message: None,
         });
     }
 
     pub(super) fn draw_export_dialog(&mut self, ui: &Ui) {
-        let Some(dialog) = self.export_dialog.as_mut() else {
+        let Some(dialog) = self.session.export_dialog.as_mut() else {
             return;
         };
         let mut opened = true;
@@ -74,17 +75,17 @@ impl App {
                 }
             });
         if !opened || close {
-            self.export_dialog = None;
+            self.session.export_dialog = None;
             return;
         }
         if save {
             let path = dialog.path.clone();
             match self.prepare_export(&path, ui.io().display_size()) {
                 Ok(request) => {
-                    self.pending_export = Some(request);
-                    self.export_dialog = None;
+                    self.session.pending_export = Some(request);
+                    self.session.export_dialog = None;
                 }
-                Err(error) => self.export_dialog.as_mut().unwrap().message = Some(error),
+                Err(error) => self.session.export_dialog.as_mut().unwrap().message = Some(error),
             }
         }
         if let Some(path) = browse_path {
@@ -93,10 +94,10 @@ impl App {
     }
 
     fn prepare_export(&self, path: &str, display_size: [f32; 2]) -> Result<PendingExport, String> {
-        let selection = self.selection.as_ref();
-        let geo_options = match self.view {
-            ViewMode::WorldMap => Some(self.map_controls.applied),
-            ViewMode::Globe => Some(self.globe_controls.applied),
+        let selection = self.session.selection.as_ref();
+        let geo_options = match self.workspace.view {
+            ViewMode::WorldMap => Some(self.geo.map_controls.applied),
+            ViewMode::Globe => Some(self.geo.globe_controls.applied),
             _ => None,
         };
         if selection.is_none() && !geo_options.is_some_and(|options| options.show_pics) {
@@ -116,10 +117,11 @@ impl App {
         if path.exists() {
             return Err("That file already exists. Choose a new filename.".into());
         }
-        let mut description = vec![format!("{} | H5Jive", self.view.title())];
+        let mut description = vec![format!("{} | H5Jive", self.workspace.view.title())];
         if let Some(selection) = selection {
-            let file = &self.files[selection.file];
+            let file = &self.session.files[selection.file];
             let source = self
+                .session
                 .file_paths
                 .get(selection.file)
                 .map_or_else(|| file.name.clone(), |path| path.display().to_string());
@@ -134,21 +136,21 @@ impl App {
         if geo_options.is_some_and(|options| options.show_pics) {
             description.push("PICS site source: runtime DIPL catalog".into());
         }
-        match self.view {
+        match self.workspace.view {
             ViewMode::Slice2d | ViewMode::Data => {
-                let slice = if self.view == ViewMode::Slice2d {
-                    self.applied_slice.as_ref()
+                let slice = if self.workspace.view == ViewMode::Slice2d {
+                    self.heatmap.applied_slice.as_ref()
                 } else {
-                    self.applied_table.as_ref()
+                    self.dataset.applied_table.as_ref()
                 };
                 if let Some(slice) = slice {
                     let rows = slice
                         .row_axis
-                        .map(|axis| axis_name(&self.axis_names, axis))
+                        .map(|axis| axis_name(&self.dataset.axis_names, axis))
                         .unwrap_or_else(|| "None".into());
                     description.push(format!(
                         "Rows: {rows}; columns: {}",
-                        axis_name(&self.axis_names, slice.column_axis)
+                        axis_name(&self.dataset.axis_names, slice.column_axis)
                     ));
                     let pins = slice
                         .pinned
@@ -158,7 +160,7 @@ impl App {
                             Some(*axis) != slice.row_axis && *axis != slice.column_axis
                         })
                         .map(|(axis, index)| {
-                            format!("{}={index}", axis_name(&self.axis_names, axis))
+                            format!("{}={index}", axis_name(&self.dataset.axis_names, axis))
                         })
                         .collect::<Vec<_>>();
                     if !pins.is_empty() {
@@ -167,15 +169,15 @@ impl App {
                 }
             }
             ViewMode::Profiles1d => {
-                if let Some(slice) = &self.applied_profile {
+                if let Some(slice) = &self.profile.applied_slice {
                     description.push(format!(
                         "Profile axis: {}",
-                        axis_name(&self.axis_names, slice.x_axis)
+                        axis_name(&self.dataset.axis_names, slice.x_axis)
                     ));
                     if let Some(axis) = slice.y_axis {
                         description.push(format!(
                             "Compare across: {}; indexes: {}",
-                            axis_name(&self.axis_names, axis),
+                            axis_name(&self.dataset.axis_names, axis),
                             slice.y_indexes
                         ));
                     }
@@ -185,7 +187,7 @@ impl App {
                         .enumerate()
                         .filter(|(axis, _)| *axis != slice.x_axis && Some(*axis) != slice.y_axis)
                         .map(|(axis, index)| {
-                            format!("{}={index}", axis_name(&self.axis_names, axis))
+                            format!("{}={index}", axis_name(&self.dataset.axis_names, axis))
                         })
                         .collect::<Vec<_>>();
                     if !pins.is_empty() {
@@ -205,18 +207,18 @@ impl App {
                 ));
             }
             ViewMode::Spatial3d => {
-                if let Some(slice) = &self.applied_volume {
+                if let Some(slice) = &self.volume.applied_slice {
                     let axes = slice
                         .axes
                         .iter()
                         .flatten()
-                        .map(|&axis| axis_name(&self.axis_names, axis))
+                        .map(|&axis| axis_name(&self.dataset.axis_names, axis))
                         .collect::<Vec<_>>();
                     description.push(format!("Axes: {}", axes.join(", ")));
                     if let Some(hidden) = slice.hidden {
                         description.push(format!(
                             "Pinned: {}={}",
-                            axis_name(&self.axis_names, hidden),
+                            axis_name(&self.dataset.axis_names, hidden),
                             slice.pinned
                         ));
                     }
@@ -227,21 +229,21 @@ impl App {
             path,
             format,
             description,
-            view_rect: self.view_rect,
+            view_rect: self.session.view_rect,
             display_size,
             frames_remaining: 1,
         })
     }
 
     pub(super) fn advance_export(&mut self) {
-        let Some(request) = self.pending_export.as_mut() else {
+        let Some(request) = self.session.pending_export.as_mut() else {
             return;
         };
         if request.frames_remaining > 0 {
             request.frames_remaining -= 1;
             return;
         }
-        let request = self.pending_export.take().unwrap();
+        let request = self.session.pending_export.take().unwrap();
         match save_view_image(&request) {
             Ok(()) => self.show_notice(
                 NoticeKind::Success,

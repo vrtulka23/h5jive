@@ -1,6 +1,6 @@
 use super::*;
 use dear_app::imgui::MouseButton;
-use h5jive_data::{copy_hdf5_object, Hdf5ObjectKind};
+use h5jive_data::{copy_missing_objects, copy_plan, replace_hdf5_object, CopyItem, Hdf5ObjectKind};
 use std::collections::{BTreeMap, BTreeSet};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -25,12 +25,6 @@ impl SyncDirection {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-struct CopyItem {
-    path: String,
-    kind: PathKind,
-}
-
 enum SyncRequest {
     Missing(SyncDirection, Vec<CopyItem>),
     Replace(SyncDirection, CopyItem),
@@ -44,222 +38,12 @@ impl SyncRequest {
     }
 }
 
-fn collect_copy_items(entry: &Entry, items: &mut BTreeMap<String, PathKind>) {
-    if entry.path != "/" && !matches!(entry.kind, Kind::Other) {
-        items.insert(entry.path.clone(), PathKind::from_entry(entry));
-    }
-    for child in &entry.children {
-        collect_copy_items(child, items);
-    }
-}
-
-fn copy_plan(source: &File, destination: &File) -> Vec<CopyItem> {
-    let mut source_items = BTreeMap::new();
-    let mut destination_items = BTreeMap::new();
-    collect_copy_items(&source.tree, &mut source_items);
-    collect_copy_items(&destination.tree, &mut destination_items);
-    let mut plan = Vec::new();
-    let mut copied_groups = BTreeSet::new();
-    for (path, kind) in source_items {
-        if destination_items.contains_key(&path) {
-            continue;
-        }
-        // A copied group includes every child and all its attributes.
-        let mut parent = path.as_str();
-        let mut inside_copied_group = false;
-        while let Some((ancestor, _)) = parent.rsplit_once('/') {
-            if copied_groups.contains(ancestor) {
-                inside_copied_group = true;
-                break;
-            }
-            parent = ancestor;
-        }
-        if inside_copied_group {
-            continue;
-        }
-        if matches!(kind, PathKind::Group) {
-            copied_groups.insert(path.clone());
-        }
-        plan.push(CopyItem { path, kind });
-    }
-    plan
-}
-
 struct SyncOutcome {
     destination: usize,
     path: PathBuf,
     copied: usize,
     error: Option<String>,
     action: &'static str,
-}
-
-fn open_copy_files(
-    source_path: &std::path::Path,
-    destination_path: &std::path::Path,
-) -> Result<
-    (
-        hdf5_metno::File,
-        WritableFile,
-        hdf5_metno::plist::ObjectCopy,
-    ),
-    String,
-> {
-    if same_file(source_path, destination_path) {
-        return Err("Source and destination must be different files".into());
-    }
-    let source = hdf5_metno::File::open(source_path).map_err(|e| e.to_string())?;
-    let copy_properties =
-        hdf5_metno::plist::ObjectCopy::try_new().map_err(|e| format!("Copy properties: {e}"))?;
-    // Keep object references valid when H5Ocopy crosses file boundaries.
-    let property_result = hdf5_metno::sync::sync(|| unsafe {
-        hdf5_metno_sys::h5p::H5Pset_copy_object(
-            copy_properties.id(),
-            hdf5_metno_sys::h5o::H5O_COPY_EXPAND_REFERENCE_FLAG,
-        )
-    });
-    if property_result < 0 {
-        return Err("Could not enable HDF5 reference copying".into());
-    }
-    let destination = WritableFile::open(destination_path).map_err(|error| error.to_string())?;
-    Ok((source, destination, copy_properties))
-}
-
-fn copy_missing(
-    source_path: &std::path::Path,
-    destination_path: &std::path::Path,
-    plan: &[CopyItem],
-) -> (usize, Option<String>) {
-    let mut copied = 0;
-    let result = (|| -> Result<(), String> {
-        let (source, destination, copy_properties) =
-            open_copy_files(source_path, destination_path)?;
-        for item in plan {
-            if destination.link_exists(&item.path) {
-                continue;
-            }
-            let (parent_path, name) = item.path.rsplit_once('/').unwrap();
-            let parent = if parent_path.is_empty() {
-                destination.group("/")
-            } else if destination.link_exists(parent_path) {
-                destination.group(parent_path)
-            } else {
-                destination.create_group(parent_path)
-            }
-            .map_err(|e| format!("{}: destination parent: {e}", item.path))?;
-            let kind = match item.kind {
-                PathKind::Group => Hdf5ObjectKind::Group,
-                PathKind::Dataset { .. } => Hdf5ObjectKind::Dataset,
-                PathKind::Other => continue,
-            };
-            copy_hdf5_object(
-                &source,
-                &item.path,
-                &parent,
-                name,
-                kind,
-                Some(&copy_properties),
-            )
-            .map_err(|e| format!("{}: {e}", item.path))?;
-            copied += 1;
-        }
-        destination.flush().map_err(|e| e.to_string())?;
-        Ok(())
-    })();
-    (copied, result.err())
-}
-
-fn replacement_name(parent: &hdf5_metno::Group, prefix: &str) -> String {
-    let nonce = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_or(0, |time| time.as_nanos());
-    for index in 0.. {
-        let name = format!(".__h5jive_{prefix}_{}_{nonce}_{index}", std::process::id());
-        if !parent.link_exists(&name) {
-            return name;
-        }
-    }
-    unreachable!()
-}
-
-fn replace_existing(
-    source_path: &std::path::Path,
-    destination_path: &std::path::Path,
-    item: &CopyItem,
-) -> (usize, Option<String>) {
-    let mut replaced = 0;
-    let result = (|| -> Result<(), String> {
-        if item.path == "/" {
-            return Err("The file root cannot be replaced".into());
-        }
-        let (source, destination, copy_properties) =
-            open_copy_files(source_path, destination_path)?;
-        let (parent_path, name) = item.path.rsplit_once('/').unwrap();
-        let parent = destination
-            .group(if parent_path.is_empty() {
-                "/"
-            } else {
-                parent_path
-            })
-            .map_err(|e| format!("{}: destination parent: {e}", item.path))?;
-        if !parent.link_exists(name) {
-            return Err(format!("{} no longer exists in the destination", item.path));
-        }
-        let staged = replacement_name(&parent, "stage");
-        let backup = replacement_name(&parent, "previous");
-        let copied = match item.kind {
-            PathKind::Group => copy_hdf5_object(
-                &source,
-                &item.path,
-                &parent,
-                &staged,
-                Hdf5ObjectKind::Group,
-                Some(&copy_properties),
-            ),
-            PathKind::Dataset { .. } => copy_hdf5_object(
-                &source,
-                &item.path,
-                &parent,
-                &staged,
-                Hdf5ObjectKind::Dataset,
-                Some(&copy_properties),
-            ),
-            PathKind::Other => return Err("This HDF5 object type cannot be replaced".into()),
-        };
-        if let Err(error) = copied {
-            if parent.link_exists(&staged) {
-                let _ = parent.unlink(&staged);
-            }
-            return Err(format!("{}: staging copy failed: {error}", item.path));
-        }
-        if let Err(error) = parent.relink(name, &backup) {
-            let _ = parent.unlink(&staged);
-            return Err(format!(
-                "{}: could not save the destination object: {error}",
-                item.path
-            ));
-        }
-        if let Err(error) = parent.relink(&staged, name) {
-            let rollback = parent.relink(&backup, name);
-            let _ = parent.unlink(&staged);
-            return Err(match rollback {
-                Ok(()) => format!("{}: replacement failed; original restored: {error}", item.path),
-                Err(rollback_error) => format!(
-                    "{}: replacement failed: {error}; original remains at {backup}: {rollback_error}",
-                    item.path
-                ),
-            });
-        }
-        replaced = 1;
-        parent.unlink(&backup).map_err(|e| {
-            format!(
-                "{}: replaced, but the old object remains at {backup}: {e}",
-                item.path
-            )
-        })?;
-        destination.flush().map_err(|e| e.to_string())?;
-        Ok(())
-    })();
-    (replaced, result.err())
 }
 
 pub(super) fn draw_icon(draw: &DrawListMut<'_>, min: [f32; 2], max: [f32; 2], color: [f32; 4]) {
@@ -345,6 +129,14 @@ impl PathKind {
             Self::Group => "Group".into(),
             Self::Dataset { shape, .. } => format!("Dataset {shape:?}"),
             Self::Other => "Other".into(),
+        }
+    }
+
+    fn object_kind(&self) -> Option<Hdf5ObjectKind> {
+        match self {
+            Self::Group => Some(Hdf5ObjectKind::Group),
+            Self::Dataset { .. } => Some(Hdf5ObjectKind::Dataset),
+            Self::Other => None,
         }
     }
 }
@@ -835,12 +627,12 @@ impl State {
         self.sync_job.start((), move |_| {
             let (copied, error, action) = match request {
                 SyncRequest::Missing(_, plan) => {
-                    let (copied, error) = copy_missing(&source_path, &destination_path, &plan);
-                    (copied, error, "Copied")
+                    let outcome = copy_missing_objects(&source_path, &destination_path, &plan);
+                    (outcome.copied, outcome.error, "Copied")
                 }
                 SyncRequest::Replace(_, item) => {
-                    let (copied, error) = replace_existing(&source_path, &destination_path, &item);
-                    (copied, error, "Replaced")
+                    let outcome = replace_hdf5_object(&source_path, &destination_path, &item);
+                    (outcome.copied, outcome.error, "Replaced")
                 }
             };
             Ok(SyncOutcome {
@@ -1084,14 +876,16 @@ pub(super) fn draw(lab: &mut PluginLab, ui: &Ui, context: PluginContext<'_>) -> 
                                 _ => None,
                             };
                             if let Some((direction, entry)) = transfer {
-                                lab.comparison.pending_sync = Some((
-                                    direction,
-                                    vec![CopyItem {
-                                        path: row.path.clone(),
-                                        kind: entry.kind.clone(),
-                                    }],
-                                ));
-                                lab.comparison.show_sync_prompt = true;
+                                if let Some(kind) = entry.kind.object_kind() {
+                                    lab.comparison.pending_sync = Some((
+                                        direction,
+                                        vec![CopyItem {
+                                            path: row.path.clone(),
+                                            kind,
+                                        }],
+                                    ));
+                                    lab.comparison.show_sync_prompt = true;
+                                }
                             }
                         }
                         draw_status_icon(
@@ -1243,13 +1037,15 @@ pub(super) fn draw(lab: &mut PluginLab, ui: &Ui, context: PluginContext<'_>) -> 
                     summary.filter(|entry| !matches!(entry.kind, PathKind::Other))
                 {
                     if ui.button(label) {
-                        start_sync = Some(SyncRequest::Replace(
-                            direction,
-                            CopyItem {
-                                path: row.path.clone(),
-                                kind: summary.kind.clone(),
-                            },
-                        ));
+                        if let Some(kind) = summary.kind.object_kind() {
+                            start_sync = Some(SyncRequest::Replace(
+                                direction,
+                                CopyItem {
+                                    path: row.path.clone(),
+                                    kind,
+                                },
+                            ));
+                        }
                         lab.comparison.pending_resolution = None;
                         ui.close_current_popup();
                     }
@@ -1347,8 +1143,14 @@ mod tests {
             .any(|item| item.path == "/measurements/only_b"));
         // The app releases its read handles before opening a destination for writing.
         drop((a, b));
-        assert_eq!(copy_missing(&paths[0], &paths[1], &a_to_b).1, None);
-        assert_eq!(copy_missing(&paths[1], &paths[0], &b_to_a).1, None);
+        assert_eq!(
+            copy_missing_objects(&paths[0], &paths[1], &a_to_b).error,
+            None
+        );
+        assert_eq!(
+            copy_missing_objects(&paths[1], &paths[0], &b_to_a).error,
+            None
+        );
         let left = hdf5_metno::File::open(&paths[0]).unwrap();
         let right = hdf5_metno::File::open(&paths[1]).unwrap();
         assert!(left.dataset("/measurements/only_b").is_ok());
@@ -1368,7 +1170,10 @@ mod tests {
                 .shape()
         );
         drop((left, right));
-        assert_eq!(copy_missing(&paths[0], &paths[1], &a_to_b).0, 0);
+        assert_eq!(
+            copy_missing_objects(&paths[0], &paths[1], &a_to_b).copied,
+            0
+        );
         for path in paths {
             std::fs::remove_file(path).unwrap();
         }
@@ -1402,9 +1207,12 @@ mod tests {
         drop(hdf5_metno::File::create(&target_path).unwrap());
         let plan = [CopyItem {
             path: "/refs".into(),
-            kind: PathKind::Dataset { shape: vec![1] },
+            kind: Hdf5ObjectKind::Dataset,
         }];
-        assert_eq!(copy_missing(&source_path, &target_path, &plan).1, None);
+        assert_eq!(
+            copy_missing_objects(&source_path, &target_path, &plan).error,
+            None
+        );
         let target = hdf5_metno::File::open(&target_path).unwrap();
         let references = target
             .dataset("refs")
@@ -1446,11 +1254,9 @@ mod tests {
             .shape;
         let item = CopyItem {
             path: shape_path.into(),
-            kind: PathKind::Dataset {
-                shape: shape.clone(),
-            },
+            kind: Hdf5ObjectKind::Dataset,
         };
-        assert_eq!(replace_existing(&paths[0], &paths[1], &item).1, None);
+        assert_eq!(replace_hdf5_object(&paths[0], &paths[1], &item).error, None);
         let b = hdf5_metno::File::open(&paths[1]).unwrap();
         assert_eq!(b.dataset(shape_path).unwrap().shape(), shape);
         assert!(b
@@ -1464,9 +1270,12 @@ mod tests {
 
         let group = CopyItem {
             path: "/measurements".into(),
-            kind: PathKind::Group,
+            kind: Hdf5ObjectKind::Group,
         };
-        assert_eq!(replace_existing(&paths[0], &paths[1], &group).1, None);
+        assert_eq!(
+            replace_hdf5_object(&paths[0], &paths[1], &group).error,
+            None
+        );
         let b = hdf5_metno::File::open(&paths[1]).unwrap();
         assert!(b.dataset("/measurements/only_a").is_ok());
         assert!(b.dataset("/measurements/only_b").is_err());
@@ -1474,10 +1283,10 @@ mod tests {
 
         let changed_kind = CopyItem {
             path: "/structure_variant".into(),
-            kind: PathKind::Dataset { shape: vec![2] },
+            kind: Hdf5ObjectKind::Dataset,
         };
         assert_eq!(
-            replace_existing(&paths[1], &paths[0], &changed_kind).1,
+            replace_hdf5_object(&paths[1], &paths[0], &changed_kind).error,
             None
         );
         let a = hdf5_metno::File::open(&paths[0]).unwrap();

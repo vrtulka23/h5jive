@@ -1,21 +1,9 @@
 use super::*;
-use h5jive_data::{copy_hdf5_object, dataset_path_parts, Hdf5ObjectKind, StagedOutput};
-use hdf5_metno::{
-    types::{FloatSize, IntSize, TypeDescriptor},
-    Dataset, Hyperslab, SliceOrIndex,
+use h5jive_data::{
+    dataset_path_parts, execute_dataset_operation, AxisRange, DatasetOperation as Operation,
+    DatasetOperationRequest, DatasetOutputTarget,
 };
-use ndarray::{ArrayD, IxDyn};
 use std::path::PathBuf;
-
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-enum Operation {
-    #[default]
-    Slice,
-    Sum,
-    Difference,
-    Product,
-    Ratio,
-}
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 enum Destination {
@@ -23,37 +11,6 @@ enum Destination {
     A,
     B,
     NewFile,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-struct AxisRange {
-    start: usize,
-    stop: usize,
-    step: usize,
-}
-
-impl AxisRange {
-    fn count(self, length: usize) -> Result<usize, String> {
-        if self.step == 0 || self.start >= self.stop || self.stop > length {
-            return Err(format!(
-                "Expected 0 ≤ start < stop ≤ {length}, with step ≥ 1"
-            ));
-        }
-        Ok((self.stop - self.start - 1) / self.step + 1)
-    }
-}
-
-#[derive(Clone)]
-struct JobSpec {
-    left_file: PathBuf,
-    left_path: String,
-    right: Option<(PathBuf, String)>,
-    operation: Operation,
-    ranges: Vec<AxisRange>,
-    destination: Destination,
-    destination_file: PathBuf,
-    output_path: String,
-    chunk_elements: usize,
 }
 
 pub(super) struct State {
@@ -135,444 +92,6 @@ impl State {
     pub fn take_reload(&mut self) -> bool {
         std::mem::take(&mut self.reload)
     }
-}
-
-fn numeric_descriptor(dataset: &Dataset) -> Result<TypeDescriptor, String> {
-    let descriptor = dataset
-        .dtype()
-        .and_then(|dtype| dtype.to_descriptor())
-        .map_err(|e| e.to_string())?;
-    if matches!(
-        descriptor,
-        TypeDescriptor::Integer(_) | TypeDescriptor::Unsigned(_) | TypeDescriptor::Float(_)
-    ) {
-        Ok(descriptor)
-    } else {
-        Err(format!("Unsupported numeric datatype: {descriptor}"))
-    }
-}
-
-#[derive(Clone, Copy)]
-enum OutputType {
-    Source,
-    Integer,
-    F32,
-    F64,
-}
-
-fn output_type(
-    left: &TypeDescriptor,
-    right: Option<&TypeDescriptor>,
-    operation: Operation,
-    has_fill: bool,
-) -> OutputType {
-    if operation == Operation::Slice {
-        return OutputType::Source;
-    }
-    let right = right.expect("Arithmetic requires a second dataset");
-    if *left == TypeDescriptor::Float(FloatSize::U4)
-        && *right == TypeDescriptor::Float(FloatSize::U4)
-    {
-        return OutputType::F32;
-    }
-    if matches!(
-        operation,
-        Operation::Sum | Operation::Difference | Operation::Product
-    ) && !has_fill
-        && matches!(
-            left,
-            TypeDescriptor::Integer(_) | TypeDescriptor::Unsigned(_)
-        )
-        && matches!(
-            right,
-            TypeDescriptor::Integer(_) | TypeDescriptor::Unsigned(_)
-        )
-    {
-        return OutputType::Integer;
-    }
-    OutputType::F64
-}
-
-fn fill_value(dataset: &Dataset) -> Option<f64> {
-    dataset
-        .attr("_FillValue")
-        .ok()
-        .and_then(|attr| attr.read_scalar::<f64>().ok())
-}
-
-fn selection(ranges: &[AxisRange], offset: &[usize], count: &[usize], input: bool) -> Hyperslab {
-    let dimensions = ranges
-        .iter()
-        .enumerate()
-        .map(|(axis, range)| SliceOrIndex::SliceCount {
-            start: if input {
-                range.start + offset[axis] * range.step
-            } else {
-                offset[axis]
-            },
-            step: if input { range.step } else { 1 },
-            count: count[axis],
-            block: 1,
-        })
-        .collect::<Vec<_>>();
-    Hyperslab::new(dimensions)
-}
-
-fn tiles(
-    shape: &[usize],
-    max_elements: usize,
-    mut visit: impl FnMut(&[usize], &[usize]) -> Result<(), String>,
-) -> Result<(), String> {
-    let mut capacity = max_elements.max(1);
-    let mut tile = vec![1; shape.len()];
-    for axis in (0..shape.len()).rev() {
-        tile[axis] = shape[axis].min(capacity.max(1));
-        capacity = (capacity / tile[axis]).max(1);
-    }
-    let mut offset = vec![0; shape.len()];
-    loop {
-        let count = offset
-            .iter()
-            .enumerate()
-            .map(|(i, &start)| tile[i].min(shape[i] - start))
-            .collect::<Vec<_>>();
-        visit(&offset, &count)?;
-        let mut axis = shape.len();
-        loop {
-            if axis == 0 {
-                return Ok(());
-            }
-            axis -= 1;
-            offset[axis] += tile[axis];
-            if offset[axis] < shape[axis] {
-                break;
-            }
-            offset[axis] = 0;
-        }
-    }
-}
-
-fn read_integer(
-    dataset: &Dataset,
-    descriptor: &TypeDescriptor,
-    where_: Hyperslab,
-) -> Result<Vec<i128>, String> {
-    macro_rules! read_as {
-        ($ty:ty) => {
-            dataset
-                .read_slice::<$ty, _, IxDyn>(where_)
-                .map_err(|e| e.to_string())?
-                .iter()
-                .map(|&value| value as i128)
-                .collect()
-        };
-    }
-    Ok(match descriptor {
-        TypeDescriptor::Integer(IntSize::U1) => read_as!(i8),
-        TypeDescriptor::Integer(IntSize::U2) => read_as!(i16),
-        TypeDescriptor::Integer(IntSize::U4) => read_as!(i32),
-        TypeDescriptor::Integer(IntSize::U8) => read_as!(i64),
-        TypeDescriptor::Unsigned(IntSize::U1) => read_as!(u8),
-        TypeDescriptor::Unsigned(IntSize::U2) => read_as!(u16),
-        TypeDescriptor::Unsigned(IntSize::U4) => read_as!(u32),
-        TypeDescriptor::Unsigned(IntSize::U8) => read_as!(u64),
-        _ => return Err("Expected an integer dataset".into()),
-    })
-}
-
-fn copy_slice(
-    source: &Dataset,
-    target: &Dataset,
-    descriptor: &TypeDescriptor,
-    input: Hyperslab,
-    output: Hyperslab,
-) -> Result<(), String> {
-    macro_rules! copy_as {
-        ($ty:ty) => {{
-            let values = source
-                .read_slice::<$ty, _, IxDyn>(input)
-                .map_err(|e| e.to_string())?;
-            target
-                .write_slice(values.view(), output)
-                .map_err(|e| e.to_string())
-        }};
-    }
-    match descriptor {
-        TypeDescriptor::Integer(IntSize::U1) => copy_as!(i8),
-        TypeDescriptor::Integer(IntSize::U2) => copy_as!(i16),
-        TypeDescriptor::Integer(IntSize::U4) => copy_as!(i32),
-        TypeDescriptor::Integer(IntSize::U8) => copy_as!(i64),
-        TypeDescriptor::Unsigned(IntSize::U1) => copy_as!(u8),
-        TypeDescriptor::Unsigned(IntSize::U2) => copy_as!(u16),
-        TypeDescriptor::Unsigned(IntSize::U4) => copy_as!(u32),
-        TypeDescriptor::Unsigned(IntSize::U8) => copy_as!(u64),
-        TypeDescriptor::Float(FloatSize::U4) => copy_as!(f32),
-        TypeDescriptor::Float(FloatSize::U8) => copy_as!(f64),
-        _ => Err("Unsupported slicing datatype".into()),
-    }
-}
-
-fn calculate(
-    left: &Dataset,
-    right: &Dataset,
-    target: &Dataset,
-    left_type: &TypeDescriptor,
-    right_type: &TypeDescriptor,
-    output_type: OutputType,
-    operation: Operation,
-    left_fill: Option<f64>,
-    right_fill: Option<f64>,
-    input: Hyperslab,
-    output: Hyperslab,
-    count: &[usize],
-) -> Result<(), String> {
-    if matches!(output_type, OutputType::Integer) {
-        let a = read_integer(left, left_type, input.clone())?;
-        let b = read_integer(right, right_type, input)?;
-        let values = a
-            .into_iter()
-            .zip(b)
-            .map(|(a, b)| {
-                let result = match operation {
-                    Operation::Sum => a.checked_add(b),
-                    Operation::Difference => a.checked_sub(b),
-                    Operation::Product => a.checked_mul(b),
-                    Operation::Slice | Operation::Ratio => {
-                        unreachable!("integer arithmetic output")
-                    }
-                };
-                result
-                    .and_then(|value| i64::try_from(value).ok())
-                    .ok_or_else(|| "Integer result exceeds the i64 range".to_string())
-            })
-            .collect::<Result<Vec<_>, _>>()?;
-        let array = ArrayD::from_shape_vec(IxDyn(count), values).map_err(|e| e.to_string())?;
-        return target
-            .write_slice(array.view(), output)
-            .map_err(|e| e.to_string());
-    }
-    if matches!(output_type, OutputType::F32) {
-        let a = left
-            .read_slice::<f32, _, IxDyn>(input.clone())
-            .map_err(|e| e.to_string())?;
-        let b = right
-            .read_slice::<f32, _, IxDyn>(input)
-            .map_err(|e| e.to_string())?;
-        let values = a
-            .iter()
-            .zip(b.iter())
-            .map(|(&a, &b)| {
-                if left_fill == Some(a as f64) || right_fill == Some(b as f64) {
-                    f32::NAN
-                } else {
-                    match operation {
-                        Operation::Sum => a + b,
-                        Operation::Difference => a - b,
-                        Operation::Product => a * b,
-                        Operation::Ratio if b == 0.0 => f32::NAN,
-                        Operation::Ratio => a / b,
-                        Operation::Slice => unreachable!("slice uses copy_slice"),
-                    }
-                }
-            })
-            .collect::<Vec<_>>();
-        let array = ArrayD::from_shape_vec(IxDyn(count), values).map_err(|e| e.to_string())?;
-        return target
-            .write_slice(array.view(), output)
-            .map_err(|e| e.to_string());
-    }
-    let a = left
-        .read_slice::<f64, _, IxDyn>(input.clone())
-        .map_err(|e| e.to_string())?;
-    let b = right
-        .read_slice::<f64, _, IxDyn>(input)
-        .map_err(|e| e.to_string())?;
-    let values = a
-        .iter()
-        .zip(b.iter())
-        .map(|(&a, &b)| {
-            if left_fill == Some(a) || right_fill == Some(b) {
-                f64::NAN
-            } else {
-                match operation {
-                    Operation::Sum => a + b,
-                    Operation::Difference => a - b,
-                    Operation::Product => a * b,
-                    Operation::Ratio if b == 0.0 => f64::NAN,
-                    Operation::Ratio => a / b,
-                    Operation::Slice => unreachable!("slice uses copy_slice"),
-                }
-            }
-        })
-        .collect::<Vec<_>>();
-    let array = ArrayD::from_shape_vec(IxDyn(count), values).map_err(|e| e.to_string())?;
-    target
-        .write_slice(array.view(), output)
-        .map_err(|e| e.to_string())
-}
-
-fn run(spec: JobSpec) -> Result<String, String> {
-    let (parent_path, name) = dataset_path_parts(&spec.output_path).map_err(|e| e.to_string())?;
-    if spec.destination == Destination::NewFile && spec.destination_file.exists() {
-        return Err("Output file already exists".into());
-    }
-    let staged_output = StagedOutput::new(&spec.destination_file, "operation", "hdf5")
-        .map_err(|e| e.to_string())?;
-    let result = (|| -> Result<String, String> {
-        let source_file = hdf5_metno::File::open(&spec.left_file)
-            .map_err(|e| format!("The source must be HDF5 or NetCDF-4: {e}"))?;
-        let left = source_file
-            .dataset(&spec.left_path)
-            .map_err(|e| e.to_string())?;
-        let left_type = numeric_descriptor(&left)?;
-        let right_file = spec
-            .right
-            .as_ref()
-            .map(|(path, _)| {
-                hdf5_metno::File::open(path)
-                    .map_err(|e| format!("The second source must be HDF5 or NetCDF-4: {e}"))
-            })
-            .transpose()?;
-        let right = spec
-            .right
-            .as_ref()
-            .zip(right_file.as_ref())
-            .map(|((_, path), file)| file.dataset(path).map_err(|e| e.to_string()))
-            .transpose()?;
-        let right_type = right.as_ref().map(numeric_descriptor).transpose()?;
-        let shape = left.shape();
-        if shape.is_empty() || shape.iter().any(|&length| length == 0) {
-            return Err("The source dataset must have nonempty dimensions".into());
-        }
-        if spec.operation != Operation::Slice
-            && right
-                .as_ref()
-                .is_none_or(|dataset| dataset.shape() != shape)
-        {
-            return Err("Arithmetic operations require equal dataset shapes".into());
-        }
-        let ranges = if spec.operation == Operation::Slice {
-            if spec.ranges.len() != shape.len() {
-                return Err("Slice dimensions changed".into());
-            }
-            spec.ranges.clone()
-        } else {
-            shape
-                .iter()
-                .map(|&stop| AxisRange {
-                    start: 0,
-                    stop,
-                    step: 1,
-                })
-                .collect()
-        };
-        let output_shape = ranges
-            .iter()
-            .zip(&shape)
-            .map(|(&range, &length)| range.count(length))
-            .collect::<Result<Vec<_>, _>>()?;
-        let left_fill = fill_value(&left);
-        let right_fill = right.as_ref().and_then(fill_value);
-        let result_type = output_type(
-            &left_type,
-            right_type.as_ref(),
-            spec.operation,
-            left_fill.is_some() || right_fill.is_some(),
-        );
-        let stage = hdf5_metno::File::create(staged_output.path()).map_err(|e| e.to_string())?;
-        let group = if parent_path == "/" {
-            stage.group("/")
-        } else {
-            stage.create_group(parent_path)
-        }
-        .map_err(|e| e.to_string())?;
-        let target = match result_type {
-            OutputType::Source => group
-                .new_dataset_builder()
-                .empty_as(&left.dtype().map_err(|e| e.to_string())?)
-                .shape(output_shape.clone())
-                .create(name),
-            OutputType::Integer => group
-                .new_dataset::<i64>()
-                .shape(output_shape.clone())
-                .create(name),
-            OutputType::F32 => group
-                .new_dataset::<f32>()
-                .shape(output_shape.clone())
-                .create(name),
-            OutputType::F64 => group
-                .new_dataset::<f64>()
-                .shape(output_shape.clone())
-                .create(name),
-        }
-        .map_err(|e| e.to_string())?;
-        tiles(&output_shape, spec.chunk_elements, |offset, count| {
-            let input = selection(&ranges, offset, count, true);
-            let output = selection(&ranges, offset, count, false);
-            if spec.operation == Operation::Slice {
-                copy_slice(&left, &target, &left_type, input, output)
-            } else {
-                calculate(
-                    &left,
-                    right.as_ref().unwrap(),
-                    &target,
-                    &left_type,
-                    right_type.as_ref().unwrap(),
-                    result_type,
-                    spec.operation,
-                    left_fill,
-                    right_fill,
-                    input,
-                    output,
-                    count,
-                )
-            }
-        })?;
-        stage.flush().map_err(|e| e.to_string())?;
-        drop(target);
-        drop(group);
-        drop(stage);
-        drop(right);
-        drop(right_file);
-        drop(left);
-        drop(source_file);
-        if spec.destination == Destination::NewFile {
-            staged_output
-                .publish_new(&spec.destination_file)
-                .map_err(|e| e.to_string())?;
-        } else {
-            let destination =
-                WritableFile::open(&spec.destination_file).map_err(|error| error.to_string())?;
-            if destination.link_exists(&spec.output_path) {
-                return Err("Output dataset already exists".into());
-            }
-            let stage = hdf5_metno::File::open(staged_output.path()).map_err(|e| e.to_string())?;
-            let parent = if parent_path == "/" {
-                destination.group("/")
-            } else if destination.link_exists(parent_path) {
-                destination.group(parent_path)
-            } else {
-                destination.create_group(parent_path)
-            }
-            .map_err(|e| e.to_string())?;
-            copy_hdf5_object(
-                &stage,
-                &spec.output_path,
-                &parent,
-                name,
-                Hdf5ObjectKind::Dataset,
-                None,
-            )
-            .map_err(|e| e.to_string())?;
-            destination.flush().map_err(|e| e.to_string())?;
-        }
-        Ok(format!(
-            "Saved {} in {}",
-            spec.output_path,
-            spec.destination_file.display()
-        ))
-    })();
-    result
 }
 
 fn dataset_picker(
@@ -1074,27 +593,29 @@ pub(super) fn draw(lab: &mut PluginLab, ui: &Ui, context: PluginContext<'_>) -> 
                     }
                     Some((context.file_paths[choice.file].clone(), choice.path.clone()))
                 };
-                Ok(JobSpec {
+                let destination = match state.destination {
+                    Destination::A | Destination::B => {
+                        DatasetOutputTarget::Existing(destination_file)
+                    }
+                    Destination::NewFile => DatasetOutputTarget::NewFile(destination_file),
+                };
+                Ok(DatasetOperationRequest {
                     left_file: context.file_paths[left.file].clone(),
                     left_path: left.path.clone(),
                     right,
                     operation: state.operation,
                     ranges,
-                    destination: state.destination,
-                    destination_file,
+                    destination,
                     output_path: state.output_path.trim().to_owned(),
                     chunk_elements: context.settings.dataset_manipulation_chunk_elements,
                 })
             });
             match spec {
                 Ok(spec) => {
-                    let release = match spec.destination {
+                    let destination = state.destination;
+                    let release = match destination {
                         Destination::A | Destination::B => {
-                            let slot = if spec.destination == Destination::A {
-                                0
-                            } else {
-                                1
-                            };
+                            let slot = if destination == Destination::A { 0 } else { 1 };
                             if !context.write_allowed[slot] {
                                 Err("Finish file loading or synchronization and apply or discard pending inspector edits before writing to A/B".into())
                             } else {
@@ -1107,8 +628,9 @@ pub(super) fn draw(lab: &mut PluginLab, ui: &Ui, context: PluginContext<'_>) -> 
                     };
                     match release {
                         Ok(()) => {
-                            let spec_destination = spec.destination;
-                            state.job.start(spec_destination, move |_| run(spec));
+                            state
+                                .job
+                                .start(destination, move |_| execute_dataset_operation(&spec));
                         }
                         Err(error) => context.notices.error(error),
                     }
@@ -1124,6 +646,7 @@ pub(super) fn draw(lab: &mut PluginLab, ui: &Ui, context: PluginContext<'_>) -> 
 mod tests {
     use super::*;
     use dear_app::imgui::{Condition, Context};
+    use hdf5_metno::types::{FloatSize, IntSize, TypeDescriptor};
     use std::{
         path::Path,
         time::{SystemTime, UNIX_EPOCH},
@@ -1166,8 +689,8 @@ mod tests {
         (directory, a, b)
     }
 
-    fn spec(a: &Path, b: &Path, output: &Path, operation: Operation) -> JobSpec {
-        JobSpec {
+    fn spec(a: &Path, b: &Path, output: &Path, operation: Operation) -> DatasetOperationRequest {
+        DatasetOperationRequest {
             left_file: a.to_owned(),
             left_path: "/x".into(),
             right: (operation != Operation::Slice).then(|| (b.to_owned(), "/x".into())),
@@ -1184,8 +707,7 @@ mod tests {
                     step: 2,
                 },
             ],
-            destination: Destination::NewFile,
-            destination_file: output.to_owned(),
+            destination: DatasetOutputTarget::NewFile(output.to_owned()),
             output_path: "/derived/result".into(),
             chunk_elements: 3,
         }
@@ -1195,7 +717,7 @@ mod tests {
     fn slice_preserves_integer_type_and_selected_indexes() {
         let (directory, a, b) = fixture();
         let output = directory.join("slice.hdf5");
-        run(spec(&a, &b, &output, Operation::Slice)).unwrap();
+        execute_dataset_operation(&spec(&a, &b, &output, Operation::Slice)).unwrap();
         let file = hdf5_metno::File::open(&output).unwrap();
         let dataset = file.dataset("/derived/result").unwrap();
         assert_eq!(dataset.shape(), vec![2, 2]);
@@ -1213,7 +735,7 @@ mod tests {
     fn integer_difference_stays_integer_and_ratio_becomes_float() {
         let (directory, a, b) = fixture();
         let difference = directory.join("difference.hdf5");
-        run(spec(&a, &b, &difference, Operation::Difference)).unwrap();
+        execute_dataset_operation(&spec(&a, &b, &difference, Operation::Difference)).unwrap();
         let file = hdf5_metno::File::open(&difference).unwrap();
         let dataset = file.dataset("/derived/result").unwrap();
         assert_eq!(
@@ -1224,7 +746,7 @@ mod tests {
         drop(dataset);
         drop(file);
         let ratio = directory.join("ratio.hdf5");
-        run(spec(&a, &b, &ratio, Operation::Ratio)).unwrap();
+        execute_dataset_operation(&spec(&a, &b, &ratio, Operation::Ratio)).unwrap();
         let file = hdf5_metno::File::open(&ratio).unwrap();
         let dataset = file.dataset("/derived/result").unwrap();
         assert_eq!(
@@ -1257,7 +779,7 @@ mod tests {
             ),
         ] {
             let output = directory.join(name);
-            run(spec(&a, &b, &output, operation)).unwrap();
+            execute_dataset_operation(&spec(&a, &b, &output, operation)).unwrap();
             let file = hdf5_metno::File::open(&output).unwrap();
             let dataset = file.dataset("/derived/result").unwrap();
             assert_eq!(dataset.shape(), vec![3, 4]);
@@ -1281,7 +803,7 @@ mod tests {
             let mut job = spec(&a, &b, &output, operation);
             job.left_path = "/float32".into();
             job.right = Some((b.clone(), "/float32".into()));
-            run(job).unwrap();
+            execute_dataset_operation(&job).unwrap();
             let file = hdf5_metno::File::open(&output).unwrap();
             let dataset = file.dataset("/derived/result").unwrap();
             assert_eq!(
@@ -1310,7 +832,9 @@ mod tests {
             let mut job = spec(&a, &b, &output, operation);
             job.left_path = "/large".into();
             job.right = Some((b.clone(), "/large".into()));
-            assert!(run(job).unwrap_err().contains("i64 range"));
+            assert!(execute_dataset_operation(&job)
+                .unwrap_err()
+                .contains("i64 range"));
         }
         std::fs::remove_dir_all(directory).unwrap();
     }
@@ -1322,7 +846,7 @@ mod tests {
         let mut job = spec(&a, &b, &f32_output, Operation::Difference);
         job.left_path = "/float32".into();
         job.right = Some((b.clone(), "/float32".into()));
-        run(job.clone()).unwrap();
+        execute_dataset_operation(&job).unwrap();
         let file = hdf5_metno::File::open(&f32_output).unwrap();
         assert_eq!(
             file.dataset("/derived/result")
@@ -1334,9 +858,9 @@ mod tests {
             TypeDescriptor::Float(FloatSize::U4)
         );
         drop(file);
-        job.destination_file = directory.join("f64.hdf5");
+        job.destination = DatasetOutputTarget::NewFile(directory.join("f64.hdf5"));
         job.right = Some((b.clone(), "/float64".into()));
-        run(job).unwrap();
+        execute_dataset_operation(&job).unwrap();
         let file = hdf5_metno::File::open(directory.join("f64.hdf5")).unwrap();
         assert_eq!(
             file.dataset("/derived/result")
@@ -1355,15 +879,19 @@ mod tests {
     fn existing_output_paths_are_not_replaced() {
         let (directory, a, b) = fixture();
         let mut job = spec(&a, &b, &a, Operation::Slice);
-        job.destination = Destination::A;
+        job.destination = DatasetOutputTarget::Existing(a.to_owned());
         job.output_path = "/x".into();
-        assert!(run(job).unwrap_err().contains("already exists"));
+        assert!(execute_dataset_operation(&job)
+            .unwrap_err()
+            .contains("already exists"));
         let file = hdf5_metno::File::open(&a).unwrap();
         assert_eq!(file.dataset("/x").unwrap().read_raw::<i16>().unwrap()[0], 0);
         drop(file);
-        assert!(run(spec(&a, &b, &a, Operation::Slice))
-            .unwrap_err()
-            .contains("already exists"));
+        assert!(
+            execute_dataset_operation(&spec(&a, &b, &a, Operation::Slice))
+                .unwrap_err()
+                .contains("already exists")
+        );
         std::fs::remove_dir_all(directory).unwrap();
     }
 
@@ -1373,8 +901,8 @@ mod tests {
         let mut held_reader = File::open(&a).unwrap();
         held_reader.release_for_edit().unwrap();
         let mut job = spec(&a, &b, &a, Operation::Difference);
-        job.destination = Destination::A;
-        run(job).unwrap();
+        job.destination = DatasetOutputTarget::Existing(a.to_owned());
+        execute_dataset_operation(&job).unwrap();
         drop(held_reader);
         let file = hdf5_metno::File::open(&a).unwrap();
         assert_eq!(

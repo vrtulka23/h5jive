@@ -6,56 +6,62 @@ impl App {
     }
 
     pub(super) fn note_heatmap_navigation(&mut self) {
-        self.heatmap_navigation_at = Some(Instant::now());
-        let tile_cancelled = self.heatmap_tile_job.take().is_some();
-        let view_cancelled = self.heatmap_view_overview_job.take().is_some();
+        self.heatmap.navigation_at = Some(Instant::now());
+        let tile_cancelled = self.heatmap.tile_job.cancel();
+        let view_cancelled = self.heatmap.view_overview_job.cancel();
         if tile_cancelled || view_cancelled {
-            self.heatmap_refine_generation
+            self.heatmap
+                .refine_generation
                 .fetch_add(1, Ordering::Relaxed);
         }
     }
 
     pub(super) fn note_volume_zoom(&mut self) {
-        self.volume_navigation_at = Some(Instant::now());
-        let overview = self.applied_volume.as_ref();
+        self.volume.navigation_at = Some(Instant::now());
+        let overview = self.volume.applied_slice.as_ref();
         if self
-            .volume_job
-            .as_ref()
-            .is_some_and(|(key, _)| Some(&key.slice) != overview)
+            .volume
+            .job
+            .key()
+            .is_some_and(|key| Some(&key.slice) != overview)
         {
-            self.volume_refine_generation
+            self.volume
+                .refine_generation
                 .fetch_add(1, Ordering::Relaxed);
-            self.volume_job = None;
+            self.volume.job.cancel();
         }
-        if self.volume_raster_job.take().is_some() {
-            self.volume_raster_generation
+        if self.volume.raster_job.take().is_some() {
+            self.volume
+                .raster_generation
                 .fetch_add(1, Ordering::Relaxed);
         }
     }
 
     pub(super) fn switch_view(&mut self, view: ViewMode) {
-        if self.view == view {
+        if self.workspace.view == view {
             return;
         }
-        let keep_map_job = matches!(self.view, ViewMode::WorldMap | ViewMode::Globe)
+        let keep_map_job = matches!(self.workspace.view, ViewMode::WorldMap | ViewMode::Globe)
             && matches!(view, ViewMode::WorldMap | ViewMode::Globe);
-        self.view_load_generation.fetch_add(1, Ordering::Relaxed);
-        self.heatmap_tile_job = None;
-        self.heatmap_overview_job = None;
-        self.heatmap_view_overview_job = None;
-        self.heatmap_range_job = None;
-        self.profile_job = None;
-        self.volume_job = None;
-        self.volume_raster_job = None;
+        self.workspace
+            .view_load_generation
+            .fetch_add(1, Ordering::Relaxed);
+        self.heatmap.tile_job.cancel();
+        self.heatmap.overview_job.cancel();
+        self.heatmap.view_overview_job.cancel();
+        self.heatmap.range_job.cancel();
+        self.profile.job.cancel();
+        self.volume.job.cancel();
+        self.volume.raster_job = None;
         if !keep_map_job {
-            self.map_job = None;
-            self.map_load_generation.fetch_add(1, Ordering::Relaxed);
+            self.geo.map_job.cancel();
+            self.geo.map_load_generation.fetch_add(1, Ordering::Relaxed);
         }
-        self.heatmap_navigation_at = None;
-        self.volume_navigation_at = None;
-        self.view = view;
+        self.heatmap.navigation_at = None;
+        self.volume.navigation_at = None;
+        self.workspace.view = view;
         if view != ViewMode::Globe {
-            self.globe_rotation = None;
+            self.geo.globe_rotation = None;
         }
     }
 
@@ -66,66 +72,60 @@ impl App {
         replacement: f64,
         allow_start: bool,
     ) {
-        if let Some((running, receiver)) = &self.heatmap_tile_job {
-            match poll_job(receiver) {
-                JobPoll::Ready(image) => {
-                    let running = running.clone();
-                    let image = image.map(Arc::new);
-                    if let Err(error) = &image {
-                        self.notices
-                            .error(format!("Could not load 2D tile: {error}"));
-                    }
-                    if let Ok(data) = &image {
-                        self.heatmap_tiles.retain(|(cached, _)| cached != &running);
-                        self.heatmap_tiles.push((running.clone(), Arc::clone(data)));
-                        if self.heatmap_tiles.len() > 4 {
-                            self.heatmap_tiles.remove(0);
-                        }
-                    }
-                    self.heatmap_cache = Some((running, image));
-                    self.heatmap_tile_job = None;
-                }
-                JobPoll::Disconnected => {
-                    self.notices
-                        .error("Could not load 2D tile: worker stopped unexpectedly.");
-                    self.heatmap_tile_job = None;
-                }
-                JobPoll::Pending => {}
+        if let Some((running, image)) = self
+            .heatmap
+            .tile_job
+            .poll("Could not load 2D tile: worker stopped unexpectedly.")
+        {
+            let image = image.map(Arc::new);
+            if let Err(error) = &image {
+                self.session
+                    .notices
+                    .error(format!("Could not load 2D tile: {error}"));
             }
+            if let Ok(data) = &image {
+                self.heatmap.tiles.retain(|(cached, _)| cached != &running);
+                self.heatmap.tiles.push((running.clone(), Arc::clone(data)));
+                if self.heatmap.tiles.len() > 4 {
+                    self.heatmap.tiles.remove(0);
+                }
+            }
+            self.heatmap.cache = Some((running, image));
         }
         if self
-            .heatmap_cache
+            .heatmap
+            .cache
             .as_ref()
             .is_some_and(|(cached, _)| cached == &key)
         {
             return;
         }
-        if let Some((_, image)) = self.heatmap_tiles.iter().find(|(cached, _)| cached == &key) {
-            self.heatmap_cache = Some((key, Ok(Arc::clone(image))));
+        if let Some((_, image)) = self.heatmap.tiles.iter().find(|(cached, _)| cached == &key) {
+            self.heatmap.cache = Some((key, Ok(Arc::clone(image))));
             return;
         }
-        if self.heatmap_tile_job.is_some() || !allow_start {
+        if self.heatmap.tile_job.is_busy() || !allow_start {
             return;
         }
-        let file_path = self.file_paths[key.file].clone();
+        let file_path = self.session.file_paths[key.file].clone();
         let dataset_path = key.path.clone();
         let slice = key.slice.clone();
         let bounds = key.bounds;
         let shape = shape.to_vec();
-        let generation = Arc::clone(&self.view_load_generation);
+        let generation = Arc::clone(&self.workspace.view_load_generation);
         let expected = generation.load(Ordering::Relaxed);
-        let refinement = Arc::clone(&self.heatmap_refine_generation);
+        let refinement = Arc::clone(&self.heatmap.refine_generation);
         let expected_refinement = refinement.load(Ordering::Relaxed);
-        let (sender, receiver) = mpsc::channel();
-        thread::spawn(move || {
+        self.heatmap.tile_job.start(key, move |job_cancelled| {
             let cancelled = || {
-                generation.load(Ordering::Relaxed) != expected
+                job_cancelled()
+                    || generation.load(Ordering::Relaxed) != expected
                     || refinement.load(Ordering::Relaxed) != expected_refinement
             };
             if cancelled() {
-                return;
+                return Err("2D tile work was cancelled".into());
             }
-            let result = open_dataset_reader(&file_path).and_then(|file| {
+            open_dataset_reader(&file_path).and_then(|file| {
                 load_heatmap_tile_with_cancel(
                     &file,
                     &dataset_path,
@@ -135,10 +135,8 @@ impl App {
                     replacement,
                     &cancelled,
                 )
-            });
-            let _ = sender.send(result);
+            })
         });
-        self.heatmap_tile_job = Some((key, receiver));
     }
 
     pub(super) fn poll_heatmap_overview(
@@ -157,54 +155,44 @@ impl App {
             grid,
         };
         if self
-            .heatmap_overview_cache
+            .heatmap
+            .overview_cache
             .as_ref()
             .is_some_and(|(cached, _)| cached == &key)
         {
             return;
         }
-        self.heatmap_overview_cache = None;
-        if self
-            .heatmap_overview_job
-            .as_ref()
-            .is_some_and(|(running, _)| running == &key)
-        {
-            if let Some(error) = finish_keyed_result_job(
-                &mut self.heatmap_overview_job,
-                &mut self.heatmap_overview_cache,
-                "Overview worker stopped",
-            ) {
-                self.notices
+        self.heatmap.overview_cache = None;
+        if self.heatmap.overview_job.key() == Some(&key) {
+            if let Some(error) = self
+                .heatmap
+                .overview_job
+                .finish_into(&mut self.heatmap.overview_cache, "Overview worker stopped")
+            {
+                self.session
+                    .notices
                     .error(format!("Could not load 2D overview: {error}"));
             }
             return;
         }
-        self.heatmap_overview_job = None;
-        let file_path = self.file_paths[selection.file].clone();
+        self.heatmap.overview_job.cancel();
+        let file_path = self.session.file_paths[selection.file].clone();
         let path = selection.path.clone();
         let shape = shape.to_vec();
         let slice = slice.clone();
-        let generation = Arc::clone(&self.view_load_generation);
+        let generation = Arc::clone(&self.workspace.view_load_generation);
         let expected = generation.load(Ordering::Relaxed);
-        let (sender, receiver) = mpsc::channel();
-        thread::spawn(move || {
-            if generation.load(Ordering::Relaxed) != expected {
-                return;
+        self.heatmap.overview_job.start(key, move |job_cancelled| {
+            let cancelled = || job_cancelled() || generation.load(Ordering::Relaxed) != expected;
+            if cancelled() {
+                return Err("2D overview work was cancelled".into());
             }
-            let result = open_dataset_reader(&file_path).and_then(|file| {
+            open_dataset_reader(&file_path).and_then(|file| {
                 load_heatmap_overview_with_cancel(
-                    &file,
-                    &path,
-                    &shape,
-                    &slice,
-                    bounds,
-                    grid,
-                    &|| generation.load(Ordering::Relaxed) != expected,
+                    &file, &path, &shape, &slice, bounds, grid, &cancelled,
                 )
-            });
-            let _ = sender.send(result);
+            })
         });
-        self.heatmap_overview_job = Some((key, receiver));
     }
 
     pub(super) fn poll_heatmap_view_overview(
@@ -224,60 +212,58 @@ impl App {
             grid,
         };
         if self
-            .heatmap_view_overview_cache
+            .heatmap
+            .view_overview_cache
             .as_ref()
             .is_some_and(|(cached, _)| cached == &key)
         {
             return;
         }
-        self.heatmap_view_overview_cache = None;
-        if self
-            .heatmap_view_overview_job
-            .as_ref()
-            .is_some_and(|(running, _)| running == &key)
-        {
-            if let Some(error) = finish_keyed_result_job(
-                &mut self.heatmap_view_overview_job,
-                &mut self.heatmap_view_overview_cache,
+        self.heatmap.view_overview_cache = None;
+        if self.heatmap.view_overview_job.key() == Some(&key) {
+            if let Some(error) = self.heatmap.view_overview_job.finish_into(
+                &mut self.heatmap.view_overview_cache,
                 "2D view worker stopped",
             ) {
-                self.notices
+                self.session
+                    .notices
                     .error(format!("Could not load 2D view: {error}"));
             }
             return;
         }
-        if self.heatmap_view_overview_job.take().is_some() {
-            self.heatmap_refine_generation
+        if self.heatmap.view_overview_job.cancel() {
+            self.heatmap
+                .refine_generation
                 .fetch_add(1, Ordering::Relaxed);
         }
         if !allow_start {
             return;
         }
-        let file_path = self.file_paths[selection.file].clone();
+        let file_path = self.session.file_paths[selection.file].clone();
         let path = selection.path.clone();
         let shape = shape.to_vec();
         let slice = slice.clone();
-        let generation = Arc::clone(&self.view_load_generation);
+        let generation = Arc::clone(&self.workspace.view_load_generation);
         let expected = generation.load(Ordering::Relaxed);
-        let refinement = Arc::clone(&self.heatmap_refine_generation);
+        let refinement = Arc::clone(&self.heatmap.refine_generation);
         let expected_refinement = refinement.load(Ordering::Relaxed);
-        let (sender, receiver) = mpsc::channel();
-        thread::spawn(move || {
-            let cancelled = || {
-                generation.load(Ordering::Relaxed) != expected
-                    || refinement.load(Ordering::Relaxed) != expected_refinement
-            };
-            if cancelled() {
-                return;
-            }
-            let result = open_dataset_reader(&file_path).and_then(|file| {
-                load_heatmap_overview_with_cancel(
-                    &file, &path, &shape, &slice, bounds, grid, &cancelled,
-                )
+        self.heatmap
+            .view_overview_job
+            .start(key, move |job_cancelled| {
+                let cancelled = || {
+                    job_cancelled()
+                        || generation.load(Ordering::Relaxed) != expected
+                        || refinement.load(Ordering::Relaxed) != expected_refinement
+                };
+                if cancelled() {
+                    return Err("2D view work was cancelled".into());
+                }
+                open_dataset_reader(&file_path).and_then(|file| {
+                    load_heatmap_overview_with_cancel(
+                        &file, &path, &shape, &slice, bounds, grid, &cancelled,
+                    )
+                })
             });
-            let _ = sender.send(result);
-        });
-        self.heatmap_view_overview_job = Some((key, receiver));
     }
 
     pub(super) fn poll_heatmap_range(
@@ -295,48 +281,42 @@ impl App {
             slice: slice.clone(),
         };
         if self
-            .heatmap_range_cache
+            .heatmap
+            .range_cache
             .as_ref()
             .is_some_and(|(cached, _)| cached == &key)
         {
             return;
         }
-        self.heatmap_range_cache = None;
-        if self
-            .heatmap_range_job
-            .as_ref()
-            .is_some_and(|(running, _)| running == &key)
-        {
-            if let Some(error) = finish_keyed_result_job(
-                &mut self.heatmap_range_job,
-                &mut self.heatmap_range_cache,
-                "Range worker stopped",
-            ) {
-                self.notices
+        self.heatmap.range_cache = None;
+        if self.heatmap.range_job.key() == Some(&key) {
+            if let Some(error) = self
+                .heatmap
+                .range_job
+                .finish_into(&mut self.heatmap.range_cache, "Range worker stopped")
+            {
+                self.session
+                    .notices
                     .error(format!("Could not scan 2D range: {error}"));
             }
             return;
         }
-        self.heatmap_range_job = None;
-        let file_path = self.file_paths[selection.file].clone();
+        self.heatmap.range_job.cancel();
+        let file_path = self.session.file_paths[selection.file].clone();
         let path = selection.path.clone();
         let shape = shape.to_vec();
         let slice = slice.clone();
-        let generation = Arc::clone(&self.view_load_generation);
+        let generation = Arc::clone(&self.workspace.view_load_generation);
         let expected = generation.load(Ordering::Relaxed);
-        let (sender, receiver) = mpsc::channel();
-        thread::spawn(move || {
-            if generation.load(Ordering::Relaxed) != expected {
-                return;
+        self.heatmap.range_job.start(key, move |job_cancelled| {
+            let cancelled = || job_cancelled() || generation.load(Ordering::Relaxed) != expected;
+            if cancelled() {
+                return Err("2D range work was cancelled".into());
             }
-            let result = open_dataset_reader(&file_path).and_then(|file| {
-                scan_heatmap_range_with_cancel(&file, &path, &shape, &slice, &|| {
-                    generation.load(Ordering::Relaxed) != expected
-                })
-            });
-            let _ = sender.send(result);
+            open_dataset_reader(&file_path).and_then(|file| {
+                scan_heatmap_range_with_cancel(&file, &path, &shape, &slice, &|| cancelled())
+            })
         });
-        self.heatmap_range_job = Some((key, receiver));
     }
 
     pub(super) fn poll_profile(
@@ -348,73 +328,62 @@ impl App {
         let key = ProfileKey {
             selection: selection.clone(),
             slice: slice.clone(),
-            visibility: self.value_visibility,
+            visibility: self.workspace.value_visibility,
         };
-        if self
-            .profile_job
-            .as_ref()
-            .is_some_and(|(running, _)| running == &key)
-        {
-            match poll_job(&self.profile_job.as_ref().unwrap().1) {
-                JobPoll::Ready(ProfileJobUpdate::Overview(data)) => {
-                    self.profile_cache = Some((key, Ok(data)));
+        if self.profile.job.key() == Some(&key) {
+            match self
+                .profile
+                .job
+                .poll("Profile worker stopped unexpectedly.")
+            {
+                Some((_, JobEvent::Progress(data))) => {
+                    self.profile.cache = Some((key, Ok(data)));
                 }
-                JobPoll::Ready(ProfileJobUpdate::Complete(result)) => {
+                Some((_, JobEvent::Finished(result))) => {
                     if let Err(error) = &result {
-                        self.notices
+                        self.session
+                            .notices
                             .error(format!("Could not load profile: {error}"));
                     }
-                    self.profile_cache = Some((key, result));
-                    self.profile_job = None;
+                    self.profile.cache = Some((key, result));
                 }
-                JobPoll::Disconnected => {
-                    self.notices
-                        .error("Could not load profile: worker stopped unexpectedly.");
-                    self.profile_cache = Some((key, Err("Profile worker stopped".into())));
-                    self.profile_job = None;
-                }
-                JobPoll::Pending => {}
+                None => {}
             }
             return;
         }
         if self
-            .profile_cache
+            .profile
+            .cache
             .as_ref()
             .is_some_and(|(cached, _)| cached == &key)
         {
             return;
         }
-        self.profile_cache = None;
-        if self.profile_job.take().is_some() {
-            self.profile_load_generation.fetch_add(1, Ordering::Relaxed);
+        self.profile.cache = None;
+        if self.profile.job.cancel() {
+            self.profile.load_generation.fetch_add(1, Ordering::Relaxed);
         }
-        let file_path = self.file_paths[selection.file].clone();
+        let file_path = self.session.file_paths[selection.file].clone();
         let dataset_path = selection.path.clone();
         let shape = shape.to_vec();
         let slice = slice.clone();
-        let visibility = self.value_visibility;
-        let generation = Arc::clone(&self.view_load_generation);
+        let visibility = self.workspace.value_visibility;
+        let generation = Arc::clone(&self.workspace.view_load_generation);
         let expected = generation.load(Ordering::Relaxed);
-        let profile_generation = Arc::clone(&self.profile_load_generation);
+        let profile_generation = Arc::clone(&self.profile.load_generation);
         let expected_profile = profile_generation.load(Ordering::Relaxed);
-        let (sender, receiver) = mpsc::channel();
-        thread::spawn(move || {
+        self.profile.job.start(key, move |job_cancelled, progress| {
             let cancelled = || {
-                generation.load(Ordering::Relaxed) != expected
+                job_cancelled()
+                    || generation.load(Ordering::Relaxed) != expected
                     || profile_generation.load(Ordering::Relaxed) != expected_profile
             };
             if cancelled() {
-                return;
+                return Err("Profile work was cancelled".into());
             }
-            let file = match open_dataset_reader(&file_path) {
-                Ok(file) => file,
-                Err(error) => {
-                    let _ = sender.send(ProfileJobUpdate::Complete(Err(error)));
-                    return;
-                }
-            };
+            let file = open_dataset_reader(&file_path)?;
             if profile_needs_preview(&shape, &slice) {
-                match load_profile_preview_with_cancel(
+                let data = load_profile_preview_with_cancel(
                     &file,
                     &dataset_path,
                     &shape,
@@ -422,54 +391,52 @@ impl App {
                     &visibility,
                     PROFILE_OVERVIEW_SAMPLE_BUDGET,
                     &cancelled,
-                ) {
-                    Ok(data) => {
-                        if sender.send(ProfileJobUpdate::Overview(data)).is_err() {
-                            return;
-                        }
-                    }
-                    Err(error) => {
-                        let _ = sender.send(ProfileJobUpdate::Complete(Err(error)));
-                        return;
-                    }
+                )?;
+                if !progress(data) {
+                    return Err("Profile work was cancelled".into());
                 }
             }
             if cancelled() {
-                return;
+                return Err("Profile work was cancelled".into());
             }
-            let result = load_profile_with_cancel(
+            load_profile_with_cancel(
                 &file,
                 &dataset_path,
                 &shape,
                 &slice,
                 &visibility,
                 &cancelled,
-            );
-            let _ = sender.send(ProfileJobUpdate::Complete(result));
+            )
         });
-        self.profile_job = Some((key, receiver));
     }
 
     pub(super) fn poll_statistics(&mut self, selection: &Selection) {
-        if let Some((key, result)) = self.statistics_job.poll("Statistics worker stopped") {
+        if let Some((key, result)) = self
+            .dataset
+            .statistics_job
+            .poll("Statistics worker stopped")
+        {
             if &key == selection {
                 if let Err(error) = &result {
-                    self.notices
+                    self.session
+                        .notices
                         .error(format!("Could not calculate statistics: {error}"));
                 }
-                self.statistics_cache = Some(result);
+                self.dataset.statistics_cache = Some(result);
             }
         }
-        if self.statistics_cache.is_none() && !self.statistics_job.is_busy() {
-            let file_path = self.file_paths[selection.file].clone();
+        if self.dataset.statistics_cache.is_none() && !self.dataset.statistics_job.is_busy() {
+            let file_path = self.session.file_paths[selection.file].clone();
             let dataset_path = selection.path.clone();
             let sample_limit = self.settings.statistics_sample_values;
-            self.statistics_job.start(selection.clone(), move |_| {
-                open_dataset_reader(&file_path).and_then(|file| {
-                    file.statistics(&dataset_path, sample_limit)
-                        .map_err(|err| err.to_string())
-                })
-            });
+            self.dataset
+                .statistics_job
+                .start(selection.clone(), move |_| {
+                    open_dataset_reader(&file_path).and_then(|file| {
+                        file.statistics(&dataset_path, sample_limit)
+                            .map_err(|err| err.to_string())
+                    })
+                });
         }
     }
 
@@ -478,36 +445,44 @@ impl App {
         selection: &Selection,
         statistics: &DatasetStatistics,
     ) {
-        if let Some((key, result)) = self.distribution_job.poll("Distribution worker stopped") {
+        if let Some((key, result)) = self
+            .dataset
+            .distribution_job
+            .poll("Distribution worker stopped")
+        {
             if &key == selection {
                 if let Err(error) = &result {
-                    self.notices
+                    self.session
+                        .notices
                         .error(format!("Could not calculate distribution: {error}"));
                 }
-                self.distribution_cache = Some(result);
+                self.dataset.distribution_cache = Some(result);
             }
         }
-        if self.distribution_cache.is_none() && !self.distribution_job.is_busy() {
-            let file_path = self.file_paths[selection.file].clone();
+        if self.dataset.distribution_cache.is_none() && !self.dataset.distribution_job.is_busy() {
+            let file_path = self.session.file_paths[selection.file].clone();
             let dataset_path = selection.path.clone();
             let statistics = statistics.clone();
             let bin_count = self.settings.histogram_bins;
-            self.distribution_job.start(selection.clone(), move |_| {
-                open_dataset_reader(&file_path).and_then(|file| {
-                    file.distribution(&dataset_path, &statistics, bin_count)
-                        .map_err(|err| err.to_string())
-                })
-            });
+            self.dataset
+                .distribution_job
+                .start(selection.clone(), move |_| {
+                    open_dataset_reader(&file_path).and_then(|file| {
+                        file.distribution(&dataset_path, &statistics, bin_count)
+                            .map_err(|err| err.to_string())
+                    })
+                });
         }
     }
 
     pub(super) fn refresh_selection(&mut self) {
-        let details_key = self.selection.clone();
-        let details_changed = details_key != self.details_key;
+        let details_key = self.session.selection.clone();
+        let details_changed = details_key != self.dataset.details_key;
         if details_changed {
-            self.details_key = details_key;
-            let selected_raw_bytes = self.selection.as_ref().and_then(|selection| {
-                self.files
+            self.dataset.details_key = details_key;
+            let selected_raw_bytes = self.session.selection.as_ref().and_then(|selection| {
+                self.session
+                    .files
                     .get(selection.file)?
                     .dataset_info(&selection.path)
                     .ok()
@@ -517,40 +492,42 @@ impl App {
                 .set_selected_raw_bytes(selected_raw_bytes);
             self.clear_selection_details();
         }
-        let key = self.selection.as_ref().and_then(|selection| {
-            let entry = find_entry(&self.files[selection.file].tree, &selection.path)?;
+        let key = self.session.selection.as_ref().and_then(|selection| {
+            let entry = find_entry(&self.session.files[selection.file].tree, &selection.path)?;
             if matches!(entry.kind, Kind::Dataset { numeric: true, .. }) {
                 Some(selection.clone())
             } else {
                 None
             }
         });
-        let selection_changed = key != self.selection_key;
+        let selection_changed = key != self.dataset.selection_key;
         if selection_changed {
-            self.selection_key = key;
-            self.volume_pan = [0.0, 0.0];
-            self.profile_zoom = 1.0;
-            self.heatmap_nav_override = None;
-            self.heatmap_tick_view = None;
-            self.heatmap_navigation_at = None;
-            self.volume_navigation_at = None;
+            self.dataset.selection_key = key;
+            self.volume.pan = [0.0, 0.0];
+            self.profile.zoom = 1.0;
+            self.heatmap.nav_override = None;
+            self.heatmap.tick_view = None;
+            self.heatmap.navigation_at = None;
+            self.volume.navigation_at = None;
             self.clear_selected_dataset_views();
-            self.axis_names = match self.selection_key.clone() {
-                Some(selection) => match self.files[selection.file].axis_names(&selection.path) {
-                    Ok(names) => names,
-                    Err(error) => {
-                        self.show_notice(
-                            NoticeKind::Error,
-                            format!("Could not read dataset axis metadata: {error}"),
-                        );
-                        Vec::new()
+            self.dataset.axis_names = match self.dataset.selection_key.clone() {
+                Some(selection) => {
+                    match self.session.files[selection.file].axis_names(&selection.path) {
+                        Ok(names) => names,
+                        Err(error) => {
+                            self.show_notice(
+                                NoticeKind::Error,
+                                format!("Could not read dataset axis metadata: {error}"),
+                            );
+                            Vec::new()
+                        }
                     }
-                },
+                }
                 None => Vec::new(),
             };
         }
-        let selected_shape = self.selection.as_ref().and_then(|selection| {
-            let entry = find_entry(&self.files[selection.file].tree, &selection.path)?;
+        let selected_shape = self.session.selection.as_ref().and_then(|selection| {
+            let entry = find_entry(&self.session.files[selection.file].tree, &selection.path)?;
             match &entry.kind {
                 Kind::Dataset {
                     shape,
@@ -561,13 +538,15 @@ impl App {
         });
         if selection_changed {
             let mut first_is_time = self
+                .dataset
                 .axis_names
                 .first()
                 .is_some_and(|name| name.to_ascii_lowercase().contains("time"));
             if !first_is_time {
-                if let Some(selection) = self.selection.clone() {
+                if let Some(selection) = self.session.selection.clone() {
                     self.ensure_coordinates_loaded(&selection);
                     first_is_time = self
+                        .dataset
                         .coordinates_cache
                         .as_ref()
                         .and_then(|result| result.as_ref().ok())
@@ -580,28 +559,28 @@ impl App {
                         });
                 }
             }
-            self.draft_table = selected_shape.as_deref().map(|shape| {
+            self.dataset.draft_table = selected_shape.as_deref().map(|shape| {
                 TableSlice::with_leading_time(shape, first_is_time, self.settings.pinned_default)
             });
-            self.applied_table = self.draft_table.clone();
-            self.draft_slice = selected_shape.as_deref().map(|shape| {
+            self.dataset.applied_table = self.dataset.draft_table.clone();
+            self.heatmap.draft_slice = selected_shape.as_deref().map(|shape| {
                 TableSlice::for_heatmap(shape, first_is_time, self.settings.pinned_default)
             });
-            self.applied_slice = self.draft_slice.clone();
-            self.draft_profile = selected_shape
+            self.heatmap.applied_slice = self.heatmap.draft_slice.clone();
+            self.profile.draft_slice = selected_shape
                 .as_deref()
                 .map(|shape| ProfileSlice::new(shape, first_is_time, self.settings.pinned_default));
-            self.applied_profile = self.draft_profile.clone();
-            self.draft_volume = selected_shape
+            self.profile.applied_slice = self.profile.draft_slice.clone();
+            self.volume.draft_slice = selected_shape
                 .as_deref()
                 .map(|shape| VolumeSlice::new(shape, first_is_time, self.settings.pinned_default));
-            self.applied_volume = self.draft_volume.clone();
-            self.draft_volume_opacity = self.volume_opacity;
-            self.draft_volume_log_scale = self.volume_log_scale;
-            self.table_column_page = 0;
+            self.volume.applied_slice = self.volume.draft_slice.clone();
+            self.volume.draft_opacity = self.volume.opacity;
+            self.volume.draft_log_scale = self.volume.log_scale;
+            self.dataset.table_column_page = 0;
         }
         if details_changed
-            && matches!(self.view, ViewMode::WorldMap | ViewMode::Globe)
+            && matches!(self.workspace.view, ViewMode::WorldMap | ViewMode::Globe)
             && self.selected_geo_source().is_none()
         {
             self.switch_view(ViewMode::Data);

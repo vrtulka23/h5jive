@@ -2,11 +2,12 @@ use super::super::*;
 
 impl App {
     pub(crate) fn draw_profile_view(&mut self, ui: &Ui) {
-        let Some(selection) = self.selection.clone() else {
+        let Some(selection) = self.session.selection.clone() else {
             ui.text("Select a numeric dataset from the tree.");
             return;
         };
-        let Some(entry) = find_entry(&self.files[selection.file].tree, &selection.path) else {
+        let Some(entry) = find_entry(&self.session.files[selection.file].tree, &selection.path)
+        else {
             return;
         };
         let shape = match &entry.kind {
@@ -19,10 +20,10 @@ impl App {
                 return;
             }
         };
-        let height = (ui.content_region_avail()[1] - self.profile_footer_height)
+        let height = (ui.content_region_avail()[1] - self.profile.footer_height)
             .max(self.settings.panel_min_height);
         let origin = ui.cursor_screen_pos();
-        self.view_rect = [origin[0], origin[1], ui.content_region_avail()[0], height];
+        self.session.view_rect = [origin[0], origin[1], ui.content_region_avail()[0], height];
         ui.child_window("profile_plot_panel")
             .size([0.0, height])
             .build(ui, || {
@@ -34,28 +35,32 @@ impl App {
         if let Some(_table) = begin_control_columns(ui, "profile_controls", button_width) {
             self.draw_profile_controls(ui, &shape);
             ui.table_next_column();
-            let pending = DraftPair::new(&self.draft_profile, &mut self.applied_profile).pending();
+            let pending =
+                DraftPair::new(&self.profile.draft_slice, &mut self.profile.applied_slice)
+                    .pending();
             if draw_update_button(ui, &self.settings, pending) {
-                if let Some(draft) = self.draft_profile.as_ref() {
+                if let Some(draft) = self.profile.draft_slice.as_ref() {
                     let valid = draft.y_axis.map_or(Ok(vec![0]), |axis| {
                         parse_profile_indexes(&draft.y_indexes, shape[axis])
                     });
                     if valid.is_ok() {
-                        DraftPair::new(&self.draft_profile, &mut self.applied_profile).apply();
-                        self.profile_cache = None;
+                        DraftPair::new(&self.profile.draft_slice, &mut self.profile.applied_slice)
+                            .apply();
+                        self.profile.cache = None;
                     }
                 }
             }
         }
-        self.profile_footer_height = (ui.cursor_pos_y() - footer_start).max(1.0);
+        self.profile.footer_height = (ui.cursor_pos_y() - footer_start).max(1.0);
     }
     pub(crate) fn draw_profile_controls(&mut self, ui: &Ui, shape: &[usize]) {
         let pinned = self
-            .draft_profile
+            .profile
+            .draft_slice
             .as_ref()
             .map(|draft| draft.pinned.clone());
         let coordinate_labels = pinned.as_ref().map(|pinned| {
-            if self.profile_job.is_some() {
+            if self.profile.job.is_busy() {
                 self.cached_pinned_coordinate_labels(pinned)
             } else {
                 self.pinned_coordinate_labels(pinned)
@@ -63,10 +68,10 @@ impl App {
         });
         let tutorial_tips = self.settings.tutorial_tips;
         let error_color = self.settings.palette.heatmap_high;
-        let Some(draft) = self.draft_profile.as_mut() else {
+        let Some(draft) = self.profile.draft_slice.as_mut() else {
             return;
         };
-        let labels = axis_option_labels(&self.axis_names, shape);
+        let labels = axis_option_labels(&self.dataset.axis_names, shape);
         let side_by_side = shape.len() > 1 && ui.content_region_avail()[0] >= 360.0;
         ui.text("X");
         ui.same_line();
@@ -99,11 +104,12 @@ impl App {
                 .filter(|&axis| axis != draft.x_axis)
                 .collect::<Vec<_>>();
             let mut profile_options = vec!["Single (pin other axes)".to_string()];
-            profile_options.extend(
-                profile_axes
-                    .iter()
-                    .map(|&axis| format!("Compare across {}", axis_name(&self.axis_names, axis))),
-            );
+            profile_options.extend(profile_axes.iter().map(|&axis| {
+                format!(
+                    "Compare across {}",
+                    axis_name(&self.dataset.axis_names, axis)
+                )
+            }));
             let mut profile_option = draft
                 .y_axis
                 .and_then(|axis| profile_axes.iter().position(|&candidate| candidate == axis))
@@ -145,7 +151,7 @@ impl App {
                 continue;
             }
             let mut index = draft.pinned[axis] as i32;
-            let name = axis_name(&self.axis_names, axis);
+            let name = axis_name(&self.dataset.axis_names, axis);
             ui.set_next_item_width((ui.content_region_avail()[0] * 0.65).max(60.0));
             ui.slider(
                 format!(
@@ -168,11 +174,11 @@ impl App {
         }
     }
     pub(crate) fn draw_profile_plot(&mut self, ui: &Ui, selection: &Selection, shape: &[usize]) {
-        let Some(slice) = self.applied_profile.clone() else {
+        let Some(slice) = self.profile.applied_slice.clone() else {
             return;
         };
         self.poll_profile(selection, shape, &slice);
-        let Some((_, result)) = self.profile_cache.as_ref() else {
+        let Some((_, result)) = self.profile.cache.as_ref() else {
             return;
         };
         let (x_len, line_indexes) = match result {
@@ -186,7 +192,7 @@ impl App {
             }
         };
         let mut x_labels = HashMap::new();
-        let loading = self.profile_job.is_some();
+        let loading = self.profile.job.is_busy();
         for tick_count in 1..=6 {
             for index in axis_ticks(x_len, tick_count) {
                 x_labels.entry(index).or_insert_with(|| {
@@ -213,28 +219,28 @@ impl App {
                 )
             })
             .collect::<Vec<_>>();
-        let data = self.profile_cache.as_ref().unwrap().1.as_ref().unwrap();
+        let data = self.profile.cache.as_ref().unwrap().1.as_ref().unwrap();
         let (nav, visibility_changed) = draw_profile_plot(
             ui,
             data,
             &slice,
-            &self.axis_names,
+            &self.dataset.axis_names,
             &self.settings.palette,
             &x_labels,
             &line_labels,
             self.settings.display_decimals,
-            self.profile_zoom,
-            &mut self.value_visibility,
+            self.profile.zoom,
+            &mut self.workspace.value_visibility,
             self.settings.tutorial_tips,
         );
         if visibility_changed {
-            self.profile_cache = None;
+            self.profile.cache = None;
         }
-        self.profile_zoom = match nav {
+        self.profile.zoom = match nav {
             PlotNavAction::Reset => 1.0,
-            PlotNavAction::ZoomOut => (self.profile_zoom / 1.25).max(1.0),
-            PlotNavAction::ZoomIn => (self.profile_zoom * 1.25).min(64.0),
-            PlotNavAction::None | PlotNavAction::Center => self.profile_zoom,
+            PlotNavAction::ZoomOut => (self.profile.zoom / 1.25).max(1.0),
+            PlotNavAction::ZoomIn => (self.profile.zoom * 1.25).min(64.0),
+            PlotNavAction::None | PlotNavAction::Center => self.profile.zoom,
         };
     }
 }

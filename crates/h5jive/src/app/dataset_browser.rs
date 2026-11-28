@@ -1,23 +1,17 @@
 use super::*;
-use std::{
-    path::Path,
-    sync::{
-        atomic::{AtomicBool, Ordering},
-        Arc,
-    },
-};
+use std::path::Path;
 
 struct SourceIndex {
     products: Vec<Product>,
     error: Option<String>,
-    scanning: bool,
     visited: usize,
-    receiver: Option<mpsc::Receiver<ScanMessage>>,
-    cancel: Option<Arc<AtomicBool>>,
+    scan_job: ProgressJob<(), Vec<Product>, usize>,
+    cache_write_job: BackgroundJob<(), ()>,
+    cache_dirty: bool,
     available: Option<bool>,
-    availability_job: Option<mpsc::Receiver<bool>>,
+    availability_job: BackgroundJob<(), bool>,
     last_availability_check: Option<std::time::Instant>,
-    metadata_job: Option<mpsc::Receiver<(String, Result<[String; 4], String>)>>,
+    metadata_job: BackgroundJob<String, [String; 4]>,
 }
 
 pub(super) struct DatasetBrowser {
@@ -64,14 +58,14 @@ impl DatasetBrowser {
                 SourceIndex {
                     products: cached.unwrap_or_default(),
                     error: None,
-                    scanning: false,
                     visited: 0,
-                    receiver: None,
-                    cancel: None,
+                    scan_job: ProgressJob::default(),
+                    cache_write_job: BackgroundJob::default(),
+                    cache_dirty: false,
                     available: None,
-                    availability_job: None,
+                    availability_job: BackgroundJob::default(),
                     last_availability_check: None,
-                    metadata_job: None,
+                    metadata_job: BackgroundJob::default(),
                 }
             })
             .collect();
@@ -98,11 +92,13 @@ impl DatasetBrowser {
         self.sources
             .iter()
             .filter_map(|source| {
-                if source.scanning {
+                if source.scan_job.is_busy() {
                     Some("index")
-                } else if source.metadata_job.is_some() {
+                } else if source.metadata_job.is_busy() {
                     Some("metadata")
-                } else if source.availability_job.is_some() {
+                } else if source.cache_write_job.is_busy() {
+                    Some("index cache")
+                } else if source.availability_job.is_busy() {
                     Some("source check")
                 } else {
                     None
@@ -113,9 +109,12 @@ impl DatasetBrowser {
 
     pub fn poll(&mut self, sources: &[DatasetSource], notices: &mut NoticeCenter) {
         for (number, (index, config)) in self.sources.iter_mut().zip(sources).enumerate() {
-            if let Some(job) = &index.metadata_job {
-                match job.try_recv() {
-                    Ok((relative, Ok(fields))) => {
+            if let Some((relative, result)) = index
+                .metadata_job
+                .poll("Metadata reader stopped unexpectedly.")
+            {
+                match result {
+                    Ok(fields) => {
                         if let Some(product) = index
                             .products
                             .iter_mut()
@@ -134,69 +133,48 @@ impl DatasetBrowser {
                                     *current = value;
                                 }
                             }
-                            let config = config.clone();
-                            let products = index.products.clone();
-                            thread::spawn(move || {
-                                let _ = write_cache(&config, &products);
-                            });
+                            index.cache_dirty = true;
                             self.dirty = true;
                             self.products_revision = self.products_revision.wrapping_add(1);
                         }
                         notices.info("Product metadata read.");
-                        index.metadata_job = None;
                     }
-                    Ok((_, Err(error))) => {
+                    Err(error) => {
                         notices.error(format!("Could not read product metadata: {error}"));
-                        index.metadata_job = None;
                     }
-                    Err(mpsc::TryRecvError::Disconnected) => {
-                        notices.error("Metadata reader stopped unexpectedly.");
-                        index.metadata_job = None;
-                    }
-                    Err(mpsc::TryRecvError::Empty) => {}
                 }
             }
-            if let Some(job) = &index.availability_job {
-                match job.try_recv() {
-                    Ok(available) => {
-                        index.available = Some(available);
-                        index.availability_job = None;
-                    }
-                    Err(mpsc::TryRecvError::Disconnected) => {
-                        notices.warning("Dataset source availability check stopped unexpectedly.");
-                        index.availability_job = None;
-                    }
-                    Err(mpsc::TryRecvError::Empty) => {}
+            if let Some((_, result)) = index
+                .availability_job
+                .poll("Dataset source availability check stopped unexpectedly.")
+            {
+                match result {
+                    Ok(available) => index.available = Some(available),
+                    Err(error) => notices.warning(error),
                 }
             }
-            if index.availability_job.is_none()
+            if !index.availability_job.is_busy()
                 && index
                     .last_availability_check
                     .is_none_or(|time| time.elapsed().as_secs() >= 10)
             {
                 let root = config.root.clone();
-                let (sender, receiver) = mpsc::channel();
-                thread::spawn(move || {
-                    let _ = sender.send(root.is_dir());
-                });
-                index.availability_job = Some(receiver);
+                index.availability_job.start((), move |_| Ok(root.is_dir()));
                 index.last_availability_check = Some(std::time::Instant::now());
             }
-            let Some(receiver) = &index.receiver else {
-                continue;
-            };
             loop {
-                match receiver.try_recv() {
-                    Ok(ScanMessage::Progress(visited)) => index.visited = visited,
-                    Ok(ScanMessage::Finished(result)) => {
+                match index
+                    .scan_job
+                    .poll("Dataset index scan stopped unexpectedly.")
+                {
+                    Some((_, JobEvent::Progress(visited))) => index.visited = visited,
+                    Some((_, JobEvent::Finished(result))) => {
                         match result {
-                            Ok((products, cache_error)) => {
+                            Ok(products) => {
                                 index.products = products;
                                 self.products_revision = self.products_revision.wrapping_add(1);
                                 index.error = None;
-                                if let Some(error) = cache_error {
-                                    notices.warning(error);
-                                }
+                                index.cache_dirty = true;
                                 if number == self.selected_source
                                     && self.selected_product.as_ref().is_some_and(|selected| {
                                         !index
@@ -214,21 +192,26 @@ impl DatasetBrowser {
                                 index.error = Some(error);
                             }
                         }
-                        index.scanning = false;
-                        index.receiver = None;
-                        index.cancel = None;
                         break;
                     }
-                    Err(mpsc::TryRecvError::Empty) => break,
-                    Err(mpsc::TryRecvError::Disconnected) => {
-                        notices.error("Dataset index scan stopped unexpectedly.");
-                        index.error = Some("Scan worker stopped unexpectedly".into());
-                        index.scanning = false;
-                        index.receiver = None;
-                        index.cancel = None;
-                        break;
-                    }
+                    None => break,
                 }
+            }
+            if let Some((_, result)) = index
+                .cache_write_job
+                .poll("Dataset index cache writer stopped unexpectedly.")
+            {
+                if let Err(error) = result {
+                    notices.error(format!("Could not save dataset index cache: {error}"));
+                }
+            }
+            if index.cache_dirty && !index.cache_write_job.is_busy() {
+                let config = config.clone();
+                let products = index.products.clone();
+                index
+                    .cache_write_job
+                    .start((), move |_| write_cache(&config, &products));
+                index.cache_dirty = false;
             }
         }
     }
@@ -237,27 +220,18 @@ impl DatasetBrowser {
         let Some(index) = self.sources.get_mut(source_number) else {
             return;
         };
-        if index.scanning {
+        if index.scan_job.is_busy() {
             return;
         }
-        let (sender, receiver) = mpsc::channel();
-        let cancel = Arc::new(AtomicBool::new(false));
-        let worker_cancel = Arc::clone(&cancel);
         let source = source.clone();
-        thread::spawn(move || {
-            let result = scan_source(&source, &sender, &worker_cancel).map(|products| {
-                let cache_error = write_cache(&source, &products)
-                    .err()
-                    .map(|error| format!("Products found, but cache could not be saved: {error}"));
-                (products, cache_error)
-            });
-            let _ = sender.send(ScanMessage::Finished(result));
+        index.scan_job.start((), move |cancelled, progress| {
+            let report = |visited| {
+                let _ = progress(visited);
+            };
+            scan_source(&source, cancelled, &report)
         });
         index.visited = 0;
         index.error = None;
-        index.scanning = true;
-        index.cancel = Some(cancel);
-        index.receiver = Some(receiver);
     }
 
     fn read_selected_metadata(
@@ -267,16 +241,13 @@ impl DatasetBrowser {
         relative: String,
     ) {
         let index = &mut self.sources[source_number];
-        if index.metadata_job.is_some() {
+        if index.metadata_job.is_busy() {
             return;
         }
         let path = source.root.join(&relative);
-        let (sender, receiver) = mpsc::channel();
-        thread::spawn(move || {
-            let result = read_product_metadata(&path);
-            let _ = sender.send((relative, result));
-        });
-        index.metadata_job = Some(receiver);
+        index
+            .metadata_job
+            .start(relative, move |_| read_product_metadata(&path));
     }
 
     fn rebuild_visible(&mut self) {
@@ -471,11 +442,9 @@ impl DatasetBrowser {
                     );
                 }
                 ui.spacing();
-                if index.scanning {
+                if self.sources[source_number].scan_job.is_busy() {
                     if ui.button("Cancel scan") {
-                        if let Some(cancel) = &index.cancel {
-                            cancel.store(true, Ordering::Relaxed);
-                        }
+                        self.sources[source_number].scan_job.cancel();
                     }
                     item_tip(
                         ui,
@@ -692,7 +661,7 @@ impl DatasetBrowser {
                             || product.orbit.is_empty()
                     }) {
                         ui.same_line();
-                        let pending = self.sources[source_number].metadata_job.is_some();
+                        let pending = self.sources[source_number].metadata_job.is_busy();
                         let _disabled = ui.begin_disabled_with_cond(pending);
                         if ui.button("Read product metadata") {
                             self.read_selected_metadata(source_number, source, relative.clone());
@@ -746,8 +715,7 @@ mod tests {
             if !source.root.is_dir() {
                 continue;
             }
-            let (sender, _receiver) = mpsc::channel();
-            let products = scan_source(source, &sender, &AtomicBool::new(false)).unwrap();
+            let products = scan_source(source, &|| false, &|_| {}).unwrap();
             if products.is_empty() {
                 continue;
             }
@@ -788,14 +756,14 @@ mod tests {
                 })
                 .collect(),
             error: None,
-            scanning: false,
             visited: 0,
-            receiver: None,
-            cancel: None,
+            scan_job: ProgressJob::default(),
+            cache_write_job: BackgroundJob::default(),
+            cache_dirty: false,
             available: None,
-            availability_job: None,
+            availability_job: BackgroundJob::default(),
             last_availability_check: None,
-            metadata_job: None,
+            metadata_job: BackgroundJob::default(),
         });
         browser.rebuild_visible();
         assert_eq!(browser.filtered.len(), 70_001);
@@ -837,14 +805,14 @@ mod tests {
                 })
                 .collect(),
             error: None,
-            scanning: false,
             visited: 0,
-            receiver: None,
-            cancel: None,
+            scan_job: ProgressJob::default(),
+            cache_write_job: BackgroundJob::default(),
+            cache_dirty: false,
             available: None,
-            availability_job: None,
+            availability_job: BackgroundJob::default(),
             last_availability_check: None,
-            metadata_job: None,
+            metadata_job: BackgroundJob::default(),
         });
         for (label, name, date, orbit) in [
             ("all", "", "", ""),
@@ -923,13 +891,12 @@ mod tests {
             cache_path: base.join("index.json"),
             overpass: OverpassDiscovery::default(),
         };
-        let (sender, _receiver) = mpsc::channel();
-        let products = scan_source(&source, &sender, &AtomicBool::new(false)).unwrap();
+        let products = scan_source(&source, &|| false, &|_| {}).unwrap();
         write_cache(&source, &products).unwrap();
         fs::remove_dir_all(root).unwrap();
         let browser = DatasetBrowser::new(&[source]);
         assert_eq!(browser.sources[0].products.len(), 1);
-        assert!(!browser.sources[0].scanning);
+        assert!(!browser.sources[0].scan_job.is_busy());
         fs::remove_dir_all(base).unwrap();
     }
 
@@ -954,13 +921,16 @@ mod tests {
         };
         let mut browser = DatasetBrowser::new(&[source.clone()]);
         browser.poll(&[source.clone()], &mut NoticeCenter::default());
-        assert!(!browser.sources[0].scanning);
+        assert!(!browser.sources[0].scan_job.is_busy());
         assert!(browser.sources[0].products.is_empty());
         assert!(!source.cache_path.exists());
         browser.refresh(0, &source);
         for _ in 0..100 {
             browser.poll(&[source.clone()], &mut NoticeCenter::default());
-            if !browser.sources[0].scanning {
+            if !browser.sources[0].scan_job.is_busy()
+                && !browser.sources[0].cache_write_job.is_busy()
+                && source.cache_path.exists()
+            {
                 break;
             }
             std::thread::sleep(std::time::Duration::from_millis(5));
@@ -968,6 +938,83 @@ mod tests {
         assert_eq!(browser.sources[0].products.len(), 1);
         assert!(source.cache_path.exists());
         fs::remove_dir_all(base).unwrap();
+    }
+
+    #[test]
+    fn cache_write_failure_is_reported() {
+        let base =
+            std::env::temp_dir().join(format!("h5jive_cache_failure_test_{}", std::process::id()));
+        fs::create_dir_all(&base).unwrap();
+        fs::write(base.join("blocked"), b"file").unwrap();
+        let source = DatasetSource {
+            id: "cache_failure_test".into(),
+            name: "Cache failure test".into(),
+            root: base.clone(),
+            format: "gome_l1b".into(),
+            tags: vec![],
+            product_regex: "[.]nc$".into(),
+            cache_path: base.join("blocked/index.json"),
+            overpass: OverpassDiscovery::default(),
+        };
+        let mut browser = DatasetBrowser::new(&[source.clone()]);
+        browser.sources[0].cache_dirty = true;
+        let mut notices = NoticeCenter::default();
+        for _ in 0..100 {
+            browser.poll(&[source.clone()], &mut notices);
+            if notices.iter().any(|notice| {
+                notice.kind == NoticeKind::Error
+                    && notice
+                        .message
+                        .contains("Could not save dataset index cache")
+            }) {
+                fs::remove_dir_all(base).unwrap();
+                return;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        fs::remove_dir_all(base).unwrap();
+        panic!("cache write failure did not reach the notice stack");
+    }
+
+    #[test]
+    fn newer_cache_snapshot_is_saved_after_an_inflight_write() {
+        let base =
+            std::env::temp_dir().join(format!("h5jive_cache_update_test_{}", std::process::id()));
+        fs::create_dir_all(&base).unwrap();
+        let source = DatasetSource {
+            id: "cache_update_test".into(),
+            name: "Cache update test".into(),
+            root: base.clone(),
+            format: "gome_l1b".into(),
+            tags: vec![],
+            product_regex: "[.]nc$".into(),
+            cache_path: base.join("index.json"),
+            overpass: OverpassDiscovery::default(),
+        };
+        let mut browser = DatasetBrowser::new(&[source.clone()]);
+        browser.sources[0].cache_dirty = true;
+        browser.poll(&[source.clone()], &mut NoticeCenter::default());
+        browser.sources[0].products.push(Product {
+            filename: "new.nc".into(),
+            relative_path: "new.nc".into(),
+            year: "2026".into(),
+            month: "11".into(),
+            day: "28".into(),
+            orbit: "1".into(),
+            size: 1,
+        });
+        browser.sources[0].cache_dirty = true;
+        for _ in 0..100 {
+            browser.poll(&[source.clone()], &mut NoticeCenter::default());
+            if !browser.sources[0].cache_dirty && !browser.sources[0].cache_write_job.is_busy() {
+                assert_eq!(read_cache(&source).unwrap().len(), 1);
+                fs::remove_dir_all(base).unwrap();
+                return;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        fs::remove_dir_all(base).unwrap();
+        panic!("newer cache snapshot was not saved");
     }
 
     #[test]

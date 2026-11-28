@@ -2,12 +2,12 @@ use super::super::*;
 
 impl App {
     pub(crate) fn draw_attributes_tab(&mut self, ui: &Ui) {
-        let Some(selection) = self.selection.clone() else {
+        let Some(selection) = self.session.selection.clone() else {
             ui.text_wrapped("Select a group or dataset to see its attributes.");
             return;
         };
         self.ensure_attributes_loaded(&selection);
-        let Some(result) = &self.attributes_cache else {
+        let Some(result) = &self.dataset.attributes_cache else {
             return;
         };
         let attributes = match result {

@@ -2,11 +2,12 @@ use super::super::*;
 
 impl App {
     pub(crate) fn draw_distribution_tab(&mut self, ui: &Ui) {
-        let Some(selection) = self.selection.clone() else {
+        let Some(selection) = self.session.selection.clone() else {
             ui.text_wrapped("Select a numeric dataset to see its distribution.");
             return;
         };
-        let Some(entry) = find_entry(&self.files[selection.file].tree, &selection.path) else {
+        let Some(entry) = find_entry(&self.session.files[selection.file].tree, &selection.path)
+        else {
             return;
         };
         if !matches!(entry.kind, Kind::Dataset { numeric: true, .. }) {
@@ -14,10 +15,10 @@ impl App {
             return;
         }
         self.poll_statistics(&selection);
-        if self.statistics_cache.is_none() {
+        if self.dataset.statistics_cache.is_none() {
             return;
         }
-        let statistics = match self.statistics_cache.as_ref().unwrap() {
+        let statistics = match self.dataset.statistics_cache.as_ref().unwrap() {
             Ok(statistics) => statistics,
             Err(err) => {
                 ui.text_wrapped(format!("Distribution unavailable: {err}"));
@@ -30,10 +31,10 @@ impl App {
         }
         let statistics = statistics.clone();
         self.poll_distribution(&selection, &statistics);
-        if self.distribution_cache.is_none() {
+        if self.dataset.distribution_cache.is_none() {
             return;
         }
-        match self.distribution_cache.as_ref().unwrap() {
+        match self.dataset.distribution_cache.as_ref().unwrap() {
             Ok(distribution) => draw_distribution(ui, &statistics, distribution, &self.settings),
             Err(err) => ui.text_wrapped(format!("Distribution unavailable: {err}")),
         }

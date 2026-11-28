@@ -2,11 +2,12 @@ use super::super::*;
 
 impl App {
     pub(crate) fn draw_coordinates_tab(&mut self, ui: &Ui) {
-        let Some(selection) = self.selection.clone() else {
+        let Some(selection) = self.session.selection.clone() else {
             ui.text_wrapped("Select a dataset to see its coordinates.");
             return;
         };
-        let Some(entry) = find_entry(&self.files[selection.file].tree, &selection.path) else {
+        let Some(entry) = find_entry(&self.session.files[selection.file].tree, &selection.path)
+        else {
             return;
         };
         if !matches!(entry.kind, Kind::Dataset { .. }) {
@@ -14,7 +15,7 @@ impl App {
             return;
         }
         self.ensure_coordinates_loaded(&selection);
-        match self.coordinates_cache.as_ref().unwrap() {
+        match self.dataset.coordinates_cache.as_ref().unwrap() {
             Ok(axes) if axes.is_empty() => ui.text("Scalar dataset: no dimensions"),
             Ok(axes) => {
                 let (outer_size, scroll) = table_extent(

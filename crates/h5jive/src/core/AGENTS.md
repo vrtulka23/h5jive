@@ -7,7 +7,9 @@ value classification, and visualization data preparation without GUI code.
 1. Keep this layer independent of Dear ImGui, Dear ImPlot, wgpu, and window
    state. Return data, keys, or errors that callers can render or explain.
    Use `h5jive-data` for HDF5 and NetCDF access instead of opening backend
-   libraries directly here.
+   libraries directly here. Scanner and loader APIs accept cancellation and
+   progress callbacks rather than exposing channels; app code wraps them in
+   `BackgroundJob` or `ProgressJob`.
 2. Preserve arbitrary dataset shape and axis order. Check shapes, ranges,
    indexing, and overflow before allocating or reading. Follow existing
    region and slice models so large datasets are read in bounded chunks.

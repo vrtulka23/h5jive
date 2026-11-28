@@ -7,7 +7,7 @@ use std::{
     fs,
     path::{Path, PathBuf},
     sync::{
-        atomic::{AtomicBool, AtomicUsize, Ordering},
+        atomic::{AtomicUsize, Ordering},
         mpsc,
     },
     time::UNIX_EPOCH,
@@ -52,17 +52,10 @@ struct OverpassCache {
     products: HashMap<String, CachedProduct>,
 }
 
-pub(crate) enum OverpassMessage {
-    Progress {
-        done: usize,
-        total: usize,
-        hits: usize,
-    },
-    Finished {
-        results: HashMap<String, Result<Vec<OverpassGroupResult>, String>>,
-        cancelled: bool,
-        cache_error: Option<String>,
-    },
+pub(crate) struct OverpassScan {
+    pub(crate) results: HashMap<String, Result<Vec<OverpassGroupResult>, String>>,
+    pub(crate) cancelled: bool,
+    pub(crate) cache_error: Option<String>,
 }
 
 fn cache_path(source: &DatasetSource, area: &OverpassArea) -> PathBuf {
@@ -350,9 +343,9 @@ pub(crate) fn scan_overpasses(
     source: &DatasetSource,
     products: &[Product],
     area: &OverpassArea,
-    sender: &mpsc::Sender<OverpassMessage>,
-    cancel: &AtomicBool,
-) {
+    cancelled: &(dyn Fn() -> bool + Sync),
+    progress: &(dyn Fn(usize, usize, usize) + Sync),
+) -> OverpassScan {
     let mut cache = read_overpass_cache(source, area);
     let current: HashSet<&str> = products
         .iter()
@@ -362,7 +355,7 @@ pub(crate) fn scan_overpasses(
     let mut results = HashMap::with_capacity(products.len());
     let mut pending = Vec::new();
     for product in products {
-        if cancel.load(Ordering::Relaxed) {
+        if cancelled() {
             break;
         }
         let path = source.root.join(&product.relative_path);
@@ -392,7 +385,7 @@ pub(crate) fn scan_overpasses(
                 .is_ok_and(|groups| groups.iter().any(|group| group.hit))
         })
         .count();
-    let _ = sender.send(OverpassMessage::Progress { done, total, hits });
+    progress(done, total, hits);
     let next = AtomicUsize::new(0);
     let mut cache_error = None;
     let workers = pending.len().min(
@@ -407,7 +400,7 @@ pub(crate) fn scan_overpasses(
             let next = &next;
             let pending = &pending;
             scope.spawn(move || loop {
-                if cancel.load(Ordering::Relaxed) {
+                if cancelled() {
                     break;
                 }
                 let index = next.fetch_add(1, Ordering::Relaxed);
@@ -444,11 +437,7 @@ pub(crate) fn scan_overpasses(
             }
             results.insert(relative, result);
             if results.len() % 32 == 0 {
-                let _ = sender.send(OverpassMessage::Progress {
-                    done: results.len(),
-                    total,
-                    hits,
-                });
+                progress(results.len(), total, hits);
             }
             if since_write >= 2048 {
                 if let Err(error) = write_overpass_cache(source, area, &cache) {
@@ -463,11 +452,11 @@ pub(crate) fn scan_overpasses(
             cache_error = Some(error);
         }
     }
-    let _ = sender.send(OverpassMessage::Finished {
+    OverpassScan {
         results,
-        cancelled: cancel.load(Ordering::Relaxed),
+        cancelled: cancelled(),
         cache_error,
-    });
+    }
 }
 
 #[cfg(test)]
@@ -545,30 +534,25 @@ mod tests {
             size: fs::metadata(product).unwrap().len(),
         };
         for expected_cached in [0, 1] {
-            let (sender, receiver) = mpsc::channel();
-            scan_overpasses(
+            let progress = std::sync::Mutex::new(Vec::new());
+            let scan = scan_overpasses(
                 &source,
                 &[product.clone()],
                 &area,
-                &sender,
-                &AtomicBool::new(false),
+                &|| false,
+                &|done, total, hits| {
+                    progress.lock().unwrap().push((done, total, hits));
+                },
             );
-            let initial = receiver.try_recv().unwrap();
-            let OverpassMessage::Progress { done, .. } = initial else {
-                panic!("missing initial progress")
-            };
-            assert_eq!(done, expected_cached);
-            let finish = receiver.try_iter().last().unwrap();
-            let OverpassMessage::Finished {
-                results,
-                cache_error,
-                ..
-            } = finish
-            else {
-                panic!("missing result")
-            };
-            assert!(cache_error.is_none(), "cache write failed: {cache_error:?}");
-            assert!(results[&product.relative_path].as_ref().unwrap()[0].hit);
+            let progress = progress.into_inner().unwrap();
+            assert_eq!(progress[0].0, expected_cached);
+            assert_eq!(scan.results.len(), 1);
+            assert!(
+                scan.cache_error.is_none(),
+                "cache write failed: {:?}",
+                scan.cache_error
+            );
+            assert!(scan.results[&product.relative_path].as_ref().unwrap()[0].hit);
         }
         fs::remove_dir_all(temporary).unwrap();
     }

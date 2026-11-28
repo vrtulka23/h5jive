@@ -123,19 +123,19 @@ impl NoticeCenter {
 
 impl App {
     pub(crate) fn show_notice(&mut self, kind: NoticeKind, message: impl Into<String>) {
-        self.notices.show(kind, message);
+        self.session.notices.show(kind, message);
     }
 
     pub(crate) fn expire_notices(&mut self, now: Instant) {
-        self.notices.expire(now);
+        self.session.notices.expire(now);
     }
 
     pub(crate) fn dismiss_notice(&mut self, id: u64) {
-        self.notices.dismiss(id);
+        self.session.notices.dismiss(id);
     }
 
     pub(crate) fn next_notice_deadline(&self) -> Option<Instant> {
-        self.notices.next_deadline()
+        self.session.notices.next_deadline()
     }
 }
 
@@ -164,7 +164,7 @@ pub(crate) struct CellEditJob {
     pub(crate) path: String,
     pub(crate) restore_selection: Option<Selection>,
     pub(crate) keys: Vec<CellKey>,
-    pub(crate) receiver: mpsc::Receiver<(h5jive_data::NumericApplyOutcome, Result<File, String>)>,
+    pub(crate) job: BackgroundJob<(), (h5jive_data::NumericApplyOutcome, Result<File, String>)>,
 }
 
 pub(crate) struct FindReplaceDialog {
@@ -179,8 +179,7 @@ pub(crate) struct FindReplaceDialog {
     pub(crate) summary: Option<Result<h5jive_data::NumericSearchSummary, String>>,
     pub(crate) progress: Arc<AtomicU64>,
     pub(crate) cancel: Arc<AtomicBool>,
-    pub(crate) search_job:
-        Option<mpsc::Receiver<Result<h5jive_data::NumericSearchSummary, String>>>,
+    pub(crate) search_job: BackgroundJob<(), h5jive_data::NumericSearchSummary>,
     pub(crate) message: Option<String>,
     pub(crate) preserved: bool,
 }
@@ -188,7 +187,7 @@ pub(crate) struct FindReplaceDialog {
 pub(crate) struct BulkReplaceJob {
     pub(crate) selection: Selection,
     pub(crate) progress: Arc<AtomicU64>,
-    pub(crate) receiver: mpsc::Receiver<(h5jive_data::NumericReplaceOutcome, Result<File, String>)>,
+    pub(crate) job: BackgroundJob<(), (h5jive_data::NumericReplaceOutcome, Result<File, String>)>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]

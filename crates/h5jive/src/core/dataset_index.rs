@@ -7,10 +7,6 @@ use serde::{Deserialize, Serialize};
 use std::{
     fs,
     path::{Path, PathBuf},
-    sync::{
-        atomic::{AtomicBool, Ordering},
-        mpsc,
-    },
     time::UNIX_EPOCH,
 };
 
@@ -156,11 +152,6 @@ pub(crate) fn matching_products(
     matching
 }
 
-pub(crate) enum ScanMessage {
-    Progress(usize),
-    Finished(Result<(Vec<Product>, Option<String>), String>),
-}
-
 /// Read metadata only when path and filename discovery left fields empty.
 pub(crate) fn read_product_metadata(path: &Path) -> Result<[String; 4], String> {
     let attributes = File::open_with_options(
@@ -232,8 +223,8 @@ pub(crate) fn write_cache(source: &DatasetSource, products: &[Product]) -> Resul
 /// Walk a repository in the background, reporting progress and honoring cancellation.
 pub(crate) fn scan_source(
     source: &DatasetSource,
-    sender: &mpsc::Sender<ScanMessage>,
-    cancel: &AtomicBool,
+    cancelled: &(dyn Fn() -> bool + Sync),
+    progress: &(dyn Fn(usize) + Sync),
 ) -> Result<Vec<Product>, String> {
     let regex = Regex::new(&source.product_regex).map_err(|error| error.to_string())?;
     if !source.root.is_dir() {
@@ -243,13 +234,13 @@ pub(crate) fn scan_source(
     let mut pending = vec![source.root.clone()];
     let mut visited = 0;
     while let Some(directory) = pending.pop() {
-        if cancel.load(Ordering::Relaxed) {
+        if cancelled() {
             return Err("Scan cancelled".into());
         }
         let entries = fs::read_dir(&directory)
             .map_err(|error| format!("{}: {error}", directory.display()))?;
         for entry in entries {
-            if cancel.load(Ordering::Relaxed) {
+            if cancelled() {
                 return Err("Scan cancelled".into());
             }
             let entry = entry.map_err(|error| error.to_string())?;
@@ -267,7 +258,7 @@ pub(crate) fn scan_source(
             }
             visited += 1;
             if visited % 1024 == 0 {
-                let _ = sender.send(ScanMessage::Progress(visited));
+                progress(visited);
             }
             let relative = path
                 .strip_prefix(&source.root)
@@ -296,6 +287,6 @@ pub(crate) fn scan_source(
         }
     }
     products.sort_by(|a, b| a.relative_path.cmp(&b.relative_path));
-    let _ = sender.send(ScanMessage::Progress(visited));
+    progress(visited);
     Ok(products)
 }

@@ -19,6 +19,7 @@ mod state;
 mod tutorial_tips;
 mod ui;
 mod value_visibility;
+mod view_state;
 mod views;
 pub(crate) use views::coastlines;
 mod volume_raycast;
@@ -37,6 +38,7 @@ use settings::*;
 use state::*;
 use tutorial_tips::*;
 use ui::*;
+use view_state::*;
 use views::*;
 use volume_raycast::*;
 
@@ -56,7 +58,7 @@ use dear_implot::{
 };
 use h5jive_data::{
     same_file, AttributeValue, CoordinateAxis, DatasetDistribution, DatasetStatistics, Entry, File,
-    Geolocation, GeolocationRule, Kind, NumericEdit, OpenOptions, Region, ScanFilter, WritableFile,
+    Geolocation, GeolocationRule, Kind, NumericEdit, OpenOptions, Region, ScanFilter,
 };
 use scinumtools3::Project;
 use std::{
@@ -65,7 +67,7 @@ use std::{
     path::PathBuf,
     sync::{
         atomic::{AtomicBool, AtomicU64, Ordering},
-        mpsc, Arc,
+        Arc,
     },
     thread,
     time::{Duration, Instant},
@@ -98,11 +100,6 @@ enum PlotNavAction {
 #[derive(Clone, Copy)]
 struct VolumeRotation([f32; 4]);
 
-enum MapJobUpdate {
-    Preview(MapData),
-    Complete(Result<(MapData, Option<Arc<Region>>), String>),
-}
-
 #[derive(Clone, Copy)]
 struct GlobeRotation {
     start_yaw: f32,
@@ -110,11 +107,6 @@ struct GlobeRotation {
     start_pitch: f32,
     target_pitch: f32,
     started_at: Instant,
-}
-
-enum ProfileJobUpdate {
-    Overview(ProfileData),
-    Complete(Result<ProfileData, String>),
 }
 
 #[derive(Clone, PartialEq, Eq)]
@@ -125,136 +117,13 @@ struct ProfileKey {
 }
 
 struct App {
-    files: Vec<File>,
-    file_paths: Vec<PathBuf>,
-    file_path_inputs: [String; 2],
-    notices: NoticeCenter,
-    file_open_jobs: [Option<mpsc::Receiver<Result<File, String>>>; 2],
-    file_open_paths: [Option<PathBuf>; 2],
-    pending_browser_b: Option<PathBuf>,
-    file_picker: Option<FilePickerState>,
-    file_drop: FileDropState,
-    export_dialog: Option<ExportDialog>,
-    pending_export: Option<PendingExport>,
-    view_rect: [f32; 4],
-    selection: Option<Selection>,
-    sync_restore_selection: Option<Selection>,
-    startup_tab: Option<usize>,
-    details_key: Option<Selection>,
-    details_default_pending: bool,
-    statistics_cache: Option<Result<DatasetStatistics, String>>,
-    statistics_job: BackgroundJob<Selection, DatasetStatistics>,
-    distribution_cache: Option<Result<DatasetDistribution, String>>,
-    distribution_job: BackgroundJob<Selection, DatasetDistribution>,
-    attributes_cache: Option<Result<Vec<AttributeValue>, String>>,
-    coordinates_cache: Option<Result<Vec<CoordinateAxis>, String>>,
-    coordinate_value_cache: HashMap<(usize, usize), Option<String>>,
-    tree_geolocation_cache: HashMap<(usize, String), Option<Geolocation>>,
-    selection_key: Option<Selection>,
-    axis_names: Vec<String>,
-    region_cache: Vec<(RegionKey, Arc<Result<Region, String>>)>,
-    pending_cell_edits: HashMap<CellKey, PendingCellEdit>,
-    cell_editor: Option<CellEditor>,
-    cell_edit_job: Option<CellEditJob>,
-    find_replace_dialog: Option<FindReplaceDialog>,
-    bulk_replace_job: Option<BulkReplaceJob>,
-    table_scroll_to_row: Option<usize>,
-    queued_selection: Option<Selection>,
-    heatmap_cache: Option<(HeatmapKey, Result<Arc<HeatmapImage>, String>)>,
-    heatmap_tiles: Vec<(HeatmapKey, Arc<HeatmapImage>)>,
-    heatmap_tile_job: Option<(HeatmapKey, mpsc::Receiver<Result<HeatmapImage, String>>)>,
-    heatmap_refine_generation: Arc<AtomicU64>,
-    heatmap_navigation_at: Option<Instant>,
-    heatmap_overview_cache: Option<(HeatmapOverviewKey, Result<HeatmapImage, String>)>,
-    heatmap_overview_job: Option<(
-        HeatmapOverviewKey,
-        mpsc::Receiver<Result<HeatmapImage, String>>,
-    )>,
-    heatmap_view_overview_cache: Option<(HeatmapOverviewKey, Result<HeatmapImage, String>)>,
-    heatmap_view_overview_job: Option<(
-        HeatmapOverviewKey,
-        mpsc::Receiver<Result<HeatmapImage, String>>,
-    )>,
-    heatmap_range_cache: Option<(HeatmapRangeKey, Result<Option<(f64, f64)>, String>)>,
-    heatmap_tick_view: Option<(HeatmapRangeKey, [f64; 4])>,
-    heatmap_range_job: Option<(
-        HeatmapRangeKey,
-        mpsc::Receiver<Result<Option<(f64, f64)>, String>>,
-    )>,
-    heatmap_colormap: Option<([[f32; 4]; 3], String)>,
-    profile_cache: Option<(ProfileKey, Result<ProfileData, String>)>,
-    profile_job: Option<(ProfileKey, mpsc::Receiver<ProfileJobUpdate>)>,
-    profile_load_generation: Arc<AtomicU64>,
-    volume_cache: Option<(VolumeKey, Result<Arc<ExactVolumeData>, String>)>,
-    volume_overview_cache: Option<(VolumeKey, Result<Arc<ExactVolumeData>, String>)>,
-    volume_refined_cache: Vec<(VolumeKey, Arc<ExactVolumeData>)>,
-    volume_job: Option<(
-        VolumeKey,
-        mpsc::Receiver<Result<Arc<ExactVolumeData>, String>>,
-    )>,
-    volume_refine_generation: Arc<AtomicU64>,
-    volume_raster_generation: Arc<AtomicU64>,
-    volume_navigation_at: Option<Instant>,
-    volume_raster: Option<(VolumeRasterKey, RegisteredVolumeRaster)>,
-    volume_overview_raster: Option<(VolumeRasterKey, RegisteredVolumeRaster)>,
-    volume_raster_job: Option<VolumeRasterJob>,
-    draft_volume: Option<VolumeSlice>,
-    applied_volume: Option<VolumeSlice>,
-    draft_volume_opacity: f32,
-    volume_opacity: f32,
-    draft_volume_log_scale: bool,
-    volume_log_scale: bool,
-    volume_projection: Option<VolumeProjection>,
-    volume_axis_corner: [f32; 3],
-    volume_rotation: VolumeRotation,
-    volume_zoom: f32,
-    volume_pan: [f32; 2],
-    volume_range_drag: Option<(usize, bool)>,
-    volume_footer_height: f32,
-    map_cache: Option<(MapKey, Result<MapData, String>)>,
-    map_job: Option<(MapKey, mpsc::Receiver<MapJobUpdate>)>,
-    map_plane: Option<(MapPlaneKey, Arc<Region>)>,
-    map_load_generation: Arc<AtomicU64>,
-    map_controls: GeoViewControls,
-    globe_controls: GeoViewControls,
-    selected_pics: usize,
-    selected_site_group: Option<String>,
-    map_viewport: MapViewport,
-    map_footer_height: f32,
-    globe_footer_height: f32,
-    earth_texture: Option<EarthTexture>,
-    globe_yaw: f32,
-    globe_pitch: f32,
-    globe_zoom: f32,
-    globe_auto_center_source: Option<(usize, String)>,
-    globe_auto_center_pending: bool,
-    globe_rotation: Option<GlobeRotation>,
-    draft_slice: Option<TableSlice>,
-    applied_slice: Option<TableSlice>,
-    draft_table: Option<TableSlice>,
-    applied_table: Option<TableSlice>,
-    draft_profile: Option<ProfileSlice>,
-    applied_profile: Option<ProfileSlice>,
-    table_column_page: usize,
-    table_footer_height: f32,
-    slice_footer_height: f32,
-    profile_footer_height: f32,
-    profile_zoom: f32,
-    heatmap_nav_override: Option<(HeatmapRangeKey, [f64; 4])>,
-    view_selector_height: f32,
-    workspace_mode: WorkspaceMode,
-    plugins: plugins::PluginLab,
-    dataset_browser: DatasetBrowser,
-    browser_footer_height: f32,
-    view: ViewMode,
-    view_load_generation: Arc<AtomicU64>,
-    value_visibility: ValueVisibility,
-    volume_visibility: ValueVisibility,
-    sidebar_width: f32,
-    details_panel_fraction: f32,
-    show_about: bool,
-    show_section_help: bool,
-    show_dataset_registration_help: bool,
+    session: SessionState,
+    workspace: WorkspaceState,
+    dataset: DatasetState,
+    heatmap: HeatmapState,
+    profile: ProfileState,
+    volume: VolumeState,
+    geo: GeoState,
     settings: Settings,
     resource_monitor: ResourceMonitor,
     gpu_initialized: Arc<AtomicBool>,
@@ -287,6 +156,7 @@ impl Application for App {
             return Ok(());
         }
         match self
+            .session
             .file_drop
             .handle_event(context.event(), context.window())
         {
@@ -303,14 +173,14 @@ impl Application for App {
     }
 
     fn prepare_frame(&mut self, context: &mut PrepareFrameContext<'_>) -> Result<(), RunError> {
-        if self.file_drop.hovering {
-            self.file_drop.refresh_pointer(context.window());
+        if self.session.file_drop.hovering {
+            self.session.file_drop.refresh_pointer(context.window());
         }
         Ok(())
     }
 
     fn frame(&mut self, frame: &mut FrameContext<'_>) -> Result<(), RunError> {
-        if self.file_drop.hovering {
+        if self.session.file_drop.hovering {
             let _ = frame
                 .wake_handle()
                 .request_redraw_at(Instant::now() + Duration::from_millis(33));
@@ -318,7 +188,7 @@ impl Application for App {
         self.advance_export();
         self.expire_notices(Instant::now());
         self.ensure_earth_texture(frame.gpu());
-        if self.view == ViewMode::Spatial3d {
+        if self.workspace.view == ViewMode::Spatial3d {
             self.poll_volume_raster(frame.gpu());
         }
         let ui = frame.ui();
@@ -327,7 +197,7 @@ impl Application for App {
         let frame_start = Instant::now();
         self.draw(ui, &plot_ui, plot_ctx);
         self.resource_monitor.record_ui_time(frame_start.elapsed());
-        if self.view == ViewMode::Globe && self.globe_rotation.is_some() {
+        if self.workspace.view == ViewMode::Globe && self.geo.globe_rotation.is_some() {
             let _ = frame
                 .wake_handle()
                 .request_redraw_at(Instant::now() + Duration::from_millis(16));
@@ -335,7 +205,7 @@ impl Application for App {
         let _ = frame
             .wake_handle()
             .request_redraw_at(self.resource_monitor.next_sample_at());
-        if self.pending_export.is_some() {
+        if self.session.pending_export.is_some() {
             let _ = frame.wake_handle().request_redraw_at(
                 std::time::Instant::now() + std::time::Duration::from_millis(80),
             );
@@ -343,25 +213,30 @@ impl Application for App {
         if let Some(deadline) = self.next_notice_deadline() {
             let _ = frame.wake_handle().request_redraw_at(deadline);
         }
-        if self.plugins.poll(&mut self.notices)
-            || self.cell_edit_job.is_some()
-            || self.bulk_replace_job.is_some()
-            || self.file_open_jobs.iter().any(Option::is_some)
+        if self.workspace.plugins.poll(&mut self.session.notices)
+            || self.dataset.cell_edit_job.is_some()
+            || self.dataset.bulk_replace_job.is_some()
             || self
+                .session
+                .file_open_jobs
+                .iter()
+                .any(BackgroundJob::is_busy)
+            || self
+                .dataset
                 .find_replace_dialog
                 .as_ref()
-                .is_some_and(|dialog| dialog.search_job.is_some())
-            || self.heatmap_overview_job.is_some()
-            || self.heatmap_view_overview_job.is_some()
-            || self.profile_job.is_some()
-            || self.volume_raster_job.is_some()
-            || self.map_job.is_some()
+                .is_some_and(|dialog| dialog.search_job.is_busy())
+            || self.heatmap.overview_job.is_busy()
+            || self.heatmap.view_overview_job.is_busy()
+            || self.profile.job.is_busy()
+            || self.volume.raster_job.is_some()
+            || self.geo.map_job.is_busy()
         {
             let _ = frame.wake_handle().request_redraw_at(
                 std::time::Instant::now() + std::time::Duration::from_millis(80),
             );
         }
-        for activity in [self.heatmap_navigation_at, self.volume_navigation_at]
+        for activity in [self.heatmap.navigation_at, self.volume.navigation_at]
             .into_iter()
             .flatten()
         {
@@ -499,140 +374,17 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
             .contains(wgpu::Backends::VULKAN | wgpu::Backends::GL);
     let gpu_initialized = Arc::new(AtomicBool::new(false));
     let app = App {
-        files,
-        file_paths: inputs.iter().map(|(path, _)| path.clone()).collect(),
-        file_path_inputs: [
-            inputs
-                .first()
-                .map_or_else(String::new, |(path, _)| path.display().to_string()),
-            inputs
-                .get(1)
-                .map_or_else(String::new, |(path, _)| path.display().to_string()),
-        ],
-        notices: NoticeCenter::default(),
-        file_open_jobs: [None, None],
-        file_open_paths: [None, None],
-        pending_browser_b: None,
-        file_picker: None,
-        file_drop: FileDropState::default(),
-        export_dialog: None,
-        pending_export: None,
-        view_rect: [0.0; 4],
-        startup_tab: selection.as_ref().map(|selected| selected.file),
-        selection,
-        sync_restore_selection: None,
-        details_key: None,
-        details_default_pending: true,
-        statistics_cache: None,
-        statistics_job: BackgroundJob::default(),
-        distribution_cache: None,
-        distribution_job: BackgroundJob::default(),
-        attributes_cache: None,
-        coordinates_cache: None,
-        coordinate_value_cache: HashMap::new(),
-        tree_geolocation_cache: HashMap::new(),
-        selection_key: None,
-        axis_names: Vec::new(),
-        region_cache: Vec::new(),
-        pending_cell_edits: HashMap::new(),
-        cell_editor: None,
-        cell_edit_job: None,
-        find_replace_dialog: None,
-        bulk_replace_job: None,
-        table_scroll_to_row: None,
-        queued_selection: None,
-        heatmap_cache: None,
-        heatmap_tiles: Vec::new(),
-        heatmap_tile_job: None,
-        heatmap_refine_generation: Arc::new(AtomicU64::new(0)),
-        heatmap_navigation_at: None,
-        heatmap_overview_cache: None,
-        heatmap_overview_job: None,
-        heatmap_view_overview_cache: None,
-        heatmap_view_overview_job: None,
-        heatmap_range_cache: None,
-        heatmap_tick_view: None,
-        heatmap_range_job: None,
-        heatmap_colormap: None,
-        profile_cache: None,
-        profile_job: None,
-        profile_load_generation: Arc::new(AtomicU64::new(0)),
-        volume_cache: None,
-        volume_overview_cache: None,
-        volume_refined_cache: Vec::new(),
-        volume_job: None,
-        volume_refine_generation: Arc::new(AtomicU64::new(0)),
-        volume_raster_generation: Arc::new(AtomicU64::new(0)),
-        volume_navigation_at: None,
-        volume_raster: None,
-        volume_overview_raster: None,
-        volume_raster_job: None,
-        draft_volume: None,
-        applied_volume: None,
-        draft_volume_opacity: settings.volume_default_opacity,
-        volume_opacity: settings.volume_default_opacity,
-        draft_volume_log_scale: settings.volume_default_log_scale,
-        volume_log_scale: settings.volume_default_log_scale,
-        volume_projection: Some(VolumeProjection::Isometric),
-        volume_axis_corner: [0.5; 3],
-        volume_rotation: VolumeRotation::from_angles(0.65, 0.45),
-        volume_zoom: 1.0,
-        volume_pan: [0.0, 0.0],
-        volume_range_drag: None,
-        volume_footer_height: 260.0,
-        map_cache: None,
-        map_job: None,
-        map_plane: None,
-        map_load_generation: Arc::new(AtomicU64::new(0)),
-        map_controls: GeoViewControls::new(settings.map_show_pics)
-            .with_dummy_rgb(settings.palette.accent),
-        globe_controls: GeoViewControls::new(settings.map_show_pics)
-            .with_dummy_rgb(settings.palette.accent),
-        selected_pics: 0,
-        selected_site_group: None,
-        map_viewport: MapViewport::default(),
-        map_footer_height: 0.0,
-        globe_footer_height: 0.0,
-        earth_texture: None,
-        globe_yaw: 0.0,
-        globe_pitch: 0.0,
-        globe_zoom: 1.0,
-        globe_auto_center_source: None,
-        globe_auto_center_pending: false,
-        globe_rotation: None,
-        draft_slice: None,
-        applied_slice: None,
-        draft_table: None,
-        applied_table: None,
-        draft_profile: None,
-        applied_profile: None,
-        table_column_page: 0,
-        table_footer_height: 150.0,
-        slice_footer_height: 150.0,
-        profile_footer_height: 170.0,
-        profile_zoom: 1.0,
-        heatmap_nav_override: None,
-        view_selector_height: settings.view_button_height + 4.0,
-        workspace_mode: WorkspaceMode::DataInspector,
-        plugins: plugins::PluginLab::default(),
-        dataset_browser: DatasetBrowser::new(&settings.dataset_sources),
-        browser_footer_height: 105.0,
-        view: view_override.unwrap_or(settings.default_view),
-        view_load_generation: Arc::new(AtomicU64::new(0)),
-        value_visibility: ValueVisibility::default(),
-        volume_visibility: ValueVisibility {
-            fill: false,
-            ..ValueVisibility::default()
-        },
-        sidebar_width: settings.sidebar_width,
-        details_panel_fraction: settings.details_panel_fraction,
+        session: SessionState::new(files, &inputs, selection),
+        workspace: WorkspaceState::new(&settings, view_override),
+        dataset: DatasetState::new(),
+        heatmap: HeatmapState::new(),
+        profile: ProfileState::new(),
+        volume: VolumeState::new(&settings),
+        geo: GeoState::new(&settings),
         resource_monitor: ResourceMonitor::new(),
         gpu_initialized: Arc::clone(&gpu_initialized),
         wayland_session,
         display_backend: None,
-        show_about: false,
-        show_section_help: false,
-        show_dataset_registration_help: false,
         settings,
     };
     match run_app(config, app) {

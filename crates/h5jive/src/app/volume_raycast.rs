@@ -36,8 +36,7 @@ pub(super) struct VolumeRasterRequest {
 }
 
 pub(super) struct VolumeRasterJob {
-    pub(super) key: VolumeRasterKey,
-    pub(super) receiver: mpsc::Receiver<Vec<u8>>,
+    pub(super) job: BackgroundJob<VolumeRasterKey, Vec<u8>>,
     pub(super) started_at: Instant,
 }
 
@@ -76,99 +75,99 @@ fn prefer_wider_overview(
 impl App {
     pub(super) fn poll_volume_raster(&mut self, gpu: &mut GpuApi<'_>) {
         if self
-            .volume_raster
+            .volume
+            .raster
             .as_ref()
             .is_some_and(|(_, raster)| raster.generation != gpu.generation())
         {
-            self.volume_raster = None;
+            self.volume.raster = None;
         }
         if self
-            .volume_overview_raster
+            .volume
+            .overview_raster
             .as_ref()
             .is_some_and(|(_, raster)| raster.generation != gpu.generation())
         {
-            self.volume_overview_raster = None;
+            self.volume.overview_raster = None;
         }
-        let ready = self
-            .volume_raster_job
-            .as_ref()
-            .and_then(|job| job.receiver.try_recv().ok());
-        if let Some(rgba) = ready {
-            if let Some(VolumeRasterJob { key, .. }) = self.volume_raster_job.take() {
-                match upload_volume_raster(gpu, &key, &rgba) {
+        if let Some((key, result)) = self.volume.raster_job.as_mut().and_then(|job| {
+            job.job
+                .poll("Could not render 3D view: worker stopped unexpectedly.")
+        }) {
+            self.volume.raster_job = None;
+            match result {
+                Ok(rgba) => match upload_volume_raster(gpu, &key, &rgba) {
                     Ok(raster) => {
-                        if let Some(old) = self.volume_raster.take() {
-                            let has_full_overview = self
-                                .applied_volume
-                                .as_ref()
-                                .is_some_and(|slice| raster_has_full_overview(&old.0, &key, slice));
+                        if let Some(old) = self.volume.raster.take() {
+                            let has_full_overview =
+                                self.volume.applied_slice.as_ref().is_some_and(|slice| {
+                                    raster_has_full_overview(&old.0, &key, slice)
+                                });
                             let is_wider = self
-                                .volume_overview_raster
+                                .volume
+                                .overview_raster
                                 .as_ref()
                                 .is_none_or(|(cached, _)| old.0.scale[0] < cached.scale[0]);
                             if has_full_overview && is_wider {
-                                self.volume_overview_raster = Some(old);
+                                self.volume.overview_raster = Some(old);
                             }
                         }
-                        self.volume_raster = Some((key, raster));
+                        self.volume.raster = Some((key, raster));
                     }
                     Err(error) => {
-                        self.notices
+                        self.session
+                            .notices
                             .error(format!("Could not display the 3D render: {error}"));
                     }
-                }
+                },
+                Err(error) => self.session.notices.error(error),
             }
-        } else if self.volume_raster_job.as_ref().is_some_and(|job| {
-            matches!(
-                job.receiver.try_recv(),
-                Err(mpsc::TryRecvError::Disconnected)
-            )
-        }) {
-            self.notices
-                .error("Could not render 3D view: worker stopped unexpectedly.");
-            self.volume_raster_job = None;
         }
     }
 
     pub(super) fn request_volume_raster(&mut self, request: VolumeRasterRequest) {
         if self
-            .volume_raster
+            .volume
+            .raster
             .as_ref()
             .is_some_and(|(key, _)| *key == request.key)
         {
             return;
         }
-        if let Some(job) = &self.volume_raster_job {
+        if let Some(job) = &self.volume.raster_job {
             // Finish one low-resolution frame before replacing it, so continuous
             // dragging cannot starve the preview. A full render yields to motion.
-            let preview_in_progress = job.key.render_size != job.key.size;
+            let working = job.job.key().expect("active raster job has a key");
+            let preview_in_progress = working.render_size != working.size;
             let requesting_preview = request.key.render_size != request.key.size;
-            if job.key == request.key
+            if *working == request.key
                 || preview_in_progress
                 || !requesting_preview && job.started_at.elapsed() < STALE_RASTER_AFTER
             {
                 return;
             }
-            self.volume_raster_generation
+            self.volume
+                .raster_generation
                 .fetch_add(1, Ordering::Relaxed);
-            self.volume_raster_job = None;
+            self.volume.raster_job.as_mut().unwrap().job.cancel();
+            self.volume.raster_job = None;
         }
         let key = request.key.clone();
-        let generation = Arc::clone(&self.view_load_generation);
+        let generation = Arc::clone(&self.workspace.view_load_generation);
         let expected = generation.load(Ordering::Relaxed);
-        let refinement = Arc::clone(&self.volume_raster_generation);
+        let refinement = Arc::clone(&self.volume.raster_generation);
         let expected_refinement = refinement.load(Ordering::Relaxed);
-        let (sender, receiver) = mpsc::channel();
-        thread::spawn(move || {
+        let mut job = BackgroundJob::default();
+        job.start(key.clone(), move |job_cancelled| {
             let image = render_exact_volume_with_cancel(&request, &|| {
-                generation.load(Ordering::Relaxed) != expected
+                job_cancelled()
+                    || generation.load(Ordering::Relaxed) != expected
                     || refinement.load(Ordering::Relaxed) != expected_refinement
             });
-            let _ = sender.send(image);
+            Ok(image)
         });
-        self.volume_raster_job = Some(VolumeRasterJob {
-            key,
-            receiver,
+        self.volume.raster_job = Some(VolumeRasterJob {
+            job,
             started_at: Instant::now(),
         });
     }
@@ -202,11 +201,13 @@ impl App {
             })
         };
         let current = self
-            .volume_raster
+            .volume
+            .raster
             .as_ref()
             .filter(|(cached, _)| compatible(cached));
         let overview = self
-            .volume_overview_raster
+            .volume
+            .overview_raster
             .as_ref()
             .filter(|(cached, _)| compatible(cached));
         let wider_overview = current.zip(overview).and_then(|(current, overview)| {

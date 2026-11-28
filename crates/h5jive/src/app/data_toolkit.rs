@@ -13,10 +13,10 @@ impl SpecialValue {
 
 impl App {
     pub(super) fn ensure_attributes_loaded(&mut self, selection: &Selection) {
-        if self.attributes_cache.is_some() {
+        if self.dataset.attributes_cache.is_some() {
             return;
         }
-        let result = self.files[selection.file]
+        let result = self.session.files[selection.file]
             .attributes(&selection.path)
             .map_err(|err| err.to_string());
         if let Err(error) = &result {
@@ -25,14 +25,14 @@ impl App {
                 format!("Could not read dataset attributes: {error}"),
             );
         }
-        self.attributes_cache = Some(result);
+        self.dataset.attributes_cache = Some(result);
     }
 
     pub(super) fn ensure_coordinates_loaded(&mut self, selection: &Selection) {
-        if self.coordinates_cache.is_some() {
+        if self.dataset.coordinates_cache.is_some() {
             return;
         }
-        let result = self.files[selection.file]
+        let result = self.session.files[selection.file]
             .coordinate_axes(&selection.path)
             .map_err(|err| err.to_string());
         if let Err(error) = &result {
@@ -41,11 +41,12 @@ impl App {
                 format!("Could not read coordinate metadata: {error}"),
             );
         }
-        self.coordinates_cache = Some(result);
+        self.dataset.coordinates_cache = Some(result);
     }
 
     pub(super) fn cached_coordinate_label(&self, axis: usize, index: usize) -> String {
-        self.coordinate_value_cache
+        self.dataset
+            .coordinate_value_cache
             .get(&(axis, index))
             .and_then(Option::as_ref)
             .map_or_else(|| index.to_string(), |value| format!("{index} ({value})"))
@@ -67,7 +68,7 @@ impl App {
     }
 
     pub(super) fn pinned_coordinate_labels(&mut self, pinned: &[usize]) -> Vec<String> {
-        let selection = self.selection.clone();
+        let selection = self.session.selection.clone();
         pinned
             .iter()
             .enumerate()
@@ -89,7 +90,8 @@ impl App {
         selection: &Selection,
     ) -> Option<&[CoordinateAxis]> {
         self.ensure_coordinates_loaded(selection);
-        self.coordinates_cache
+        self.dataset
+            .coordinates_cache
             .as_ref()?
             .as_ref()
             .ok()
@@ -113,13 +115,16 @@ impl App {
                 .map(|index| index.to_string())
                 .collect();
         };
-        if (start..start + count)
-            .any(|index| !self.coordinate_value_cache.contains_key(&(axis, index)))
-        {
-            if self.coordinate_value_cache.len() + count > 8192 {
-                self.coordinate_value_cache.clear();
+        if (start..start + count).any(|index| {
+            !self
+                .dataset
+                .coordinate_value_cache
+                .contains_key(&(axis, index))
+        }) {
+            if self.dataset.coordinate_value_cache.len() + count > 8192 {
+                self.dataset.coordinate_value_cache.clear();
             }
-            let rank = match self.files[selection.file].dataset_info(&variable) {
+            let rank = match self.session.files[selection.file].dataset_info(&variable) {
                 Ok(info) => info.shape.len(),
                 Err(error) => {
                     self.show_notice(
@@ -130,9 +135,9 @@ impl App {
                 }
             };
             let values = if rank == 2 {
-                self.files[selection.file].region(&variable, &[0, start], &[1, count])
+                self.session.files[selection.file].region(&variable, &[0, start], &[1, count])
             } else {
-                self.files[selection.file].region(&variable, &[start], &[count])
+                self.session.files[selection.file].region(&variable, &[start], &[count])
             };
             if let Err(error) = &values {
                 self.show_notice(
@@ -150,13 +155,15 @@ impl App {
                         }
                     })
                 });
-                self.coordinate_value_cache
+                self.dataset
+                    .coordinate_value_cache
                     .insert((axis, start + offset), value);
             }
         }
         (start..start + count)
             .map(|index| {
-                self.coordinate_value_cache
+                self.dataset
+                    .coordinate_value_cache
                     .get(&(axis, index))
                     .and_then(|value| value.as_ref())
                     .map_or_else(|| index.to_string(), |value| format!("{index} ({value})"))

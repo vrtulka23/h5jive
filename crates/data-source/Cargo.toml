@@ -7,6 +7,7 @@ description = "HDF5 and NetCDF data access and export for H5Jive"
 
 [dependencies]
 hdf5-metno = "0.15"
+hdf5-metno-sys = "0.12"
 netcdf-reader = "0.9"
 netcdf = "0.12.1"
 ndarray = "0.17"

@@ -2,16 +2,25 @@
 
 ## Workspace
 
-- `crates/data-source` handles file access, dataset discovery, attributes,
-  statistics, coordinate discovery, and bounded region reads.
+- `crates/data-source` (`h5jive-data`) is the backend boundary and handles file
+  access, dataset discovery, attributes, mutations, copies, statistics,
+  coordinate discovery, and bounded region reads. It is the only crate that
+  may depend on HDF5, NetCDF, or ndarray.
 - `crates/h5jive/src/core/` contains GUI-independent dataset indexing,
   slice models, value classification, and profile, heatmap, volume, and
-  geospatial loading routines.
+  geospatial loading routines. It may use `h5jive-data`, but not the UI or
+  plugin layers. Scanners accept cancellation and progress callbacks.
 - `crates/h5jive/src/app/` contains the native UI, view controls,
   rendering, settings, and background job coordination. Views call the core
-  routines to obtain data for display.
+  routines to obtain data for display. All long-running work is polled through
+  `BackgroundJob` or `ProgressJob`; do not add raw channel polling. The `App`
+  shell delegates state to cohesive groups in `app/view_state.rs`: session,
+  workspace, dataset inspector, 2D heatmap/slice, profile, volume, and
+  geospatial state. Add fields to the owning group rather than to `App`.
 - `crates/h5jive/src/plugins/` contains optional Plugin Lab tools. See
-  [Plugin Lab](plugin-lab.md) for the extension contract and demo.
+  [Plugin Lab](plugin-lab.md) for the extension contract and demo. Plugins use
+  `h5jive-data` for format-specific work and the shared job and notice APIs for
+  transient state.
 
 - `settings/build/` contains compiled DIPL constants; `settings/runtime/`
   contains editable DIPL configuration, schemas, and appearance profiles.
@@ -27,10 +36,14 @@ where they occur.
 ## Build and API reference
 
 ```sh
+./scripts/check-layering.sh
 cargo check --workspace
 cargo doc --workspace --no-deps
 ./h5jive.sh --build
 ```
+
+`check-layering.sh` verifies the crate dependency directions and rejects new
+backend imports in the UI or raw channel polling outside the shared job layer.
 
 When the `snt` CLI with `dip format` is on `PATH`, the H5Jive build script
 checks and, when needed, formats the build and runtime settings (including

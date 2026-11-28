@@ -7,7 +7,7 @@ const DIALOG_PADDING: [f32; 2] = [12.0, 10.0];
 
 fn invalidate_search(dialog: &mut FindReplaceDialog) {
     dialog.cancel.store(true, Ordering::Relaxed);
-    dialog.search_job = None;
+    dialog.search_job.cancel();
     dialog.summary = None;
     dialog.first_result = 0;
 }
@@ -43,16 +43,17 @@ impl App {
         let width = ui.content_region_avail()[0].max(1.0);
         if ui.button_with_size("Find / Replace", [width, ui.frame_height()]) {
             if self
+                .dataset
                 .find_replace_dialog
                 .as_ref()
                 .is_some_and(|dialog| dialog.selection == *selection)
             {
-                let dialog = self.find_replace_dialog.as_mut().unwrap();
+                let dialog = self.dataset.find_replace_dialog.as_mut().unwrap();
                 dialog.open_requested = true;
                 dialog.preserved = false;
                 dialog.message = None;
             } else {
-                self.find_replace_dialog = Some(FindReplaceDialog {
+                self.dataset.find_replace_dialog = Some(FindReplaceDialog {
                     selection: selection.clone(),
                     open_requested: true,
                     needle: String::new(),
@@ -64,7 +65,7 @@ impl App {
                     summary: None,
                     progress: Arc::new(AtomicU64::new(0)),
                     cancel: Arc::new(AtomicBool::new(false)),
-                    search_job: None,
+                    search_job: BackgroundJob::default(),
                     message: None,
                     preserved: false,
                 });
@@ -79,7 +80,7 @@ impl App {
     }
 
     fn start_numeric_search(&mut self) {
-        let Some(dialog) = self.find_replace_dialog.as_mut() else {
+        let Some(dialog) = self.dataset.find_replace_dialog.as_mut() else {
             return;
         };
         if dialog.needle.trim().is_empty() {
@@ -97,7 +98,7 @@ impl App {
         dialog.cancel = Arc::new(AtomicBool::new(false));
         dialog.progress = Arc::new(AtomicU64::new(0));
         dialog.message = None;
-        let path = self.file_paths[dialog.selection.file].clone();
+        let path = self.session.file_paths[dialog.selection.file].clone();
         let dataset = dialog.selection.path.clone();
         let options = OpenOptions {
             max_depth: self.settings.tree_max_depth,
@@ -107,16 +108,13 @@ impl App {
         let first = dialog.first_result;
         let progress = Arc::clone(&dialog.progress);
         let cancel = Arc::clone(&dialog.cancel);
-        let (sender, receiver) = mpsc::channel();
-        thread::spawn(move || {
-            let result = File::open_with_options(&path, options)
+        dialog.search_job.start((), move |_| {
+            File::open_with_options(&path, options)
                 .and_then(|file| {
                     file.search_numeric(&dataset, &needle, rule, first, PAGE, &progress, &cancel)
                 })
-                .map_err(|error| error.to_string());
-            let _ = sender.send(result);
+                .map_err(|error| error.to_string())
         });
-        dialog.search_job = Some(receiver);
     }
 
     pub(super) fn draw_find_replace_dialog(
@@ -125,33 +123,26 @@ impl App {
         selection: &Selection,
         _shape: &[usize],
     ) {
-        let Some(dialog) = self.find_replace_dialog.as_mut() else {
+        let Some(dialog) = self.dataset.find_replace_dialog.as_mut() else {
             return;
         };
         if dialog.selection != *selection {
             dialog.cancel.store(true, Ordering::Relaxed);
-            self.find_replace_dialog = None;
+            self.dataset.find_replace_dialog = None;
             return;
         }
         let mut search_error = None;
-        if let Some(receiver) = &dialog.search_job {
-            match receiver.try_recv() {
-                Ok(result) => {
-                    if let Err(error) = &result {
-                        search_error = Some(format!("Search failed: {error}"));
-                    }
-                    dialog.summary = Some(result);
-                    dialog.search_job = None;
+        if let Some((_, result)) = dialog.search_job.poll("Search stopped unexpectedly.") {
+            match result {
+                Ok(summary) => dialog.summary = Some(Ok(summary)),
+                Err(error) => {
+                    search_error = Some(format!("Search failed: {error}"));
+                    dialog.summary = Some(Err(error));
                 }
-                Err(mpsc::TryRecvError::Disconnected) => {
-                    search_error = Some("Search stopped unexpectedly.".into());
-                    dialog.search_job = None;
-                }
-                Err(mpsc::TryRecvError::Empty) => {}
             }
         }
         if let Some(message) = search_error {
-            self.notices.error(message);
+            self.session.notices.error(message);
         }
         if dialog.open_requested {
             ui.open_popup(POPUP);
@@ -230,7 +221,7 @@ impl App {
                 }
 
                 ui.spacing();
-                let searching = dialog.search_job.is_some();
+                let searching = dialog.search_job.is_busy();
                 {
                     let _disabled = ui.begin_disabled_with_cond(searching);
                     if draw_accent_button(ui, &palette, "Find all", [0.0, 0.0]) {
@@ -268,6 +259,7 @@ impl App {
                     "Value to write into every match, such as a number, NaN, or Fill.",
                 );
                 let staged = self
+                    .dataset
                     .pending_cell_edits
                     .keys()
                     .any(|key| key.file == selection.file);
@@ -279,8 +271,8 @@ impl App {
                 let can_replace_all = matches!(&dialog.summary, Some(Ok(summary)) if summary.matches > 0)
                     && !dialog.replacement.trim().is_empty()
                     && !staged
-                    && dialog.search_job.is_none()
-                    && self.bulk_replace_job.is_none();
+                    && !dialog.search_job.is_busy()
+                    && self.dataset.bulk_replace_job.is_none();
                 {
                     let _disabled = ui.begin_disabled_with_cond(!can_replace_all);
                     if draw_accent_button(ui, &palette, "Replace all matches", [0.0, 0.0]) {
@@ -406,7 +398,7 @@ impl App {
                                     "Search failed. See the error notice for details.",
                                 ),
                             }
-                        } else if dialog.search_job.is_none() {
+                        } else if !dialog.search_job.is_busy() {
                             ui.text_wrapped("Run Find all to list matches here.");
                         }
                     });
@@ -414,11 +406,12 @@ impl App {
         }
         if !open {
             if self
+                .dataset
                 .find_replace_dialog
                 .as_ref()
                 .is_some_and(|dialog| !dialog.preserved)
             {
-                if let Some(dialog) = self.find_replace_dialog.take() {
+                if let Some(dialog) = self.dataset.find_replace_dialog.take() {
                     dialog.cancel.store(true, Ordering::Relaxed);
                 }
             }
@@ -428,15 +421,16 @@ impl App {
             self.start_numeric_search();
         }
         if let Some(coordinates) = navigate {
-            if let Some(slice) = self.applied_table.as_mut() {
+            if let Some(slice) = self.dataset.applied_table.as_mut() {
                 slice.pinned.clone_from(&coordinates);
-                self.draft_table = Some(slice.clone());
-                self.table_column_page =
+                self.dataset.draft_table = Some(slice.clone());
+                self.dataset.table_column_page =
                     coordinates[slice.column_axis] / self.settings.table_columns_per_page;
-                self.table_scroll_to_row = Some(slice.row_axis.map_or(0, |axis| coordinates[axis]));
-                self.region_cache.clear();
+                self.dataset.table_scroll_to_row =
+                    Some(slice.row_axis.map_or(0, |axis| coordinates[axis]));
+                self.dataset.region_cache.clear();
             }
-            if let Some(dialog) = self.find_replace_dialog.as_mut() {
+            if let Some(dialog) = self.dataset.find_replace_dialog.as_mut() {
                 dialog.preserved = true;
             }
         }
@@ -444,20 +438,21 @@ impl App {
             self.start_bulk_replace(selection);
         }
         if !ui.is_popup_open(POPUP)
-            && self.bulk_replace_job.is_none()
+            && self.dataset.bulk_replace_job.is_none()
             && self
+                .dataset
                 .find_replace_dialog
                 .as_ref()
                 .is_some_and(|dialog| !dialog.open_requested && !dialog.preserved)
         {
-            if let Some(dialog) = self.find_replace_dialog.take() {
+            if let Some(dialog) = self.dataset.find_replace_dialog.take() {
                 dialog.cancel.store(true, Ordering::Relaxed);
             }
         }
     }
 
     fn start_bulk_replace(&mut self, selection: &Selection) {
-        let Some(dialog) = self.find_replace_dialog.as_mut() else {
+        let Some(dialog) = self.dataset.find_replace_dialog.as_mut() else {
             return;
         };
         let Some(Ok(summary)) = &dialog.summary else {
@@ -471,18 +466,23 @@ impl App {
                 return;
             }
         };
-        if self.cell_edit_job.is_some()
-            || self.bulk_replace_job.is_some()
-            || self.plugins.is_busy()
-            || self.file_open_jobs.iter().any(Option::is_some)
+        if self.dataset.cell_edit_job.is_some()
+            || self.dataset.bulk_replace_job.is_some()
+            || self.workspace.plugins.is_busy()
+            || self
+                .session
+                .file_open_jobs
+                .iter()
+                .any(BackgroundJob::is_busy)
         {
             dialog.message = Some("Wait for file operations to finish.".into());
             dialog.open_requested = true;
             return;
         }
         let slot = selection.file;
-        let path = self.file_paths[slot].clone();
+        let path = self.session.file_paths[slot].clone();
         if self
+            .session
             .file_paths
             .iter()
             .enumerate()
@@ -494,13 +494,13 @@ impl App {
             return;
         }
         if let Err(error) =
-            self.files[slot].validate_numeric_edit(&selection.path, &dialog.replacement)
+            self.session.files[slot].validate_numeric_edit(&selection.path, &dialog.replacement)
         {
             dialog.message = Some(error.to_string());
             dialog.open_requested = true;
             return;
         }
-        if let Err(error) = self.files[slot].release_for_edit() {
+        if let Err(error) = self.session.files[slot].release_for_edit() {
             dialog.message = Some(error.to_string());
             dialog.open_requested = true;
             return;
@@ -515,8 +515,8 @@ impl App {
             max_depth: self.settings.tree_max_depth,
             max_objects: self.settings.tree_max_objects,
         };
-        let (sender, receiver) = mpsc::channel();
-        thread::spawn(move || {
+        let mut job = BackgroundJob::default();
+        job.start((), move |_| {
             let outcome = File::replace_numeric_matches(
                 &path,
                 &dataset,
@@ -528,34 +528,35 @@ impl App {
             );
             let reopened =
                 File::open_with_options(&path, options).map_err(|error| error.to_string());
-            let _ = sender.send((outcome, reopened));
+            Ok((outcome, reopened))
         });
-        self.bulk_replace_job = Some(BulkReplaceJob {
+        self.dataset.bulk_replace_job = Some(BulkReplaceJob {
             selection: selection.clone(),
             progress,
-            receiver,
+            job,
         });
-        self.find_replace_dialog = None;
+        self.dataset.find_replace_dialog = None;
         self.reset_file_selection();
     }
 
     pub(crate) fn poll_bulk_replace_job(&mut self) {
-        let Some(job) = &self.bulk_replace_job else {
-            return;
-        };
-        let result = job.receiver.try_recv();
+        let result = self
+            .dataset
+            .bulk_replace_job
+            .as_mut()
+            .and_then(|job| job.job.poll("Replace worker stopped unexpectedly."));
         match result {
-            Ok((outcome, reopened)) => {
-                let job = self.bulk_replace_job.take().unwrap();
+            Some((_, Ok((outcome, reopened)))) => {
+                let job = self.dataset.bulk_replace_job.take().unwrap();
                 let slot = job.selection.file;
                 match reopened {
                     Ok(file) => {
-                        self.files[slot] = file;
+                        self.session.files[slot] = file;
                         self.reset_file_selection();
-                        self.selection = Some(job.selection);
+                        self.session.selection = Some(job.selection);
                         self.refresh_selection();
-                        self.region_cache.clear();
-                        self.plugins.invalidate();
+                        self.dataset.region_cache.clear();
+                        self.workspace.plugins.invalidate();
                     }
                     Err(error) => {
                         self.show_notice(
@@ -574,11 +575,11 @@ impl App {
                     ),
                 }
             }
-            Err(mpsc::TryRecvError::Disconnected) => {
-                self.bulk_replace_job = None;
-                self.show_notice(NoticeKind::Error, "Replace worker stopped unexpectedly.");
+            Some((_, Err(error))) => {
+                self.dataset.bulk_replace_job = None;
+                self.show_notice(NoticeKind::Error, error);
             }
-            Err(mpsc::TryRecvError::Empty) => {}
+            None => {}
         }
     }
 }

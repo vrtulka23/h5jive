@@ -1178,10 +1178,8 @@ dependencies = [
  "font8x8",
  "h5jive-data",
  "hdf5-metno",
- "hdf5-metno-sys",
  "image",
  "libc",
- "ndarray",
  "regex",
  "scinumtools3",
  "scinumtools3-build",
@@ -1198,6 +1196,7 @@ name = "h5jive-data"
 version = "0.2.0"
 dependencies = [
  "hdf5-metno",
+ "hdf5-metno-sys",
  "ndarray",
  "netcdf",
  "netcdf-reader",

@@ -2,21 +2,26 @@
 
 This directory owns the native Dear ImGui UI, view controls, rendering,
 settings, exports, and background job coordination. `../app.rs` declares the
-application state and wires these modules together. Read `docs/src/development.md`
-before changing a cross-cutting flow.
+application shell and wires these modules together. Cohesive state groups live
+in `view_state.rs` (`SessionState`, `WorkspaceState`, `DatasetState`,
+`HeatmapState`, `ProfileState`, `VolumeState`, `GeoState`); add fields to the
+owning group rather than growing `App`. Read `docs/src/development.md` before
+changing a cross-cutting flow.
 
 1. Keep rendering and interaction in `views/`, `details/`, `layout.rs`, or
    focused UI helpers. Put GUI-independent data calculations and slice models
    in `../core/`. Reuse `h5jive-data` for file access. Plugins belong in
    `../plugins/`, with their own scoped `AGENTS.md`.
 2. Keep source and dataset identity explicit as `(file slot, dataset path)`.
-   Files A and B come from the same `App.files` slots throughout the UI.
+   Files A and B come from the same `App.session.files` slots throughout the UI.
    When a file or selection changes, invalidate dependent caches and jobs;
    follow the existing reset and generation patterns in `layout.rs` and
    `jobs.rs`.
-3. Do costly file reads and refinements outside the frame loop. Existing jobs
-   reopen files on worker threads, send results through channels, and use
-   generation counters to discard stale work. Keep each frame responsive.
+3. Do costly file reads and refinements outside the frame loop. Start work with
+   `BackgroundJob` or `ProgressJob`; they own worker threads, cancellation, and
+   stale-result rejection. Do not add raw channel receivers or `try_recv` loops
+   outside `background_job.rs`. Keep each frame responsive and surface worker
+   failures through notices.
 4. Use `Settings` for behavior and sizes that users should configure, and
    update the matching DIPL schema and source file in `settings/runtime/`.
    Build-only constants live in `settings/build/`. Use palette

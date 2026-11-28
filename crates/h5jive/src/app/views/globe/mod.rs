@@ -126,23 +126,27 @@ impl GlobeRotation {
 
 impl App {
     fn try_center_dataset(&mut self, key: Option<&MapKey>, scan_filter: ScanFilter) {
-        if !self.globe_auto_center_pending {
+        if !self.geo.globe_auto_center_pending {
             return;
         }
-        let (Some(key), Some((cached, result))) = (key, self.map_cache.as_ref()) else {
+        let (Some(key), Some((cached, result))) = (key, self.geo.map_cache.as_ref()) else {
             return;
         };
-        if cached != key || self.map_job.is_some() {
+        if cached != key || self.geo.map_job.is_busy() {
             return;
         }
         let center = result
             .as_ref()
             .ok()
             .and_then(|data| geospatial_center(&data.points, scan_filter));
-        self.globe_auto_center_pending = false;
+        self.geo.globe_auto_center_pending = false;
         if let Some([longitude, latitude]) = center {
-            self.globe_rotation =
-                GlobeRotation::toward(self.globe_yaw, self.globe_pitch, longitude, latitude);
+            self.geo.globe_rotation = GlobeRotation::toward(
+                self.geo.globe_yaw,
+                self.geo.globe_pitch,
+                longitude,
+                latitude,
+            );
         }
     }
 
@@ -151,12 +155,12 @@ impl App {
         let source_id = source
             .as_ref()
             .map(|source| (source.selection.file, source.selection.path.clone()));
-        if self.globe_auto_center_source != source_id {
-            self.globe_auto_center_pending = source_id.is_some();
-            self.globe_auto_center_source = source_id;
-            self.globe_rotation = None;
+        if self.geo.globe_auto_center_source != source_id {
+            self.geo.globe_auto_center_pending = source_id.is_some();
+            self.geo.globe_auto_center_source = source_id;
+            self.geo.globe_rotation = None;
         }
-        self.globe_controls.sync_source(
+        self.geo.globe_controls.sync_source(
             source
                 .as_ref()
                 .map(|source| (&source.selection, source.shape.as_slice())),
@@ -166,7 +170,7 @@ impl App {
                 .and_then(|source| source.geolocation.scan_direction.as_ref())
                 .map_or(ScanFilter::Both, |scan| scan.default_filter),
         );
-        let options = self.globe_controls.applied;
+        let options = self.geo.globe_controls.applied;
         let has_bounds = source.as_ref().is_some_and(|s| {
             s.geolocation.latitude_bounds.is_some() && s.geolocation.longitude_bounds.is_some()
         });
@@ -174,7 +178,7 @@ impl App {
             geospatial_point_budget(
                 self.settings.map_max_points,
                 self.settings.map_zoom_detail_factor,
-                self.globe_zoom,
+                self.geo.globe_zoom,
                 source.shape.iter().take(3).product(),
             )
         } else {
@@ -184,8 +188,8 @@ impl App {
         let available = ui.content_region_avail();
         let legend_width = self.settings.heatmap_legend_width.min(available[0] * 0.22);
         let legend_gap = PANEL_GAP;
-        let controls_height = if self.globe_footer_height > 0.0 {
-            self.globe_footer_height
+        let controls_height = if self.geo.globe_footer_height > 0.0 {
+            self.geo.globe_footer_height
         } else {
             geo_controls_height(
                 ui,
@@ -202,32 +206,32 @@ impl App {
             (available[1] - controls_height).max(1.0),
         ];
         let cursor = ui.cursor_screen_pos();
-        self.view_rect = [cursor[0], cursor[1], available[0], area[1]];
+        self.session.view_rect = [cursor[0], cursor[1], available[0], area[1]];
         let center = [cursor[0] + area[0] * 0.5, cursor[1] + area[1] * 0.5];
-        let radius = (area[0].min(area[1]) * 0.43 * self.globe_zoom).max(10.0);
+        let radius = (area[0].min(area[1]) * 0.43 * self.geo.globe_zoom).max(10.0);
         ui.invisible_button("##globe_canvas", area);
         let mouse = ui.io().mouse_pos();
         let within =
             (mouse[0] - center[0]).powi(2) + (mouse[1] - center[1]).powi(2) <= radius.powi(2);
         if ui.is_item_hovered() && within && ui.io().mouse_wheel() != 0.0 {
-            self.globe_zoom = (self.globe_zoom
+            self.geo.globe_zoom = (self.geo.globe_zoom
                 * self.settings.globe_zoom_factor.powf(ui.io().mouse_wheel()))
             .clamp(self.settings.globe_zoom_min, self.settings.globe_zoom_max);
         }
         if ui.is_item_active() && ui.is_mouse_dragging(dear_app::imgui::MouseButton::Left) {
-            self.globe_auto_center_pending = false;
-            self.globe_rotation = None;
+            self.geo.globe_auto_center_pending = false;
+            self.geo.globe_rotation = None;
             let d = ui.io().mouse_delta();
-            self.globe_yaw += d[0] / radius;
-            self.globe_pitch = (self.globe_pitch + d[1] / radius).clamp(-1.5, 1.5);
+            self.geo.globe_yaw += d[0] / radius;
+            self.geo.globe_pitch = (self.geo.globe_pitch + d[1] / radius).clamp(-1.5, 1.5);
         }
         self.try_center_dataset(key.as_ref(), options.scan_filter);
-        if let Some(rotation) = self.globe_rotation {
+        if let Some(rotation) = self.geo.globe_rotation {
             let (yaw, pitch, finished) = rotation.angles_at(Instant::now());
-            self.globe_yaw = yaw;
-            self.globe_pitch = pitch;
+            self.geo.globe_yaw = yaw;
+            self.geo.globe_pitch = pitch;
             if finished {
-                self.globe_rotation = None;
+                self.geo.globe_rotation = None;
             }
         }
         let earth_texture = self.earth_texture_id();
@@ -248,32 +252,32 @@ impl App {
                             north as f32,
                             center,
                             radius,
-                            self.globe_yaw,
-                            self.globe_pitch,
+                            self.geo.globe_yaw,
+                            self.geo.globe_pitch,
                         ),
                         project(
                             east as f32,
                             north as f32,
                             center,
                             radius,
-                            self.globe_yaw,
-                            self.globe_pitch,
+                            self.geo.globe_yaw,
+                            self.geo.globe_pitch,
                         ),
                         project(
                             east as f32,
                             south as f32,
                             center,
                             radius,
-                            self.globe_yaw,
-                            self.globe_pitch,
+                            self.geo.globe_yaw,
+                            self.geo.globe_pitch,
                         ),
                         project(
                             west as f32,
                             south as f32,
                             center,
                             radius,
-                            self.globe_yaw,
-                            self.globe_pitch,
+                            self.geo.globe_yaw,
+                            self.geo.globe_pitch,
                         ),
                     ];
                     let u0 = (west as f32 + 180.0) / 360.0;
@@ -314,8 +318,8 @@ impl App {
                     lat as f32,
                     center,
                     radius,
-                    self.globe_yaw,
-                    self.globe_pitch,
+                    self.geo.globe_yaw,
+                    self.geo.globe_pitch,
                 );
                 if p.depth >= 0.0 {
                     if let Some(prev) = last {
@@ -336,8 +340,8 @@ impl App {
                     lat as f32,
                     center,
                     radius,
-                    self.globe_yaw,
-                    self.globe_pitch,
+                    self.geo.globe_yaw,
+                    self.geo.globe_pitch,
                 );
                 if p.depth >= 0.0 {
                     if let Some(prev) = last {
@@ -358,16 +362,16 @@ impl App {
                     seg[0][1],
                     center,
                     radius,
-                    self.globe_yaw,
-                    self.globe_pitch,
+                    self.geo.globe_yaw,
+                    self.geo.globe_pitch,
                 );
                 let b = project(
                     seg[1][0],
                     seg[1][1],
                     center,
                     radius,
-                    self.globe_yaw,
-                    self.globe_pitch,
+                    self.geo.globe_yaw,
+                    self.geo.globe_pitch,
                 );
                 if a.depth >= 0.0 && b.depth >= 0.0 {
                     draw.add_line(a.point, b.point, shore)
@@ -395,6 +399,7 @@ impl App {
                     continue;
                 }
                 if !self
+                    .workspace
                     .value_visibility
                     .allows_class(point.value, point.special)
                 {
@@ -405,8 +410,8 @@ impl App {
                     point.latitude,
                     center,
                     radius,
-                    self.globe_yaw,
-                    self.globe_pitch,
+                    self.geo.globe_yaw,
+                    self.geo.globe_pitch,
                 );
                 if p.depth < 0.0
                     || (p.point[0] < cursor[0] - 32.0
@@ -440,8 +445,8 @@ impl App {
                                 corner[1],
                                 center,
                                 radius,
-                                self.globe_yaw,
-                                self.globe_pitch,
+                                self.geo.globe_yaw,
+                                self.geo.globe_pitch,
                             )
                         });
                         projected
@@ -484,6 +489,7 @@ impl App {
         }
         if let Some(Ok(data)) = map_data {
             let current = self
+                .geo
                 .map_cache
                 .as_ref()
                 .is_some_and(|(cached, _)| key.as_ref() == Some(cached));
@@ -502,6 +508,7 @@ impl App {
         if options.show_pics {
             for (i, site) in self.settings.pics_sites.iter().enumerate() {
                 if self
+                    .geo
                     .selected_site_group
                     .as_deref()
                     .is_some_and(|group| site.category != group)
@@ -513,8 +520,8 @@ impl App {
                     site.center[1],
                     center,
                     radius,
-                    self.globe_yaw,
-                    self.globe_pitch,
+                    self.geo.globe_yaw,
+                    self.geo.globe_pitch,
                 );
                 if p.depth < 0.0 {
                     continue;
@@ -522,10 +529,17 @@ impl App {
                 for region in &site.regions {
                     let [w, s, e, n] = region.bounds;
                     let corners = [[w, s], [e, s], [e, n], [w, n]].map(|c| {
-                        project(c[0], c[1], center, radius, self.globe_yaw, self.globe_pitch)
+                        project(
+                            c[0],
+                            c[1],
+                            center,
+                            radius,
+                            self.geo.globe_yaw,
+                            self.geo.globe_pitch,
+                        )
                     });
                     if corners.iter().all(|p| p.depth >= 0.0) {
-                        let c = if i + 1 == self.selected_pics {
+                        let c = if i + 1 == self.geo.selected_pics {
                             palette.accent
                         } else {
                             palette.fill
@@ -618,32 +632,33 @@ impl App {
             "globe",
             [cursor[0] + available[0] - nav_width, cursor[1]],
             nav_width,
-            self.globe_zoom,
-            &mut self.value_visibility,
+            self.geo.globe_zoom,
+            &mut self.workspace.value_visibility,
             palette,
             self.settings.tutorial_tips,
             Some(source.is_some()),
         );
         if visibility_changed {
-            self.profile_cache = None;
+            self.profile.cache = None;
         }
         match nav {
             PlotNavAction::Reset => {
-                self.globe_auto_center_pending = false;
-                self.globe_rotation = None;
-                self.globe_yaw = 0.0;
-                self.globe_pitch = 0.0;
-                self.globe_zoom = 1.0;
+                self.geo.globe_auto_center_pending = false;
+                self.geo.globe_rotation = None;
+                self.geo.globe_yaw = 0.0;
+                self.geo.globe_pitch = 0.0;
+                self.geo.globe_zoom = 1.0;
             }
             PlotNavAction::Center => {
-                self.globe_auto_center_pending = true;
-                self.globe_rotation = None;
+                self.geo.globe_auto_center_pending = true;
+                self.geo.globe_rotation = None;
                 self.try_center_dataset(key.as_ref(), options.scan_filter);
             }
             PlotNavAction::ZoomOut | PlotNavAction::ZoomIn => {
                 let step = if nav == PlotNavAction::ZoomIn { 1 } else { -1 };
-                self.globe_zoom = (self.globe_zoom * self.settings.globe_zoom_factor.powi(step))
-                    .clamp(self.settings.globe_zoom_min, self.settings.globe_zoom_max);
+                self.geo.globe_zoom = (self.geo.globe_zoom
+                    * self.settings.globe_zoom_factor.powi(step))
+                .clamp(self.settings.globe_zoom_min, self.settings.globe_zoom_max);
             }
             PlotNavAction::None => {}
         }
@@ -651,42 +666,46 @@ impl App {
         let changes = draw_geo_controls(
             ui,
             "globe",
-            &mut self.globe_controls,
+            &mut self.geo.globe_controls,
             source.as_ref().map(|source| source.shape.as_slice()),
-            self.axis_names.get(3).map_or("axis 3", String::as_str),
+            self.dataset
+                .axis_names
+                .get(3)
+                .map_or("axis 3", String::as_str),
             has_bounds,
             source
                 .as_ref()
                 .is_some_and(|source| source.geolocation.scan_direction.is_some()),
-            &mut self.selected_pics,
-            &mut self.selected_site_group,
+            &mut self.geo.selected_pics,
+            &mut self.geo.selected_site_group,
             &self.settings,
         );
         if changes.site_changed {
-            self.globe_auto_center_pending = false;
-            self.globe_rotation = None;
+            self.geo.globe_auto_center_pending = false;
+            self.geo.globe_rotation = None;
             if let Some(site) = self
+                .geo
                 .selected_pics
                 .checked_sub(1)
                 .and_then(|i| self.settings.pics_sites.get(i))
             {
-                self.globe_yaw = -site.center[0].to_radians();
-                self.globe_pitch = site.center[1].to_radians().clamp(-1.5, 1.5);
-                self.globe_zoom = self
+                self.geo.globe_yaw = -site.center[0].to_radians();
+                self.geo.globe_pitch = site.center[1].to_radians().clamp(-1.5, 1.5);
+                self.geo.globe_zoom = self
                     .settings
                     .map_site_zoom
                     .min(self.settings.globe_zoom_max);
             } else {
-                self.globe_yaw = 0.0;
-                self.globe_pitch = 0.0;
-                self.globe_zoom = 1.0;
+                self.geo.globe_yaw = 0.0;
+                self.geo.globe_pitch = 0.0;
+                self.geo.globe_zoom = 1.0;
             }
         }
         if changes.refresh_data {
-            self.map_job = None;
-            self.map_load_generation.fetch_add(1, Ordering::Relaxed);
+            self.geo.map_job.cancel();
+            self.geo.map_load_generation.fetch_add(1, Ordering::Relaxed);
         }
-        self.globe_footer_height = (ui.cursor_pos_y() - content_start_y - area[1]).max(1.0);
+        self.geo.globe_footer_height = (ui.cursor_pos_y() - content_start_y - area[1]).max(1.0);
     }
 }
 

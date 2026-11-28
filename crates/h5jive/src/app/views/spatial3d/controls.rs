@@ -26,11 +26,12 @@ impl App {
         plot_ui: &PlotUi<'_>,
         plot_ctx: &PlotContext,
     ) {
-        let Some(selection) = self.selection.clone() else {
+        let Some(selection) = self.session.selection.clone() else {
             ui.text("Select a numeric dataset from the tree.");
             return;
         };
-        let Some(entry) = find_entry(&self.files[selection.file].tree, &selection.path) else {
+        let Some(entry) = find_entry(&self.session.files[selection.file].tree, &selection.path)
+        else {
             return;
         };
         let shape = match &entry.kind {
@@ -47,10 +48,10 @@ impl App {
             ui.text("Empty dataset");
             return;
         }
-        let height = (ui.content_region_avail()[1] - self.volume_footer_height)
+        let height = (ui.content_region_avail()[1] - self.volume.footer_height)
             .max(self.settings.panel_min_height);
         let origin = ui.cursor_screen_pos();
-        self.view_rect = [origin[0], origin[1], ui.content_region_avail()[0], height];
+        self.session.view_rect = [origin[0], origin[1], ui.content_region_avail()[0], height];
         ui.child_window("volume_panel")
             .size([0.0, height])
             .flags(WindowFlags::NO_SCROLLBAR | WindowFlags::NO_SCROLL_WITH_MOUSE)
@@ -70,35 +71,37 @@ impl App {
             let extra_width = ui.content_region_avail()[0].max(1.0);
             self.draw_volume_projection_buttons(ui, extra_width);
             if ui.button_with_size("Center object", [extra_width, 24.0]) {
-                self.volume_pan = [0.0, 0.0];
+                self.volume.pan = [0.0, 0.0];
             }
             ui.table_next_column();
-            let pending = DraftPair::new(&self.draft_volume, &mut self.applied_volume).pending()
-                || self.draft_volume_opacity != self.volume_opacity
-                || self.draft_volume_log_scale != self.volume_log_scale;
+            let pending = DraftPair::new(&self.volume.draft_slice, &mut self.volume.applied_slice)
+                .pending()
+                || self.volume.draft_opacity != self.volume.opacity
+                || self.volume.draft_log_scale != self.volume.log_scale;
             let special_height = 2.0 * 26.0 + 24.0 + 2.0 * ui.clone_style().item_spacing()[1];
             let update_height = self.settings.update_button_height.max(special_height + 4.0);
             if draw_update_button_with_height(ui, &self.settings, pending, update_height) {
                 let slice_changed =
-                    DraftPair::new(&self.draft_volume, &mut self.applied_volume).apply();
-                self.volume_opacity = self.draft_volume_opacity;
-                self.volume_log_scale = self.draft_volume_log_scale;
+                    DraftPair::new(&self.volume.draft_slice, &mut self.volume.applied_slice)
+                        .apply();
+                self.volume.opacity = self.volume.draft_opacity;
+                self.volume.log_scale = self.volume.draft_log_scale;
                 if slice_changed {
-                    self.volume_cache = None;
-                    self.volume_overview_cache = None;
-                    self.volume_refined_cache.clear();
-                    self.volume_job = None;
-                    self.volume_raster = None;
-                    self.volume_overview_raster = None;
+                    self.volume.cache = None;
+                    self.volume.overview_cache = None;
+                    self.volume.refined_cache.clear();
+                    self.volume.job.cancel();
+                    self.volume.raster = None;
+                    self.volume.overview_raster = None;
                 }
-                self.volume_raster_job = None;
+                self.volume.raster_job = None;
             }
         }
-        self.volume_footer_height = (ui.cursor_pos_y() - footer_start).max(1.0);
+        self.volume.footer_height = (ui.cursor_pos_y() - footer_start).max(1.0);
     }
 
     fn draw_volume_controls(&mut self, ui: &Ui, shape: &[usize]) {
-        let Some(mut slice) = self.draft_volume.clone() else {
+        let Some(mut slice) = self.volume.draft_slice.clone() else {
             return;
         };
         if (2..=3).contains(&shape.len()) {
@@ -117,7 +120,7 @@ impl App {
             );
         }
         let visible_count = slice.visible_count();
-        let labels = axis_option_labels(&self.axis_names, shape);
+        let labels = axis_option_labels(&self.dataset.axis_names, shape);
         let controls_width = ui.content_region_avail()[0];
         let select_width = (controls_width * 0.38).clamp(110.0, 180.0);
         if let Some(_table) = ui.begin_table("volume_axis_controls", 2) {
@@ -179,8 +182,8 @@ impl App {
                 }
             }
         }
-        self.draft_volume = Some(slice);
-        let mut opacity_position = self.draft_volume_opacity.sqrt();
+        self.volume.draft_slice = Some(slice);
+        let mut opacity_position = self.volume.draft_opacity.sqrt();
         let available = ui.content_region_avail()[0];
         let label_width = ui.calc_text_size("Normal opacity 0.000")[0];
         let log_width = ui.calc_text_size("Log scale")[0] + 24.0;
@@ -195,11 +198,11 @@ impl App {
             "",
             "Fade ordinary voxels; fill and other special values stay visible.",
         );
-        self.draft_volume_opacity = opacity_from_slider(opacity_position);
+        self.volume.draft_opacity = opacity_from_slider(opacity_position);
         ui.same_line();
-        ui.text(format!("Normal opacity {:.3}", self.draft_volume_opacity));
+        ui.text(format!("Normal opacity {:.3}", self.volume.draft_opacity));
         ui.same_line();
-        ui.checkbox("Log scale", &mut self.draft_volume_log_scale);
+        ui.checkbox("Log scale", &mut self.volume.draft_log_scale);
         item_tip(
             ui,
             self.settings.tutorial_tips,
@@ -224,9 +227,9 @@ impl App {
                 }
                 if ui.button_with_size(label, [cell_width, 26.0]) {
                     let (yaw, pitch) = projection.angles();
-                    self.volume_rotation = VolumeRotation::from_angles(yaw, pitch);
-                    self.volume_axis_corner = projection.axis_corner();
-                    self.volume_projection = Some(projection);
+                    self.volume.rotation = VolumeRotation::from_angles(yaw, pitch);
+                    self.volume.axis_corner = projection.axis_corner();
+                    self.volume.projection = Some(projection);
                 }
                 item_tip(
                     ui,
@@ -234,7 +237,7 @@ impl App {
                     "",
                     "Choose a preset view direction; drag the volume to rotate freely.",
                 );
-                if self.volume_projection == Some(projection) {
+                if self.volume.projection == Some(projection) {
                     ui.get_window_draw_list()
                         .add_rect(
                             ui.item_rect_min(),
@@ -260,7 +263,7 @@ impl App {
         use dear_app::imgui::MouseButton;
 
         if !ui.is_mouse_down(MouseButton::Left) {
-            self.volume_range_drag = None;
+            self.volume.range_drag = None;
         }
         let width = ui.content_region_avail()[0].max(80.0);
         ui.invisible_button(format!("##volume_range_{axis}"), [width, 22.0]);
@@ -284,9 +287,9 @@ impl App {
             } else {
                 (mouse - position(*end)).abs() < (mouse - position(*start)).abs()
             };
-            self.volume_range_drag = Some((axis, upper));
+            self.volume.range_drag = Some((axis, upper));
         }
-        if let Some((drag_axis, upper)) = self.volume_range_drag {
+        if let Some((drag_axis, upper)) = self.volume.range_drag {
             if drag_axis == axis && ui.is_mouse_down(MouseButton::Left) {
                 let fraction = ((ui.mouse_pos()[0] - left) / (right - left)).clamp(0.0, 1.0);
                 let index = (fraction * max as f32).round() as i32;
@@ -299,7 +302,8 @@ impl App {
         }
         if hovered
             || self
-                .volume_range_drag
+                .volume
+                .range_drag
                 .is_some_and(|(drag_axis, _)| drag_axis == axis)
         {
             ui.set_mouse_cursor(Some(MouseCursor::ResizeEW));
@@ -335,7 +339,7 @@ impl App {
         }
         for (index, upper) in [(*start, false), (*end, true)] {
             let x = position(index);
-            let active = self.volume_range_drag == Some((axis, upper));
+            let active = self.volume.range_drag == Some((axis, upper));
             draw.add_rect(
                 [x - 5.0, y - 9.0],
                 [x + 5.0, y + 9.0],

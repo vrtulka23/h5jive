@@ -3,11 +3,12 @@ use super::super::*;
 impl App {
     pub(super) fn draw_cell_edit_bar(&mut self, ui: &Ui, selection: &Selection) {
         let count = self
+            .dataset
             .pending_cell_edits
             .keys()
             .filter(|key| key.file == selection.file && key.path == selection.path)
             .count();
-        let elsewhere = self.pending_cell_edits.len() - count;
+        let elsewhere = self.dataset.pending_cell_edits.len() - count;
         if count == 0 && elsewhere == 0 {
             return;
         }
@@ -47,9 +48,10 @@ impl App {
                 "Write the highlighted changes to the file.",
             );
             if discard {
-                self.pending_cell_edits
+                self.dataset
+                    .pending_cell_edits
                     .retain(|key, _| key.file != selection.file || key.path != selection.path);
-                self.cell_editor = None;
+                self.dataset.cell_editor = None;
             }
             if apply && !discard {
                 self.start_cell_edit_job(selection);
@@ -72,15 +74,16 @@ impl App {
         palette: &Palette,
         width: f32,
     ) {
-        let staged = self.pending_cell_edits.get(&key).cloned();
+        let staged = self.dataset.pending_cell_edits.get(&key).cloned();
         let cell_width = (width - 2.0 * TABLE_CELL_PADDING[0]).max(40.0);
         let cell_height = ui.frame_height();
         let editing = self
+            .dataset
             .cell_editor
             .as_ref()
             .is_some_and(|editor| editor.key == key);
         if editing {
-            let editor = self.cell_editor.as_mut().unwrap();
+            let editor = self.dataset.cell_editor.as_mut().unwrap();
             if editor.focus {
                 ui.set_keyboard_focus_here();
                 editor.focus = false;
@@ -102,13 +105,13 @@ impl App {
             );
             let cancelled = ui.is_item_deactivated() && !submitted;
             if submitted {
-                let editor = self.cell_editor.take().unwrap();
-                match self.files[key.file].validate_numeric_edit(&key.path, &editor.text) {
+                let editor = self.dataset.cell_editor.take().unwrap();
+                match self.session.files[key.file].validate_numeric_edit(&key.path, &editor.text) {
                     Ok(replacement) => {
                         if replacement == editor.original {
-                            self.pending_cell_edits.remove(&key);
+                            self.dataset.pending_cell_edits.remove(&key);
                         } else {
-                            self.pending_cell_edits.insert(
+                            self.dataset.pending_cell_edits.insert(
                                 key,
                                 PendingCellEdit {
                                     original: editor.original,
@@ -119,14 +122,14 @@ impl App {
                     }
                     Err(err) => {
                         self.show_notice(NoticeKind::Error, err.to_string());
-                        self.cell_editor = Some(CellEditor {
+                        self.dataset.cell_editor = Some(CellEditor {
                             focus: true,
                             ..editor
                         });
                     }
                 }
             } else if cancelled {
-                self.cell_editor = None;
+                self.dataset.cell_editor = None;
             }
             return;
         }
@@ -178,7 +181,7 @@ impl App {
             "Click to edit this cell. Press Enter to stage the change.",
         );
         if clicked {
-            match self.files[key.file].numeric_cell(&key.path, &key.coordinates) {
+            match self.session.files[key.file].numeric_cell(&key.path, &key.coordinates) {
                 Ok(original) => {
                     let text = if let Some(special) = special {
                         special.label().to_owned()
@@ -188,7 +191,7 @@ impl App {
                             .map_or_else(|| original.clone(), |edit| edit.replacement.clone())
                     };
                     let original = staged.map_or(original, |edit| edit.original);
-                    self.cell_editor = Some(CellEditor {
+                    self.dataset.cell_editor = Some(CellEditor {
                         key,
                         original,
                         text,
@@ -202,7 +205,7 @@ impl App {
 
     pub(crate) fn draw_pending_selection_dialog(&mut self, ui: &Ui) {
         const POPUP: &str = "Pending cell edits##switch_dataset";
-        if self.queued_selection.is_some() && self.cell_edit_job.is_none() {
+        if self.session.queued_selection.is_some() && self.dataset.cell_edit_job.is_none() {
             ui.open_popup(POPUP);
         }
         if let Some(_popup) = ui
@@ -210,8 +213,8 @@ impl App {
             .flags(WindowFlags::ALWAYS_AUTO_RESIZE)
             .begin()
         {
-            let Some(current) = self.selection.clone() else {
-                self.queued_selection = None;
+            let Some(current) = self.session.selection.clone() else {
+                self.session.queued_selection = None;
                 ui.close_current_popup();
                 return;
             };
@@ -225,7 +228,7 @@ impl App {
                 button_size,
             ) {
                 self.start_cell_edit_job(&current);
-                if self.cell_edit_job.is_some() {
+                if self.dataset.cell_edit_job.is_some() {
                     ui.close_current_popup();
                 }
             }
@@ -236,10 +239,11 @@ impl App {
                 "Discard##switch_dataset",
                 button_size,
             ) {
-                self.pending_cell_edits
+                self.dataset
+                    .pending_cell_edits
                     .retain(|key, _| key.file != current.file || key.path != current.path);
-                self.cell_editor = None;
-                self.selection = self.queued_selection.take();
+                self.dataset.cell_editor = None;
+                self.session.selection = self.session.queued_selection.take();
                 self.refresh_selection();
                 ui.close_current_popup();
             }
@@ -250,17 +254,21 @@ impl App {
                 "Cancel##switch_dataset",
                 button_size,
             ) {
-                self.queued_selection = None;
+                self.session.queued_selection = None;
                 ui.close_current_popup();
             }
         }
     }
 
     pub(crate) fn start_cell_edit_job(&mut self, selection: &Selection) {
-        if self.cell_edit_job.is_some()
-            || self.bulk_replace_job.is_some()
-            || self.plugins.is_busy()
-            || self.file_open_jobs.iter().any(Option::is_some)
+        if self.dataset.cell_edit_job.is_some()
+            || self.dataset.bulk_replace_job.is_some()
+            || self.workspace.plugins.is_busy()
+            || self
+                .session
+                .file_open_jobs
+                .iter()
+                .any(BackgroundJob::is_busy)
         {
             self.show_notice(
                 NoticeKind::Error,
@@ -269,11 +277,17 @@ impl App {
             return;
         }
         let slot = selection.file;
-        let file_path = self.file_paths[slot].clone();
-        if self.file_paths.iter().enumerate().any(|(other, path)| {
-            other != slot
-                && std::fs::canonicalize(path).ok() == std::fs::canonicalize(&file_path).ok()
-        }) {
+        let file_path = self.session.file_paths[slot].clone();
+        if self
+            .session
+            .file_paths
+            .iter()
+            .enumerate()
+            .any(|(other, path)| {
+                other != slot
+                    && std::fs::canonicalize(path).ok() == std::fs::canonicalize(&file_path).ok()
+            })
+        {
             self.show_notice(
                 NoticeKind::Error,
                 "The same file is open in both slots. Replace the other slot before applying edits.",
@@ -281,6 +295,7 @@ impl App {
             return;
         }
         let mut entries = self
+            .dataset
             .pending_cell_edits
             .iter()
             .filter(|(key, _)| key.file == slot && key.path == selection.path)
@@ -299,7 +314,7 @@ impl App {
                 replacement: edit.replacement,
             })
             .collect::<Vec<_>>();
-        if let Err(err) = self.files[slot].release_for_edit() {
+        if let Err(err) = self.session.files[slot].release_for_edit() {
             self.show_notice(NoticeKind::Error, err.to_string());
             return;
         }
@@ -309,48 +324,51 @@ impl App {
             max_depth: self.settings.tree_max_depth,
             max_objects: self.settings.tree_max_objects,
         };
-        let (sender, receiver) = mpsc::channel();
-        thread::spawn(move || {
+        let mut job = BackgroundJob::default();
+        job.start((), move |_| {
             let outcome = File::apply_numeric_edits(&file_path, &worker_path, &edits);
             let reopened =
                 File::open_with_options(&file_path, options).map_err(|err| err.to_string());
-            let _ = sender.send((outcome, reopened));
+            Ok((outcome, reopened))
         });
-        self.cell_editor = None;
-        self.cell_edit_job = Some(CellEditJob {
+        self.dataset.cell_editor = None;
+        self.dataset.cell_edit_job = Some(CellEditJob {
             file: slot,
             path,
-            restore_selection: self.selection.clone(),
+            restore_selection: self.session.selection.clone(),
             keys,
-            receiver,
+            job,
         });
         self.reset_file_selection();
     }
 
     pub(crate) fn poll_cell_edit_job(&mut self) {
-        let result = self
-            .cell_edit_job
-            .as_ref()
-            .map(|job| job.receiver.try_recv());
+        let result = self.dataset.cell_edit_job.as_mut().and_then(|job| {
+            job.job
+                .poll("Edit worker stopped unexpectedly. Reload the file before retrying.")
+        });
         match result {
-            Some(Ok((outcome, reopened))) => {
-                let job = self.cell_edit_job.take().unwrap();
+            Some((_, Ok((outcome, reopened)))) => {
+                let job = self.dataset.cell_edit_job.take().unwrap();
                 for key in job.keys.iter().take(outcome.applied) {
-                    self.pending_cell_edits.remove(key);
+                    self.dataset.pending_cell_edits.remove(key);
                 }
                 match reopened {
                     Ok(file) => {
-                        self.files[job.file] = file;
+                        self.session.files[job.file] = file;
                         self.reset_file_selection();
                         if let Some(selection) = job.restore_selection.filter(|selection| {
-                            selection.file < self.files.len()
-                                && find_entry(&self.files[selection.file].tree, &selection.path)
-                                    .is_some()
+                            selection.file < self.session.files.len()
+                                && find_entry(
+                                    &self.session.files[selection.file].tree,
+                                    &selection.path,
+                                )
+                                .is_some()
                         }) {
-                            self.selection = Some(selection);
+                            self.session.selection = Some(selection);
                             self.refresh_selection();
                         }
-                        self.plugins.invalidate();
+                        self.workspace.plugins.invalidate();
                     }
                     Err(err) => {
                         self.show_notice(
@@ -376,22 +394,19 @@ impl App {
                     ),
                 }
                 if succeeded {
-                    if let Some(next) = self.queued_selection.take() {
-                        self.selection = Some(next);
+                    if let Some(next) = self.session.queued_selection.take() {
+                        self.session.selection = Some(next);
                         self.refresh_selection();
                     }
                 } else {
-                    self.queued_selection = None;
+                    self.session.queued_selection = None;
                 }
             }
-            Some(Err(mpsc::TryRecvError::Disconnected)) => {
-                self.cell_edit_job = None;
-                self.show_notice(
-                    NoticeKind::Error,
-                    "Edit worker stopped unexpectedly. Reload the file before retrying.",
-                );
+            Some((_, Err(error))) => {
+                self.dataset.cell_edit_job = None;
+                self.show_notice(NoticeKind::Error, error);
             }
-            Some(Err(mpsc::TryRecvError::Empty)) | None => {}
+            None => {}
         }
     }
 }

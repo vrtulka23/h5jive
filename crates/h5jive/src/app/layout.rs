@@ -15,18 +15,19 @@ impl App {
         self.poll_cell_edit_job();
         self.poll_bulk_replace_job();
         self.poll_file_open_jobs();
-        if self.plugins.take_reload().is_some() {
-            if self.sync_restore_selection.is_none() {
-                self.sync_restore_selection = self.selection.clone();
+        if self.workspace.plugins.take_reload().is_some() {
+            if self.session.sync_restore_selection.is_none() {
+                self.session.sync_restore_selection = self.session.selection.clone();
             }
-            self.pending_browser_b = self.file_paths.get(1).cloned();
-            if let Some(path) = self.file_paths.first() {
-                self.file_path_inputs[0] = path.display().to_string();
+            self.session.pending_browser_b = self.session.file_paths.get(1).cloned();
+            if let Some(path) = self.session.file_paths.first() {
+                self.session.file_path_inputs[0] = path.display().to_string();
                 self.load_file_slot(0);
             }
         }
-        self.dataset_browser
-            .poll(&self.settings.dataset_sources, &mut self.notices);
+        self.workspace
+            .dataset_browser
+            .poll(&self.settings.dataset_sources, &mut self.session.notices);
         let palette = self.settings.palette.clone();
         let control_bg = mix_color(palette.panel, [1.0, 1.0, 1.0, 1.0], 0.055);
         let control_hover = mix_color(control_bg, palette.accent, 0.25);
@@ -102,7 +103,7 @@ impl App {
             .main_menu_bar(|| {
                 if let Some(_menu) = ui.begin_menu("Files") {
                     ui.text("Input file A");
-                    if file_path_field(ui,"input_a",&mut self.file_path_inputs[0],360.0) {
+                    if file_path_field(ui,"input_a",&mut self.session.file_path_inputs[0],360.0) {
                         self.open_file_picker(0);
                     }
                     item_tip(ui, tutorial_tips, "Browse for file A", "Type a path or click the folder icon to browse for file A.");
@@ -112,7 +113,7 @@ impl App {
                     item_tip(ui, tutorial_tips, "", "File A is the primary file for browsing and comparisons.");
                     ui.separator();
                     ui.text("Input file B");
-                    if file_path_field(ui,"input_b",&mut self.file_path_inputs[1],360.0) {
+                    if file_path_field(ui,"input_b",&mut self.session.file_path_inputs[1],360.0) {
                         self.open_file_picker(1);
                     }
                     item_tip(ui, tutorial_tips, "Browse for file B", "Type a path or click the folder icon to browse for file B.");
@@ -121,12 +122,12 @@ impl App {
                     }
                     item_tip(ui, tutorial_tips, "", "Load A first, then B for comparisons.");
                     ui.separator();
-                    if self.workspace_mode == WorkspaceMode::DataInspector
+                    if self.workspace.workspace_mode == WorkspaceMode::DataInspector
                         && ui.menu_item("Save current view...")
                     {
                         self.open_export_dialog();
                     }
-                    if self.workspace_mode == WorkspaceMode::DataInspector {
+                    if self.workspace.workspace_mode == WorkspaceMode::DataInspector {
                         item_tip(ui, tutorial_tips, "", "Export the active view as an image.");
                     }
                 }
@@ -145,18 +146,18 @@ impl App {
                         if ui.menu_item(&label) {
                             self.settings.active_profile = index;
                             self.settings.palette = self.settings.profiles[index].palette.clone();
-                            self.heatmap_cache = None;
+                            self.heatmap.cache = None;
                         }
                         item_tip(ui, tutorial_tips, "", "Choose a color theme for the interface.");
                     }
                 }
                 if let Some(_menu) = ui.begin_menu("Help") {
                     if ui.menu_item("Help for current section...") {
-                        self.show_section_help = true;
+                        self.workspace.show_section_help = true;
                     }
                     item_tip(ui, tutorial_tips, "", "Open guidance for the active view.");
                     if ui.menu_item("Register datasets in DIPL...") {
-                        self.show_dataset_registration_help = true;
+                        self.workspace.show_dataset_registration_help = true;
                     }
                     item_tip(ui, tutorial_tips, "", "See how to register a Dataset Browser source and format.");
                     ui.separator();
@@ -178,7 +179,7 @@ impl App {
                     item_tip(ui, tutorial_tips, "Show extra guidance when hovering controls. This choice is saved in DIPL overrides.", "Uncheck this to keep only normal tooltips.");
                     ui.separator();
                     if ui.menu_item("About H5Jive") {
-                        self.show_about = true;
+                        self.workspace.show_about = true;
                     }
                     item_tip(ui, tutorial_tips, "", "See the installed version and maintainer.");
                 }
@@ -239,7 +240,7 @@ impl App {
                         let hovered = ui.is_item_hovered();
                         let min = ui.item_rect_min();
                         let max = ui.item_rect_max();
-                        let selected = self.workspace_mode == mode;
+                        let selected = self.workspace.workspace_mode == mode;
                         let background = if selected {
                             mix_color(palette.panel, palette.accent, 0.17)
                         } else if hovered {
@@ -277,7 +278,7 @@ impl App {
                         );
                         draw.add_text([group_x + icon_size + icon_gap, text_y], foreground, label);
                         if clicked {
-                            self.workspace_mode = mode;
+                            self.workspace.workspace_mode = mode;
                         }
                         item_tip(
                             ui,
@@ -300,8 +301,8 @@ impl App {
         }
         let menu_height = menu_height + mode_bar_height;
         let panel_height = (size[1] - menu_height).max(1.0);
-        if self.workspace_mode == WorkspaceMode::DatasetBrowser {
-            self.view_rect = [0.0; 4];
+        if self.workspace.workspace_mode == WorkspaceMode::DatasetBrowser {
+            self.session.view_rect = [0.0; 4];
             self.draw_dataset_browser(ui, menu_height, panel_height, flags);
             self.draw_help_dialogs(ui);
             self.draw_file_picker(ui);
@@ -309,8 +310,8 @@ impl App {
             self.draw_file_drop_overlay(ui, size);
             return;
         }
-        if self.workspace_mode != WorkspaceMode::DataInspector {
-            self.view_rect = [0.0; 4];
+        if self.workspace.workspace_mode != WorkspaceMode::DataInspector {
+            self.session.view_rect = [0.0; 4];
             self.draw_workspace_placeholder(ui, plot_ui, menu_height, panel_height, flags);
             self.draw_help_dialogs(ui);
             self.draw_file_picker(ui);
@@ -318,7 +319,7 @@ impl App {
             self.draw_file_drop_overlay(ui, size);
             return;
         }
-        let side = self.sidebar_width.clamp(
+        let side = self.workspace.sidebar_width.clamp(
             self.settings.sidebar_min_width,
             (size[0] - self.settings.viewer_min_width)
                 .min(self.settings.sidebar_max_width)
@@ -329,7 +330,7 @@ impl App {
             .size([side, panel_height], Condition::Always)
             .flags(flags | WindowFlags::NO_TITLE_BAR | WindowFlags::NO_SCROLLBAR)
             .build(|| {
-                let selector_reserve = self.view_selector_height;
+                let selector_reserve = self.workspace.view_selector_height;
                 let panel_bottom =
                     ui.cursor_pos_y() + ui.content_region_avail()[1] - selector_reserve;
                 let panel_space = (panel_bottom
@@ -338,10 +339,10 @@ impl App {
                     - 2.0 * PANEL_GAP)
                     .max(1.0);
                 let minimum = self.settings.panel_min_height.min(panel_space * 0.5);
-                let details_height = (panel_space * self.details_panel_fraction)
+                let details_height = (panel_space * self.workspace.details_panel_fraction)
                     .clamp(minimum, (panel_space - minimum).max(minimum));
                 let tree_height = (panel_space - details_height).max(1.0);
-                let prior_selection = self.selection.clone();
+                let prior_selection = self.session.selection.clone();
                 let mut reload_requested = false;
                 let mut picker_slot = None;
                 ui.child_window("file_tree")
@@ -350,7 +351,7 @@ impl App {
                         if let Some(_tabs) = ui.tab_bar("file_tree_tabs") {
                             for index in 0..2 {
                                 let label = if index == 0 { "File A" } else { "File B" };
-                                let tab_flags = if self.startup_tab == Some(index) {
+                                let tab_flags = if self.session.startup_tab == Some(index) {
                                     TabItemFlags::SET_SELECTED
                                 } else {
                                     TabItemFlags::NONE
@@ -360,12 +361,12 @@ impl App {
                                     ui.child_window(format!("file_tree_slot_{index}"))
                                         .size([0.0, 0.0])
                                         .build(ui, || {
-                                            if let Some(file) = self.files.get(index) {
+                                            if let Some(file) = self.session.files.get(index) {
                                                 if draw_file_root(
                                                     ui,
                                                     file,
                                                     index,
-                                                    &mut self.selection,
+                                                    &mut self.session.selection,
                                                     self.settings.tutorial_tips,
                                                     &self.settings.palette,
                                                 ) {
@@ -379,8 +380,8 @@ impl App {
                                                         file,
                                                         index,
                                                         false,
-                                                        &mut self.selection,
-                                                        &mut self.tree_geolocation_cache,
+                                                        &mut self.session.selection,
+                                                        &mut self.dataset.tree_geolocation_cache,
                                                         &self.settings.dataset_rules,
                                                         self.settings.show_dataset_shape,
                                                         self.settings.tutorial_tips,
@@ -398,25 +399,25 @@ impl App {
                                         });
                                 }
                             }
-                            self.startup_tab = None;
+                            self.session.startup_tab = None;
                         }
                     });
                 if let Some(slot) = picker_slot {
                     self.open_file_picker(slot);
                 }
-                if reload_requested && prior_selection == self.selection {
+                if reload_requested && prior_selection == self.session.selection {
                     self.reload_selected_dataset();
                 }
                 if let (Some(previous), Some(requested)) =
-                    (prior_selection, self.selection.clone())
+                    (prior_selection, self.session.selection.clone())
                 {
                     if (previous.file != requested.file || previous.path != requested.path)
-                        && self.pending_cell_edits.keys().any(|key| {
+                        && self.dataset.pending_cell_edits.keys().any(|key| {
                             key.file == previous.file && key.path == previous.path
                         })
                     {
-                        self.selection = Some(previous);
-                        self.queued_selection = Some(requested);
+                        self.session.selection = Some(previous);
+                        self.session.queued_selection = Some(requested);
                     }
                 }
                 self.refresh_selection();
@@ -427,8 +428,8 @@ impl App {
                     false,
                     &self.settings.palette,
                 );
-                self.details_panel_fraction =
-                    (self.details_panel_fraction - delta / panel_space).clamp(0.0, 1.0);
+                self.workspace.details_panel_fraction =
+                    (self.workspace.details_panel_fraction - delta / panel_space).clamp(0.0, 1.0);
                 self.draw_details_panel(ui, details_height);
                 let gap = (panel_bottom
                     - ui.cursor_pos_y()
@@ -439,7 +440,7 @@ impl App {
                 }
                 let selector_start = ui.cursor_pos_y();
                 self.draw_view_selector(ui);
-                self.view_selector_height = (ui.cursor_pos_y() - selector_start).max(1.0);
+                self.workspace.view_selector_height = (ui.cursor_pos_y() - selector_start).max(1.0);
             });
         {
             let _padding = ui.push_style_var(StyleVar::WindowPadding([0.0, 0.0]));
@@ -459,7 +460,7 @@ impl App {
                         true,
                         &self.settings.palette,
                     );
-                    self.sidebar_width = (side + delta).clamp(
+                    self.workspace.sidebar_width = (side + delta).clamp(
                         self.settings.sidebar_min_width,
                         (size[0] - self.settings.viewer_min_width)
                             .min(self.settings.sidebar_max_width)
@@ -467,13 +468,13 @@ impl App {
                     );
                 });
         }
-        let side = self.sidebar_width.clamp(
+        let side = self.workspace.sidebar_width.clamp(
             self.settings.sidebar_min_width,
             (size[0] - self.settings.viewer_min_width)
                 .min(self.settings.sidebar_max_width)
                 .max(self.settings.sidebar_min_width),
         ) + self.settings.splitter_width;
-        self.view_rect = [side, menu_height, (size[0] - side).max(1.0), panel_height];
+        self.session.view_rect = [side, menu_height, (size[0] - side).max(1.0), panel_height];
         ui.window("###viewing_window")
             .position([side, menu_height], Condition::Always)
             .size([(size[0] - side).max(1.0), panel_height], Condition::Always)
@@ -484,23 +485,23 @@ impl App {
                 ui.child_window("##active_view_content")
                     .size([0.0, available[1]])
                     .build(ui, || {
-                        if self.view == ViewMode::Spatial3d {
+                        if self.workspace.view == ViewMode::Spatial3d {
                             self.draw_volume_view(ui, plot_ui, plot_ctx);
                             return;
                         }
-                        if self.view == ViewMode::Profiles1d {
+                        if self.workspace.view == ViewMode::Profiles1d {
                             self.draw_profile_view(ui);
                             return;
                         }
-                        if self.view == ViewMode::WorldMap {
+                        if self.workspace.view == ViewMode::WorldMap {
                             self.draw_world_map_view(ui, plot_ctx);
                             return;
                         }
-                        if self.view == ViewMode::Globe {
+                        if self.workspace.view == ViewMode::Globe {
                             self.draw_globe_view(ui, plot_ctx);
                             return;
                         }
-                        if !matches!(self.view, ViewMode::Data | ViewMode::Slice2d) {
+                        if !matches!(self.workspace.view, ViewMode::Data | ViewMode::Slice2d) {
                             self.draw_view_placeholder(ui);
                             return;
                         }
@@ -516,7 +517,7 @@ impl App {
     }
 
     fn draw_file_drop_overlay(&self, ui: &Ui, size: [f32; 2]) {
-        if !self.file_drop.hovering {
+        if !self.session.file_drop.hovering {
             return;
         }
         let draw = ui.get_foreground_draw_list();
@@ -526,7 +527,7 @@ impl App {
         let margin = 24.0;
         let gap = 16.0;
         let half_width = ((size[0] - margin * 2.0 - gap) * 0.5).max(1.0);
-        let selected = drop_slot(self.file_drop.pointer_x, size[0]);
+        let selected = drop_slot(self.session.file_drop.pointer_x, size[0]);
         for slot in 0..2 {
             let min = [margin + slot as f32 * (half_width + gap), margin];
             let max = [min[0] + half_width, (size[1] - margin).max(margin + 1.0)];
@@ -575,8 +576,8 @@ impl App {
 
     fn global_loading_label(&self) -> Option<String> {
         let mut tasks: Vec<String> = Vec::new();
-        for (slot, job) in self.file_open_jobs.iter().enumerate() {
-            if job.is_some() {
+        for (slot, job) in self.session.file_open_jobs.iter().enumerate() {
+            if job.is_busy() {
                 tasks.push(if slot == 0 { "file A" } else { "file B" }.to_owned());
             }
         }
@@ -592,8 +593,8 @@ impl App {
         if let Some(label) = self.volume_raster_loading_label() {
             tasks.push(label.to_owned());
         }
-        if self.profile_job.is_some() {
-            let has_overview = self.profile_cache.as_ref().is_some_and(|(_, result)| {
+        if self.profile.job.is_busy() {
+            let has_overview = self.profile.cache.as_ref().is_some_and(|(_, result)| {
                 result
                     .as_ref()
                     .is_ok_and(|data| data.sample_positions.is_some())
@@ -608,35 +609,38 @@ impl App {
             );
         }
         for (active, label) in [
-            (self.heatmap_overview_job.is_some(), "2D image"),
-            (self.heatmap_range_job.is_some(), "2D range"),
-            (self.statistics_job.is_busy(), "stats"),
-            (self.distribution_job.is_busy(), "distribution"),
-            (self.cell_edit_job.is_some(), "cell edit"),
+            (self.heatmap.overview_job.is_busy(), "2D image"),
+            (self.heatmap.range_job.is_busy(), "2D range"),
+            (self.dataset.statistics_job.is_busy(), "stats"),
+            (self.dataset.distribution_job.is_busy(), "distribution"),
+            (self.dataset.cell_edit_job.is_some(), "cell edit"),
         ] {
             if active {
                 tasks.push(label.to_owned());
             }
         }
-        if let Some(job) = &self.bulk_replace_job {
+        if let Some(job) = &self.dataset.bulk_replace_job {
             let processed = job.progress.load(Ordering::Relaxed);
             tasks.push(format!("bulk replace ({processed} cells)"));
         }
         if self
+            .dataset
             .find_replace_dialog
             .as_ref()
-            .is_some_and(|dialog| dialog.search_job.is_some())
+            .is_some_and(|dialog| dialog.search_job.is_busy())
         {
             tasks.push("find matches".to_owned());
         }
         tasks.extend(
-            self.dataset_browser
+            self.workspace
+                .dataset_browser
                 .active_task_labels()
                 .into_iter()
                 .map(str::to_owned),
         );
         tasks.extend(
-            self.plugins
+            self.workspace
+                .plugins
                 .active_task_labels()
                 .into_iter()
                 .map(str::to_owned),
@@ -677,7 +681,7 @@ impl App {
         if let Some(label) = self.global_loading_label() {
             bubbles.push(("loading".to_owned(), None, NoticeKind::Loading, label));
         }
-        for notice in self.notices.iter() {
+        for notice in self.session.notices.iter() {
             bubbles.push((
                 format!("notice-{}", notice.id()),
                 Some(notice.id()),
@@ -710,13 +714,14 @@ impl App {
     }
 
     fn heatmap_tile_loading_label(&self) -> Option<&'static str> {
-        let (working, _) = self.heatmap_tile_job.as_ref()?;
+        let working = self.heatmap.tile_job.key()?;
         let previous = self
-            .heatmap_cache
+            .heatmap
+            .cache
             .as_ref()
             .filter(|(_, result)| result.is_ok())
             .map(|(key, _)| key)
-            .or_else(|| self.heatmap_tiles.last().map(|(key, _)| key));
+            .or_else(|| self.heatmap.tiles.last().map(|(key, _)| key));
         let Some(previous) = previous.filter(|previous| {
             previous.file == working.file
                 && previous.path == working.path
@@ -724,7 +729,8 @@ impl App {
         }) else {
             return Some(
                 if self
-                    .heatmap_overview_cache
+                    .heatmap
+                    .overview_cache
                     .as_ref()
                     .is_some_and(|(key, result)| {
                         key.file == working.file
@@ -749,8 +755,8 @@ impl App {
     }
 
     fn volume_loading_label(&self) -> Option<&'static str> {
-        let (working, _) = self.volume_job.as_ref()?;
-        let Some((previous, Ok(_))) = self.volume_cache.as_ref().filter(|(key, _)| {
+        let working = self.volume.job.key()?;
+        let Some((previous, Ok(_))) = self.volume.cache.as_ref().filter(|(key, _)| {
             key.file == working.file
                 && key.path == working.path
                 && key.slice.axes == working.slice.axes
@@ -767,8 +773,8 @@ impl App {
     }
 
     fn volume_raster_loading_label(&self) -> Option<&'static str> {
-        let working = &self.volume_raster_job.as_ref()?.key;
-        let Some((previous, _)) = self.volume_raster.as_ref().filter(|(key, _)| {
+        let working = self.volume.raster_job.as_ref()?.job.key()?;
+        let Some((previous, _)) = self.volume.raster.as_ref().filter(|(key, _)| {
             key.volume.file == working.volume.file && key.volume.path == working.volume.path
         }) else {
             return Some("3D render");
@@ -789,8 +795,8 @@ impl App {
     }
 
     fn map_loading_label(&self) -> Option<&'static str> {
-        let (working, _) = self.map_job.as_ref()?;
-        let Some((previous, Ok(_))) = self.map_cache.as_ref().filter(|(key, _)| {
+        let working = self.geo.map_job.key()?;
+        let Some((previous, Ok(_))) = self.geo.map_cache.as_ref().filter(|(key, _)| {
             key.file == working.file
                 && key.path == working.path
                 && key.time == working.time
@@ -814,72 +820,75 @@ impl App {
     ) {
         ui.window(format!(
             "{}###workspace_content",
-            self.workspace_mode.title()
+            self.workspace.workspace_mode.title()
         ))
         .position([0.0, top], Condition::Always)
         .size([ui.io().display_size()[0], height], Condition::Always)
         .flags(flags)
-        .build(|| match self.workspace_mode {
+        .build(|| match self.workspace.workspace_mode {
             WorkspaceMode::DatasetBrowser => {
                 if ui.button("Open data inspector") {
-                    self.workspace_mode = WorkspaceMode::DataInspector;
+                    self.workspace.workspace_mode = WorkspaceMode::DataInspector;
                 }
             }
             WorkspaceMode::PluginLab => {
-                let can_write_files = self.cell_edit_job.is_none()
-                    && self.bulk_replace_job.is_none()
-                    && !self.plugins.is_syncing()
-                    && self.file_open_jobs.iter().all(Option::is_none)
-                    && self.pending_cell_edits.is_empty();
+                let can_write_files = self.dataset.cell_edit_job.is_none()
+                    && self.dataset.bulk_replace_job.is_none()
+                    && !self.workspace.plugins.is_syncing()
+                    && self.session.file_open_jobs.iter().all(|job| !job.is_busy())
+                    && self.dataset.pending_cell_edits.is_empty();
                 let write_allowed = [can_write_files; 2];
                 let mut picker_request = None;
-                if let Some(selection) = self.plugins.draw(
+                if let Some(selection) = self.workspace.plugins.draw(
                     ui,
                     plot_ui,
-                    &mut self.files,
-                    &self.file_paths,
+                    &mut self.session.files,
+                    &self.session.file_paths,
                     &self.settings,
-                    self.selection.as_ref(),
+                    self.session.selection.as_ref(),
                     write_allowed,
-                    &self.dataset_browser,
+                    &self.workspace.dataset_browser,
                     &mut picker_request,
-                    &mut self.notices,
+                    &mut self.session.notices,
                 ) {
-                    if let Some(current) = &self.selection {
+                    if let Some(current) = &self.session.selection {
                         if (current.file != selection.file || current.path != selection.path)
                             && self
+                                .dataset
                                 .pending_cell_edits
                                 .keys()
                                 .any(|key| key.file == current.file && key.path == current.path)
                         {
-                            self.queued_selection = Some(selection);
+                            self.session.queued_selection = Some(selection);
                         } else {
-                            self.selection = Some(selection);
+                            self.session.selection = Some(selection);
                         }
                     } else {
-                        self.selection = Some(selection);
+                        self.session.selection = Some(selection);
                     }
-                    self.workspace_mode = WorkspaceMode::DataInspector;
+                    self.workspace.workspace_mode = WorkspaceMode::DataInspector;
                     self.switch_view(ViewMode::Data);
                 }
                 if let Some((target, path)) = picker_request {
                     self.open_file_picker_for(target, path);
                 }
-                if self.plugins.has_sync_request() {
-                    if !self.pending_cell_edits.is_empty()
-                        || self.cell_edit_job.is_some()
-                        || self.bulk_replace_job.is_some()
+                if self.workspace.plugins.has_sync_request() {
+                    if !self.dataset.pending_cell_edits.is_empty()
+                        || self.dataset.cell_edit_job.is_some()
+                        || self.dataset.bulk_replace_job.is_some()
                     {
-                        self.plugins.invalidate();
+                        self.workspace.plugins.invalidate();
                         self.show_notice(
                             NoticeKind::Warning,
                             "Apply or discard pending cell edits before synchronizing files.",
                         );
-                    } else if self.file_open_jobs.iter().all(Option::is_none) {
-                        self.sync_restore_selection = self.selection.clone();
+                    } else if self.session.file_open_jobs.iter().all(|job| !job.is_busy()) {
+                        self.session.sync_restore_selection = self.session.selection.clone();
                         self.reset_file_selection();
-                        self.files.clear();
-                        self.plugins.start_requested_sync(&self.file_paths);
+                        self.session.files.clear();
+                        self.workspace
+                            .plugins
+                            .start_requested_sync(&self.session.file_paths);
                     }
                 }
             }
@@ -887,13 +896,13 @@ impl App {
         });
     }
     fn current_help_topic(&self) -> (&'static str, &'static str) {
-        match self.workspace_mode {
+        match self.workspace.workspace_mode {
             WorkspaceMode::DatasetBrowser => (
                 "Dataset browser",
                 "Browse products indexed from the local dataset sources configured in DIPL. Open a product as file A or B, then inspect its datasets or use it in Plugin Lab.",
             ),
-            WorkspaceMode::PluginLab => self.plugins.help_topic(&self.settings),
-            WorkspaceMode::DataInspector => match self.view {
+            WorkspaceMode::PluginLab => self.workspace.plugins.help_topic(&self.settings),
+            WorkspaceMode::DataInspector => match self.workspace.view {
                 ViewMode::Spatial3d => (
                     "3D projection",
                     "Preview a numeric dataset in 3D. Choose displayed dimensions and pin any remaining dimensions in the controls. Use the projection and range controls to focus the volume.",
@@ -924,9 +933,9 @@ impl App {
 
     fn draw_help_dialogs(&mut self, ui: &Ui) {
         const SECTION_HELP_POPUP: &str = "Current section help##section_help";
-        if self.show_section_help {
+        if self.workspace.show_section_help {
             ui.open_popup(SECTION_HELP_POPUP);
-            self.show_section_help = false;
+            self.workspace.show_section_help = false;
         }
         if let Some(_popup) = ui
             .begin_modal_popup_config(SECTION_HELP_POPUP)
@@ -942,7 +951,7 @@ impl App {
                     ui.text_wrapped(help);
                     ui.spacing();
                     ui.text_wrapped("Tutorial tips add extra guidance when you hover controls. Turn them on or off in Help → Tutorial tips; the choice is saved for future launches.");
-                    if self.workspace_mode == WorkspaceMode::DataInspector {
+                    if self.workspace.workspace_mode == WorkspaceMode::DataInspector {
                         ui.spacing();
                         ui.text("Inspector details");
                         ui.text_wrapped("Statistics exclude fill and nonfinite values. Large-dataset quartiles may use a bounded sample and are marked approximate in the table.");
@@ -963,9 +972,9 @@ impl App {
 
     fn draw_dataset_registration_help(&mut self, ui: &Ui) {
         const POPUP: &str = "Register datasets in DIPL###dataset_registration_help";
-        if self.show_dataset_registration_help {
+        if self.workspace.show_dataset_registration_help {
             ui.open_popup(POPUP);
-            self.show_dataset_registration_help = false;
+            self.workspace.show_dataset_registration_help = false;
         }
         let mut open = true;
         if let Some(_popup) = ui.begin_modal_popup_config(POPUP).opened(&mut open).begin() {
@@ -989,10 +998,10 @@ impl App {
     }
 
     fn draw_about_dialog(&mut self, ui: &Ui) {
-        if self.show_about {
+        if self.workspace.show_about {
             ui.window("About H5Jive")
                 .size([440.0, 150.0], Condition::FirstUseEver)
-                .opened(&mut self.show_about)
+                .opened(&mut self.workspace.show_about)
                 .build(|| {
                     ui.text(format!("H5Jive v{}", env!("CARGO_PKG_VERSION")));
                     ui.separator();
@@ -1002,8 +1011,8 @@ impl App {
         }
     }
     pub(super) fn draw_view_selector(&mut self, ui: &Ui) {
-        let dataset_available = self.selection.as_ref().is_some_and(|selection| {
-            self.files.get(selection.file).is_some_and(|file| {
+        let dataset_available = self.session.selection.as_ref().is_some_and(|selection| {
+            self.session.files.get(selection.file).is_some_and(|file| {
                 find_entry(&file.tree, &selection.path)
                     .is_some_and(|entry| matches!(entry.kind, Kind::Dataset { .. }))
             })
@@ -1035,7 +1044,7 @@ impl App {
                 mode,
                 min,
                 max,
-                self.view == mode,
+                self.workspace.view == mode,
                 hovered && enabled,
                 &self.settings.palette,
             );
@@ -1066,11 +1075,11 @@ impl App {
         }
     }
     pub(super) fn draw_view_placeholder(&self, ui: &Ui) {
-        ui.text(self.view.description());
+        ui.text(self.workspace.view.description());
         ui.spacing();
-        match &self.selection {
+        match &self.session.selection {
             Some(selection) => {
-                let file = &self.files[selection.file];
+                let file = &self.session.files[selection.file];
                 ui.text(format!(
                     "File {}: {}",
                     if selection.file == 0 { "A" } else { "B" },
@@ -1307,12 +1316,13 @@ impl App {
             .size([ui.io().display_size()[0], height], Condition::Always)
             .flags(flags | WindowFlags::NO_TITLE_BAR)
             .build(|| {
-                let browser_height =
-                    (ui.content_region_avail()[1] - self.browser_footer_height).max(120.0);
-                open = self.dataset_browser.draw(
+                let browser_height = (ui.content_region_avail()[1]
+                    - self.workspace.browser_footer_height)
+                    .max(120.0);
+                open = self.workspace.dataset_browser.draw(
                     ui,
                     &self.settings.dataset_sources,
-                    self.pending_browser_b.as_deref(),
+                    self.session.pending_browser_b.as_deref(),
                     &self.settings.palette,
                     browser_height,
                     self.settings.tutorial_tips,
@@ -1343,21 +1353,21 @@ impl App {
                             )
                         };
                         let label = if slot == 0 { "A" } else { "B" };
-                        let loading = self.file_open_jobs[slot].is_some();
-                        let path = self.file_open_paths[slot]
-                            .as_ref()
+                        let loading = self.session.file_open_jobs[slot].is_busy();
+                        let path = self.session.file_open_jobs[slot]
+                            .key()
                             .filter(|_| loading)
-                            .or_else(|| self.file_paths.get(slot))
+                            .or_else(|| self.session.file_paths.get(slot))
                             .or_else(|| {
                                 (slot == 1)
-                                    .then_some(self.pending_browser_b.as_ref())
+                                    .then_some(self.session.pending_browser_b.as_ref())
                                     .flatten()
                             });
                         let status = if loading {
                             "Loading"
                         } else if slot == 1
-                            && self.pending_browser_b.is_some()
-                            && self.files.is_empty()
+                            && self.session.pending_browser_b.is_some()
+                            && self.session.files.is_empty()
                         {
                             "Queued"
                         } else if path.is_some() {
@@ -1372,12 +1382,12 @@ impl App {
                         ));
                     }
                 }
-                self.browser_footer_height = (ui.cursor_pos_y() - footer_start).max(1.0);
+                self.workspace.browser_footer_height = (ui.cursor_pos_y() - footer_start).max(1.0);
             });
         if let Some((slot, path)) = open {
-            self.file_path_inputs[slot] = path.display().to_string();
-            if slot == 1 && self.files.is_empty() {
-                self.pending_browser_b = Some(path);
+            self.session.file_path_inputs[slot] = path.display().to_string();
+            if slot == 1 && self.session.files.is_empty() {
+                self.session.pending_browser_b = Some(path);
             } else {
                 self.load_file_slot(slot);
             }
@@ -1386,7 +1396,7 @@ impl App {
     fn open_file_picker(&mut self, slot: usize) {
         self.open_file_picker_for(
             FilePickerTarget::Input(slot),
-            self.file_path_inputs[slot].clone(),
+            self.session.file_path_inputs[slot].clone(),
         );
     }
 
@@ -1410,12 +1420,12 @@ impl App {
                 .map(|s| s.to_string_lossy().into_owned())
                 .unwrap_or_default()
         };
-        self.file_picker = Some(make_file_picker_state(target, directory, filename));
+        self.session.file_picker = Some(make_file_picker_state(target, directory, filename));
     }
 
     fn draw_file_picker(&mut self, ui: &Ui) {
         const POPUP: &str = "File picker###file_picker";
-        let Some(picker) = self.file_picker.as_mut() else {
+        let Some(picker) = self.session.file_picker.as_mut() else {
             return;
         };
         if picker.needs_open {
@@ -1542,8 +1552,10 @@ impl App {
                     match delete_file_picker_selection(
                         picker,
                         &path,
-                        &self.file_paths,
-                        &self.file_open_paths,
+                        &self.session.file_paths,
+                        &std::array::from_fn(|slot| {
+                            self.session.file_open_jobs[slot].key().cloned()
+                        }),
                     ) {
                         Ok(()) => {
                             if path
@@ -1662,35 +1674,37 @@ impl App {
             let mut next =
                 make_file_picker_state(picker.target, directory, picker.filename.clone());
             next.needs_open = false;
-            self.file_picker = Some(next);
+            self.session.file_picker = Some(next);
         } else if let Some((target, path)) = chosen {
-            self.file_picker = None;
+            self.session.file_picker = None;
             match target {
                 FilePickerTarget::Input(slot) => {
-                    self.file_path_inputs[slot] = path.display().to_string();
+                    self.session.file_path_inputs[slot] = path.display().to_string();
                     self.load_file_slot(slot);
                 }
                 FilePickerTarget::ViewExport => {
-                    if let Some(dialog) = self.export_dialog.as_mut() {
+                    if let Some(dialog) = self.session.export_dialog.as_mut() {
                         dialog.path = path.display().to_string();
                     }
                 }
                 FilePickerTarget::ManipulationOutput => self
+                    .workspace
                     .plugins
                     .set_picker_path(target, path.display().to_string()),
                 FilePickerTarget::SubsetOutput => self
+                    .workspace
                     .plugins
                     .set_picker_path(target, path.display().to_string()),
             }
         } else if !opened {
-            self.file_picker = None;
+            self.session.file_picker = None;
         }
     }
 
     pub(super) fn open_dropped_file(&mut self, slot: usize, path: PathBuf) {
-        self.file_path_inputs[slot] = path.display().to_string();
-        if slot == 1 && self.files.is_empty() {
-            self.pending_browser_b = Some(path);
+        self.session.file_path_inputs[slot] = path.display().to_string();
+        if slot == 1 && self.session.files.is_empty() {
+            self.session.pending_browser_b = Some(path);
             self.show_notice(
                 NoticeKind::Warning,
                 "File B is queued. Load File A to open it.",
@@ -1701,9 +1715,13 @@ impl App {
     }
 
     fn load_file_slot(&mut self, slot: usize) {
-        if self.cell_edit_job.is_some()
-            || self.bulk_replace_job.is_some()
-            || self.pending_cell_edits.keys().any(|key| key.file == slot)
+        if self.dataset.cell_edit_job.is_some()
+            || self.dataset.bulk_replace_job.is_some()
+            || self
+                .dataset
+                .pending_cell_edits
+                .keys()
+                .any(|key| key.file == slot)
         {
             self.show_notice(
                 NoticeKind::Warning,
@@ -1714,14 +1732,14 @@ impl App {
             );
             return;
         }
-        if self.plugins.is_syncing() {
+        if self.workspace.plugins.is_syncing() {
             self.show_notice(
                 NoticeKind::Warning,
                 "Wait for synchronization to finish before opening files.",
             );
             return;
         }
-        let path = self.file_path_inputs[slot].trim();
+        let path = self.session.file_path_inputs[slot].trim();
         if path.is_empty() {
             self.show_notice(
                 NoticeKind::Warning,
@@ -1732,7 +1750,7 @@ impl App {
             );
             return;
         }
-        if slot == 1 && self.files.is_empty() {
+        if slot == 1 && self.session.files.is_empty() {
             self.show_notice(
                 NoticeKind::Warning,
                 "Load input file A before input file B.",
@@ -1745,77 +1763,60 @@ impl App {
             max_depth: self.settings.tree_max_depth,
             max_objects: self.settings.tree_max_objects,
         };
-        let (sender, receiver) = mpsc::channel();
-        thread::spawn(move || {
-            let result =
-                File::open_with_options(&worker_path, options).map_err(|error| error.to_string());
-            let _ = sender.send(result);
+        self.session.file_open_jobs[slot].start(path, move |_| {
+            File::open_with_options(&worker_path, options).map_err(|error| error.to_string())
         });
-        self.file_open_jobs[slot] = Some(receiver);
-        self.file_open_paths[slot] = Some(path);
     }
 
     fn poll_file_open_jobs(&mut self) {
         let mut loaded_a = false;
         for slot in 0..2 {
-            let result = self.file_open_jobs[slot]
-                .as_ref()
-                .map(|receiver| receiver.try_recv());
+            let result =
+                self.session.file_open_jobs[slot].poll("File loading worker stopped unexpectedly.");
             match result {
-                Some(Ok(Ok(file))) => {
+                Some((path, Ok(file))) => {
                     loaded_a |= slot == 0;
-                    self.file_open_jobs[slot] = None;
-                    let path = self.file_open_paths[slot].take().unwrap();
-                    let different_file = self.file_paths.get(slot) != Some(&path);
-                    if slot < self.files.len() {
-                        self.files[slot] = file;
-                        self.file_paths[slot] = path;
+                    let different_file = self.session.file_paths.get(slot) != Some(&path);
+                    if slot < self.session.files.len() {
+                        self.session.files[slot] = file;
+                        self.session.file_paths[slot] = path;
                     } else {
-                        self.files.push(file);
-                        self.file_paths.push(path);
+                        self.session.files.push(file);
+                        self.session.file_paths.push(path);
                     }
-                    self.file_path_inputs[slot] = self.file_paths[slot].display().to_string();
-                    self.plugins.invalidate();
+                    self.session.file_path_inputs[slot] =
+                        self.session.file_paths[slot].display().to_string();
+                    self.workspace.plugins.invalidate();
                     self.reset_file_selection();
                     if different_file {
                         self.switch_view(ViewMode::Data);
                     }
                 }
-                Some(Ok(Err(error))) => {
-                    self.file_open_jobs[slot] = None;
-                    self.file_open_paths[slot] = None;
-                    self.sync_restore_selection = None;
+                Some((_, Err(error))) => {
+                    self.session.sync_restore_selection = None;
                     self.show_notice(NoticeKind::Error, error);
                 }
-                Some(Err(mpsc::TryRecvError::Disconnected)) => {
-                    self.file_open_jobs[slot] = None;
-                    self.file_open_paths[slot] = None;
-                    self.sync_restore_selection = None;
-                    self.show_notice(
-                        NoticeKind::Error,
-                        "File loading worker stopped unexpectedly.",
-                    );
-                }
-                Some(Err(mpsc::TryRecvError::Empty)) | None => {}
+                None => {}
             }
         }
         if loaded_a {
-            if let Some(path) = self.pending_browser_b.take() {
-                self.file_path_inputs[1] = path.display().to_string();
+            if let Some(path) = self.session.pending_browser_b.take() {
+                self.session.file_path_inputs[1] = path.display().to_string();
                 self.load_file_slot(1);
             }
         }
-        if !self.files.is_empty()
-            && self.pending_browser_b.is_none()
-            && self.file_open_jobs.iter().all(Option::is_none)
+        if !self.session.files.is_empty()
+            && self.session.pending_browser_b.is_none()
+            && self.session.file_open_jobs.iter().all(|job| !job.is_busy())
         {
-            if let Some(selection) = self.sync_restore_selection.take() {
+            if let Some(selection) = self.session.sync_restore_selection.take() {
                 if self
+                    .session
                     .files
                     .get(selection.file)
                     .is_some_and(|file| find_entry(&file.tree, &selection.path).is_some())
                 {
-                    self.selection = Some(selection);
+                    self.session.selection = Some(selection);
                     self.refresh_selection();
                 }
             }
@@ -1823,35 +1824,35 @@ impl App {
     }
 
     pub(crate) fn reset_file_selection(&mut self) {
-        self.selection = None;
-        self.selection_key = None;
-        self.details_key = None;
+        self.session.selection = None;
+        self.dataset.selection_key = None;
+        self.dataset.details_key = None;
         self.clear_selection_details();
-        self.tree_geolocation_cache.clear();
-        self.axis_names.clear();
+        self.dataset.tree_geolocation_cache.clear();
+        self.dataset.axis_names.clear();
         self.clear_selected_dataset_views();
-        self.heatmap_overview_cache = None;
-        self.heatmap_overview_job = None;
-        self.heatmap_range_cache = None;
-        self.heatmap_tick_view = None;
-        self.heatmap_range_job = None;
-        self.heatmap_colormap = None;
-        self.draft_volume = None;
-        self.applied_volume = None;
-        self.map_controls = GeoViewControls::new(self.settings.map_show_pics)
+        self.heatmap.overview_cache = None;
+        self.heatmap.overview_job.cancel();
+        self.heatmap.range_cache = None;
+        self.heatmap.tick_view = None;
+        self.heatmap.range_job.cancel();
+        self.heatmap.colormap = None;
+        self.volume.draft_slice = None;
+        self.volume.applied_slice = None;
+        self.geo.map_controls = GeoViewControls::new(self.settings.map_show_pics)
             .with_dummy_rgb(self.settings.palette.accent);
-        self.globe_controls = GeoViewControls::new(self.settings.map_show_pics)
+        self.geo.globe_controls = GeoViewControls::new(self.settings.map_show_pics)
             .with_dummy_rgb(self.settings.palette.accent);
-        self.map_viewport = MapViewport::default();
-        self.globe_auto_center_source = None;
-        self.globe_auto_center_pending = false;
-        self.globe_rotation = None;
-        self.draft_slice = None;
-        self.applied_slice = None;
-        self.draft_table = None;
-        self.applied_table = None;
-        self.draft_profile = None;
-        self.applied_profile = None;
+        self.geo.map_viewport = MapViewport::default();
+        self.geo.globe_auto_center_source = None;
+        self.geo.globe_auto_center_pending = false;
+        self.geo.globe_rotation = None;
+        self.heatmap.draft_slice = None;
+        self.heatmap.applied_slice = None;
+        self.dataset.draft_table = None;
+        self.dataset.applied_table = None;
+        self.profile.draft_slice = None;
+        self.profile.applied_slice = None;
     }
 }
 

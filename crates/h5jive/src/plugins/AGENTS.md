@@ -40,11 +40,13 @@ state. Share stateless data and drawing helpers when behavior overlaps.
    Use `h5jive-data` geolocation discovery and `select_geographic_axes` for
    coordinate matching; do not add another set of latitude/longitude name
    and shape rules in a plugin.
-   For file mutations, use `h5jive-data::WritableFile`,
-   `StagedOutput`, `dataset_path_parts`, and `copy_hdf5_object` for write
-   admission, temporary outputs, HDF5 object paths, and object copies. Keep
-   format-specific operations in
-   `h5jive-data`, then call them from a plugin worker.
+   For file mutations, use `h5jive-data` for write admission, temporary
+   outputs, HDF5 object paths, copies, and dataset operations. Prefer the
+   path-based `copy_plan`, `copy_missing_objects`, `replace_hdf5_object`, and
+   `execute_dataset_operation` APIs; use `WritableFile`, `StagedOutput`,
+   `dataset_path_parts`, and `copy_hdf5_object` only for lower-level needs.
+   Keep format-specific operations in `h5jive-data`, then call them from a
+   plugin worker.
 3. Add a central `<plugin>_enabled bool` switch in `settings/runtime/plugins.dip` and
    its declaration in `settings/runtime/schemas/viewer.dip`. Put plugin-specific
    options in `settings/runtime/plugins/<plugin>.dip` with a matching schema under

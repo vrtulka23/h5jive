@@ -3,62 +3,66 @@ use super::*;
 impl App {
     /// Invalidate the selected dataset's derived data without changing view controls.
     pub(super) fn reload_selected_dataset(&mut self) {
-        let Some(selection) = self.selection.clone() else {
+        let Some(selection) = self.session.selection.clone() else {
             return;
         };
-        self.tree_geolocation_cache
+        self.dataset
+            .tree_geolocation_cache
             .remove(&(selection.file, selection.path.clone()));
-        self.axis_names = match self.files[selection.file].axis_names(&selection.path) {
-            Ok(names) => names,
-            Err(error) => {
-                self.show_notice(
-                    NoticeKind::Error,
-                    format!("Could not reload dataset axis metadata: {error}"),
-                );
-                Vec::new()
-            }
-        };
-        self.details_key = None;
+        self.dataset.axis_names =
+            match self.session.files[selection.file].axis_names(&selection.path) {
+                Ok(names) => names,
+                Err(error) => {
+                    self.show_notice(
+                        NoticeKind::Error,
+                        format!("Could not reload dataset axis metadata: {error}"),
+                    );
+                    Vec::new()
+                }
+            };
+        self.dataset.details_key = None;
         self.clear_selected_dataset_views();
-        self.globe_auto_center_source = None;
-        self.globe_rotation = None;
+        self.geo.globe_auto_center_source = None;
+        self.geo.globe_rotation = None;
     }
 
     /// Clear metadata derived from the currently selected file entry.
     pub(super) fn clear_selection_details(&mut self) {
-        self.details_default_pending = true;
-        self.statistics_cache = None;
-        self.statistics_job.cancel();
-        self.distribution_cache = None;
-        self.distribution_job.cancel();
-        self.attributes_cache = None;
-        self.coordinates_cache = None;
-        self.coordinate_value_cache.clear();
+        self.dataset.details_default_pending = true;
+        self.dataset.statistics_cache = None;
+        self.dataset.statistics_job.cancel();
+        self.dataset.distribution_cache = None;
+        self.dataset.distribution_job.cancel();
+        self.dataset.attributes_cache = None;
+        self.dataset.coordinates_cache = None;
+        self.dataset.coordinate_value_cache.clear();
     }
 
     /// Invalidate data derived from the selected numeric dataset, including in-flight work.
     pub(super) fn clear_selected_dataset_views(&mut self) {
-        self.view_load_generation.fetch_add(1, Ordering::Relaxed);
-        self.region_cache.clear();
-        self.heatmap_cache = None;
-        self.heatmap_tiles.clear();
-        self.heatmap_tile_job = None;
-        self.heatmap_overview_cache = None;
-        self.heatmap_overview_job = None;
-        self.heatmap_view_overview_cache = None;
-        self.heatmap_view_overview_job = None;
-        self.profile_cache = None;
-        self.profile_job = None;
-        self.volume_cache = None;
-        self.volume_overview_cache = None;
-        self.volume_refined_cache.clear();
-        self.volume_job = None;
-        self.volume_raster = None;
-        self.volume_overview_raster = None;
-        self.volume_raster_job = None;
-        self.map_cache = None;
-        self.map_job = None;
-        self.map_plane = None;
-        self.map_load_generation.fetch_add(1, Ordering::Relaxed);
+        self.workspace
+            .view_load_generation
+            .fetch_add(1, Ordering::Relaxed);
+        self.dataset.region_cache.clear();
+        self.heatmap.cache = None;
+        self.heatmap.tiles.clear();
+        self.heatmap.tile_job.cancel();
+        self.heatmap.overview_cache = None;
+        self.heatmap.overview_job.cancel();
+        self.heatmap.view_overview_cache = None;
+        self.heatmap.view_overview_job.cancel();
+        self.profile.cache = None;
+        self.profile.job.cancel();
+        self.volume.cache = None;
+        self.volume.overview_cache = None;
+        self.volume.refined_cache.clear();
+        self.volume.job.cancel();
+        self.volume.raster = None;
+        self.volume.overview_raster = None;
+        self.volume.raster_job = None;
+        self.geo.map_cache = None;
+        self.geo.map_job.cancel();
+        self.geo.map_plane = None;
+        self.geo.map_load_generation.fetch_add(1, Ordering::Relaxed);
     }
 }

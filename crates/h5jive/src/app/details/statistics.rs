@@ -2,11 +2,12 @@ use super::super::*;
 
 impl App {
     pub(crate) fn draw_statistics_tab(&mut self, ui: &Ui) {
-        let Some(selection) = self.selection.clone() else {
+        let Some(selection) = self.session.selection.clone() else {
             ui.text_wrapped("Select a dataset to see its statistics.");
             return;
         };
-        let Some(entry) = find_entry(&self.files[selection.file].tree, &selection.path) else {
+        let Some(entry) = find_entry(&self.session.files[selection.file].tree, &selection.path)
+        else {
             return;
         };
         match &entry.kind {
@@ -22,7 +23,7 @@ impl App {
         }
         self.poll_statistics(&selection);
         self.ensure_attributes_loaded(&selection);
-        let Some(result) = &self.statistics_cache else {
+        let Some(result) = &self.dataset.statistics_cache else {
             return;
         };
         let statistics = match result {
@@ -61,6 +62,7 @@ impl App {
             );
             detail_row(ui, "Datatype", &statistics.info.datatype);
             if let Some(attribute) = self
+                .dataset
                 .attributes_cache
                 .as_ref()
                 .and_then(|result| result.as_ref().ok())

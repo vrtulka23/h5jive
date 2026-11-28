@@ -20,30 +20,32 @@ pub(super) struct EarthTexture {
 impl App {
     pub(super) fn ensure_earth_texture(&mut self, gpu: &mut GpuApi<'_>) {
         if self
+            .geo
             .earth_texture
             .as_ref()
             .is_some_and(|texture| texture.generation == gpu.generation())
         {
             return;
         }
-        self.earth_texture = None;
+        self.geo.earth_texture = None;
         let texture = upload_earth_texture(
             gpu,
             NATURAL_EARTH_TEXTURE_BMP,
             "Natural Earth II shaded relief and water",
         );
         if let Err(error) = &texture {
-            self.notices
+            self.session
+                .notices
                 .error(format!("Could not prepare the Earth texture: {error}"));
         }
-        self.earth_texture = Some(EarthTexture {
+        self.geo.earth_texture = Some(EarthTexture {
             texture: texture.ok(),
             generation: gpu.generation(),
         });
     }
 
     pub(super) fn earth_texture_id(&self) -> Option<dear_app::imgui::TextureId> {
-        let earth = self.earth_texture.as_ref()?;
+        let earth = self.geo.earth_texture.as_ref()?;
         let texture = earth.texture.as_ref()?;
         let _registration_keeps_view_alive = texture.handle;
         Some(texture.id)

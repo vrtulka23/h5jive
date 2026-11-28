@@ -13,7 +13,7 @@ impl App {
             .build(ui, || {
                 let _content_padding = ui.push_style_var(StyleVar::WindowPadding([0.0, 0.0]));
                 if let Some(_tabs) = ui.tab_bar("details_tabs") {
-                    let flags = if self.details_default_pending {
+                    let flags = if self.dataset.details_default_pending {
                         TabItemFlags::SET_SELECTED
                     } else {
                         TabItemFlags::NONE
@@ -23,7 +23,7 @@ impl App {
                             .size([0.0, 0.0])
                             .build(ui, || self.draw_attributes_tab(ui));
                     }
-                    self.details_default_pending = false;
+                    self.dataset.details_default_pending = false;
                     if let Some(_tab) = ui.tab_item("Statistics") {
                         ui.child_window("statistics_content")
                             .size([0.0, 0.0])

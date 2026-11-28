@@ -30,89 +30,86 @@ impl App {
         let overview_key = VolumeKey {
             file: key.file,
             path: key.path.clone(),
-            slice: self.applied_volume.as_ref().unwrap().clone(),
+            slice: self.volume.applied_slice.as_ref().unwrap().clone(),
         };
-        if let Some((working, receiver)) = &self.volume_job {
-            match receiver.try_recv() {
-                Ok(data) => {
-                    if let Err(error) = &data {
-                        self.notices
-                            .error(format!("Could not load 3D volume: {error}"));
-                    }
-                    if working == &overview_key {
-                        self.volume_overview_cache = Some((working.clone(), data.clone()));
-                    } else if let Ok(volume) = &data {
-                        self.volume_refined_cache
-                            .retain(|(cached, _)| cached != working);
-                        self.volume_refined_cache
-                            .push((working.clone(), Arc::clone(volume)));
-                        if self.volume_refined_cache.len() > 4 {
-                            self.volume_refined_cache.remove(0);
-                        }
-                    }
-                    if working == key
-                        || !self
-                            .volume_cache
-                            .as_ref()
-                            .is_some_and(|(cached, _)| cached == key)
-                    {
-                        self.volume_cache = Some((working.clone(), data));
-                    }
-                    self.volume_job = None;
+        if let Some((working, data)) = self
+            .volume
+            .job
+            .poll("Could not load 3D volume: worker stopped unexpectedly.")
+        {
+            if let Err(error) = &data {
+                self.session
+                    .notices
+                    .error(format!("Could not load 3D volume: {error}"));
+            }
+            if working == overview_key {
+                self.volume.overview_cache = Some((working.clone(), data.clone()));
+            } else if let Ok(volume) = &data {
+                self.volume
+                    .refined_cache
+                    .retain(|(cached, _)| cached != &working);
+                self.volume
+                    .refined_cache
+                    .push((working.clone(), Arc::clone(volume)));
+                if self.volume.refined_cache.len() > 4 {
+                    self.volume.refined_cache.remove(0);
                 }
-                Err(mpsc::TryRecvError::Disconnected) => {
-                    let error = "3D worker stopped unexpectedly";
-                    self.notices
-                        .error(format!("Could not load 3D volume: {error}"));
-                    let failure = (working.clone(), Err(error.into()));
-                    if working == &overview_key {
-                        self.volume_overview_cache = Some(failure.clone());
-                    }
-                    self.volume_cache = Some(failure);
-                    self.volume_job = None;
-                }
-                Err(mpsc::TryRecvError::Empty) => {}
+            }
+            if working == *key
+                || !self
+                    .volume
+                    .cache
+                    .as_ref()
+                    .is_some_and(|(cached, _)| cached == key)
+            {
+                self.volume.cache = Some((working, data));
             }
         }
         if self
-            .volume_cache
+            .volume
+            .cache
             .as_ref()
             .is_some_and(|(cached, _)| cached == &overview_key)
-            && self.volume_overview_cache.is_none()
+            && self.volume.overview_cache.is_none()
         {
-            self.volume_overview_cache = self.volume_cache.clone();
+            self.volume.overview_cache = self.volume.cache.clone();
         }
         if self
-            .volume_cache
+            .volume
+            .cache
             .as_ref()
             .is_some_and(|(cached, _)| cached == key)
         {
             return;
         }
         if let Some((_, data)) = self
-            .volume_refined_cache
+            .volume
+            .refined_cache
             .iter()
             .find(|(cached, _)| cached == key)
         {
-            self.volume_cache = Some((key.clone(), Ok(Arc::clone(data))));
+            self.volume.cache = Some((key.clone(), Ok(Arc::clone(data))));
             return;
         }
         if self
-            .volume_overview_cache
+            .volume
+            .overview_cache
             .as_ref()
             .is_some_and(|(cached, _)| cached == key)
         {
             return;
         }
         if !self
-            .volume_cache
+            .volume
+            .cache
             .as_ref()
             .is_some_and(|(cached, _)| cached == key)
-            && self.volume_job.is_none()
+            && !self.volume.job.is_busy()
         {
             let load_key = if key != &overview_key
                 && !self
-                    .volume_overview_cache
+                    .volume
+                    .overview_cache
                     .as_ref()
                     .is_some_and(|(cached, _)| cached == &overview_key)
             {
@@ -123,39 +120,40 @@ impl App {
             if load_key != &overview_key && !allow_refine {
                 return;
             }
-            let path = self.file_paths[load_key.file].clone();
+            let path = self.session.file_paths[load_key.file].clone();
             let dataset_path = load_key.path.clone();
             let shape = shape.to_vec();
             let slice = load_key.slice.clone();
             let preview_limit = self.settings.volume_preview_max_voxels;
-            let generation = Arc::clone(&self.view_load_generation);
+            let generation = Arc::clone(&self.workspace.view_load_generation);
             let expected = generation.load(Ordering::Relaxed);
-            let refinement = Arc::clone(&self.volume_refine_generation);
+            let refinement = Arc::clone(&self.volume.refine_generation);
             let expected_refinement = refinement.load(Ordering::Relaxed);
             let is_overview = load_key == &overview_key;
-            let (sender, receiver) = mpsc::channel();
-            thread::spawn(move || {
-                let cancelled = || {
-                    generation.load(Ordering::Relaxed) != expected
-                        || !is_overview && refinement.load(Ordering::Relaxed) != expected_refinement
-                };
-                if cancelled() {
-                    return;
-                }
-                let result = open_dataset_reader(&path).and_then(|file| {
-                    load_volume_data_with_cancel(
-                        &file,
-                        &dataset_path,
-                        &shape,
-                        &slice,
-                        preview_limit,
-                        &cancelled,
-                    )
-                    .map(Arc::new)
+            self.volume
+                .job
+                .start(load_key.clone(), move |job_cancelled| {
+                    let cancelled = || {
+                        job_cancelled()
+                            || generation.load(Ordering::Relaxed) != expected
+                            || !is_overview
+                                && refinement.load(Ordering::Relaxed) != expected_refinement
+                    };
+                    if cancelled() {
+                        return Err("3D volume work was cancelled".into());
+                    }
+                    open_dataset_reader(&path).and_then(|file| {
+                        load_volume_data_with_cancel(
+                            &file,
+                            &dataset_path,
+                            &shape,
+                            &slice,
+                            preview_limit,
+                            &cancelled,
+                        )
+                        .map(Arc::new)
+                    })
                 });
-                let _ = sender.send(result);
-            });
-            self.volume_job = Some((load_key.clone(), receiver));
         }
     }
 
@@ -167,10 +165,10 @@ impl App {
         selection: &Selection,
         shape: &[usize],
     ) {
-        let Some(slice) = self.applied_volume.clone() else {
+        let Some(slice) = self.volume.applied_slice.clone() else {
             return;
         };
-        let previous_camera = (self.volume_zoom, self.volume_pan, self.volume_rotation.0);
+        let previous_camera = (self.volume.zoom, self.volume.pan, self.volume.rotation.0);
         let available = ui.content_region_avail();
         if available[0] < 180.0 || available[1] < 150.0 {
             ui.text_wrapped("Enlarge the preview panel to show the volume.");
@@ -196,36 +194,36 @@ impl App {
                 || ui.io().key_shift() && ui.is_mouse_dragging(MouseButton::Left));
         if panning {
             let delta = ui.io().mouse_delta();
-            self.volume_pan[0] += delta[0];
-            self.volume_pan[1] += delta[1];
+            self.volume.pan[0] += delta[0];
+            self.volume.pan[1] += delta[1];
             ui.set_mouse_cursor(Some(MouseCursor::ResizeAll));
         }
         let screen_center = [
-            base_center[0] + self.volume_pan[0],
-            base_center[1] + self.volume_pan[1],
+            base_center[0] + self.volume.pan[0],
+            base_center[1] + self.volume.pan[1],
         ];
         if !panning && ui.is_item_active() && ui.is_mouse_dragging(MouseButton::Left) {
             let current = ui.mouse_pos();
             let delta = ui.io().mouse_delta();
             let previous = [current[0] - delta[0], current[1] - delta[1]];
-            self.volume_rotation = self.volume_rotation.drag(
+            self.volume.rotation = self.volume.rotation.drag(
                 previous,
                 current,
                 screen_center,
                 size[0].min(size[1]) * 0.45,
             );
-            self.volume_projection = None;
+            self.volume.projection = None;
         }
         if hovered {
-            self.volume_zoom = (self.volume_zoom * (1.0 + ui.io().mouse_wheel() * 0.1))
+            self.volume.zoom = (self.volume.zoom * (1.0 + ui.io().mouse_wheel() * 0.1))
                 .clamp(0.35, self.settings.volume_max_zoom);
         }
-        if previous_camera.0 != self.volume_zoom {
+        if previous_camera.0 != self.volume.zoom {
             self.note_volume_zoom();
-        } else if previous_camera.1 != self.volume_pan
-            || previous_camera.2 != self.volume_rotation.0
+        } else if previous_camera.1 != self.volume.pan
+            || previous_camera.2 != self.volume.rotation.0
         {
-            self.volume_navigation_at = Some(Instant::now());
+            self.volume.navigation_at = Some(Instant::now());
         }
         let draw = ui.get_window_draw_list();
         draw.add_rect(
@@ -235,7 +233,7 @@ impl App {
         )
         .build();
         let clip = draw.push_clip_rect(origin, [origin[0] + size[0], origin[1] + size[1]], true);
-        let base_scale = size[0].min(size[1]) * 0.53 * self.volume_zoom;
+        let base_scale = size[0].min(size[1]) * 0.53 * self.volume.zoom;
         let ratios = volume_axis_ratios(&slice, shape);
         let scale = ratios.map(|ratio| base_scale * ratio);
         let bounds = volume_visible_bounds(&slice, shape);
@@ -243,7 +241,7 @@ impl App {
             screen_center,
             volume_visible_center(&slice, shape),
             scale,
-            self.volume_rotation,
+            self.volume.rotation,
         );
         let source_voxels = slice
             .axes
@@ -261,7 +259,7 @@ impl App {
                 size,
                 [center[0] - origin[0], center[1] - origin[1]],
                 scale,
-                self.volume_rotation,
+                self.volume.rotation,
             )
         };
         let key = VolumeKey {
@@ -272,13 +270,13 @@ impl App {
         self.poll_volume(
             &key,
             shape,
-            Self::refinement_settled(self.volume_navigation_at),
+            Self::refinement_settled(self.volume.navigation_at),
         );
         draw_volume_box(
             &draw,
             center,
             scale,
-            self.volume_rotation,
+            self.volume.rotation,
             bounds,
             &self.settings.palette,
             self.settings.volume_back_brightness,
@@ -286,13 +284,14 @@ impl App {
         let mut displayed_range = None;
         let mut render_status = None;
         let mut layers = self
-            .volume_refined_cache
+            .volume
+            .refined_cache
             .iter()
             .rev()
             .filter(|(cached, _)| volume_keys_compatible(cached, &key))
             .map(|(cached, data)| (cached.clone(), Arc::clone(data)))
             .collect::<Vec<_>>();
-        for entry in [&self.volume_cache, &self.volume_overview_cache]
+        for entry in [&self.volume.cache, &self.volume.overview_cache]
             .into_iter()
             .flatten()
         {
@@ -308,7 +307,8 @@ impl App {
         match layers.first().map(|(_, data)| Arc::clone(data)) {
             Some(data) => {
                 let range = if self.settings.heatmap_auto_range {
-                    self.volume_overview_cache
+                    self.volume
+                        .overview_cache
                         .as_ref()
                         .and_then(|(_, result)| result.as_ref().ok())
                         .and_then(|overview| overview.color_range)
@@ -331,16 +331,16 @@ impl App {
                     size: canvas_size,
                     render_size: interactive_raster_size(
                         canvas_size,
-                        !Self::refinement_settled(self.volume_navigation_at),
+                        !Self::refinement_settled(self.volume.navigation_at),
                     ),
                     center: [center[0] - origin[0], center[1] - origin[1]],
                     scale,
-                    rotation: self.volume_rotation.0,
-                    opacity: self.volume_opacity,
+                    rotation: self.volume.rotation.0,
+                    opacity: self.volume.opacity,
                     back_brightness: self.settings.volume_back_brightness,
                     range,
-                    logarithmic: self.volume_log_scale,
-                    visibility: self.volume_visibility,
+                    logarithmic: self.volume.log_scale,
+                    visibility: self.volume.visibility,
                     preset: self.settings.heatmap_colormap_preset,
                     color_stops: [
                         palette.heatmap_low,
@@ -355,7 +355,8 @@ impl App {
                     ],
                 };
                 let raster_is_current = self
-                    .volume_raster
+                    .volume
+                    .raster
                     .as_ref()
                     .is_some_and(|(cached, _)| cached == &raster_key);
                 let preview = self.volume_raster_preview(&raster_key, &key);
@@ -394,14 +395,16 @@ impl App {
                 }
             }
             None if self
-                .volume_cache
+                .volume
+                .cache
                 .as_ref()
                 .is_some_and(|(_, result)| result.is_err()) =>
             {
                 draw.add_text(
                     [origin[0] + 8.0, origin[1] + 8.0],
                     self.settings.palette.text,
-                    self.volume_cache
+                    self.volume
+                        .cache
                         .as_ref()
                         .unwrap()
                         .1
@@ -420,7 +423,7 @@ impl App {
                 mark,
                 center,
                 scale,
-                self.volume_rotation,
+                self.volume.rotation,
                 self.settings.palette.text,
             );
         }
@@ -475,7 +478,7 @@ impl App {
             [origin[0] + size[0] + PANEL_GAP, origin[1] + PLOT_NAV_HEIGHT],
             [legend_width, (size[1] - PLOT_NAV_HEIGHT).max(1.0)],
             displayed_range,
-            self.volume_log_scale,
+            self.volume.log_scale,
             &self.settings.palette,
             self.settings.heatmap_colormap_preset,
             plot_ctx,
@@ -487,39 +490,39 @@ impl App {
             "volume",
             [origin[0] + available[0] - legend_width, origin[1]],
             legend_width,
-            self.volume_zoom,
-            &mut self.volume_visibility,
+            self.volume.zoom,
+            &mut self.volume.visibility,
             &self.settings.palette,
             self.settings.tutorial_tips,
             None,
         );
         if visibility_changed {
-            self.profile_cache = None;
+            self.profile.cache = None;
         }
         match nav {
             PlotNavAction::Reset => {
-                self.volume_rotation = VolumeRotation::from_angles(0.65, 0.45);
-                self.volume_axis_corner = [0.5; 3];
-                self.volume_projection = Some(VolumeProjection::Isometric);
-                self.volume_zoom = 1.0;
-                self.volume_pan = [0.0, 0.0];
+                self.volume.rotation = VolumeRotation::from_angles(0.65, 0.45);
+                self.volume.axis_corner = [0.5; 3];
+                self.volume.projection = Some(VolumeProjection::Isometric);
+                self.volume.zoom = 1.0;
+                self.volume.pan = [0.0, 0.0];
             }
             PlotNavAction::ZoomOut => {
-                self.volume_zoom =
-                    (self.volume_zoom / 1.1).clamp(0.35, self.settings.volume_max_zoom);
+                self.volume.zoom =
+                    (self.volume.zoom / 1.1).clamp(0.35, self.settings.volume_max_zoom);
             }
             PlotNavAction::ZoomIn => {
-                self.volume_zoom =
-                    (self.volume_zoom * 1.1).clamp(0.35, self.settings.volume_max_zoom);
+                self.volume.zoom =
+                    (self.volume.zoom * 1.1).clamp(0.35, self.settings.volume_max_zoom);
             }
             PlotNavAction::None | PlotNavAction::Center => {}
         }
-        if previous_camera.0 != self.volume_zoom {
+        if previous_camera.0 != self.volume.zoom {
             self.note_volume_zoom();
-        } else if previous_camera.1 != self.volume_pan
-            || previous_camera.2 != self.volume_rotation.0
+        } else if previous_camera.1 != self.volume.pan
+            || previous_camera.2 != self.volume.rotation.0
         {
-            self.volume_navigation_at = Some(Instant::now());
+            self.volume.navigation_at = Some(Instant::now());
         }
     }
 
@@ -534,7 +537,7 @@ impl App {
     ) -> Vec<AxisMark> {
         let mut marks = Vec::new();
         // Put the axes on the volume edges and offset only their ticks and labels.
-        let origin = front_axis_corner(self.volume_rotation, self.volume_axis_corner, bounds);
+        let origin = front_axis_corner(self.volume.rotation, self.volume.axis_corner, bounds);
         for slot in 0..slice.visible_count() {
             let axis = slice.axes[slot].unwrap();
             let outward = (slot + 1) % 3;
@@ -544,8 +547,8 @@ impl App {
             } else {
                 bounds[slot][0]
             };
-            let from_screen = project_rotated(origin, center, scale, self.volume_rotation).0;
-            let to_screen = project_rotated(end, center, scale, self.volume_rotation).0;
+            let from_screen = project_rotated(origin, center, scale, self.volume.rotation).0;
+            let to_screen = project_rotated(end, center, scale, self.volume.rotation).0;
             let pixels = (to_screen[0] - from_screen[0]).hypot(to_screen[1] - from_screen[1]);
             // Short segments let each part of an axis take its own place in depth order.
             for segment in 0..16 {
@@ -573,7 +576,7 @@ impl App {
                 label: format!(
                     "{}: {}",
                     ["X", "Y", "Z"][slot],
-                    axis_name(&self.axis_names, axis)
+                    axis_name(&self.dataset.axis_names, axis)
                 ),
             });
             let tick_budget = if pixels < 90.0 {

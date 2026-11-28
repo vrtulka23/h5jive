@@ -122,20 +122,20 @@ impl App {
         key: Option<&MapKey>,
     ) -> Option<&Result<MapData, String>> {
         let key = key?;
-        let (cached, result) = self.map_cache.as_ref()?;
+        let (cached, result) = self.geo.map_cache.as_ref()?;
         if cached == key {
             return Some(result);
         }
         let loading_same_source = cached.file == key.file
             && cached.path == key.path
             && result.is_ok()
-            && self.map_job.is_some();
+            && self.geo.map_job.is_busy();
         loading_same_source.then_some(result)
     }
 
     pub(crate) fn selected_geo_source(&mut self) -> Option<GeoSource> {
-        let selection = self.selection.clone()?;
-        let entry = find_entry(&self.files[selection.file].tree, &selection.path)?;
+        let selection = self.session.selection.clone()?;
+        let entry = find_entry(&self.session.files[selection.file].tree, &selection.path)?;
         let shape = match &entry.kind {
             Kind::Dataset {
                 shape,
@@ -146,8 +146,8 @@ impl App {
             _ => return None,
         };
         let cache_key = (selection.file, selection.path.clone());
-        if !self.tree_geolocation_cache.contains_key(&cache_key) {
-            let result = self.files[selection.file]
+        if !self.dataset.tree_geolocation_cache.contains_key(&cache_key) {
+            let result = self.session.files[selection.file]
                 .geolocation_with_rules(&selection.path, &self.settings.dataset_rules);
             if let Err(error) = &result {
                 self.show_notice(
@@ -155,10 +155,12 @@ impl App {
                     format!("Could not read dataset geolocation: {error}"),
                 );
             }
-            self.tree_geolocation_cache
+            self.dataset
+                .tree_geolocation_cache
                 .insert(cache_key.clone(), result.ok().flatten());
         }
         let geolocation = self
+            .dataset
             .tree_geolocation_cache
             .get(&cache_key)
             .cloned()
@@ -184,62 +186,52 @@ impl App {
             spectral: options.pinned,
             max_points,
         };
-        if let Some((running, receiver)) = self.map_job.take() {
-            let mut completed = false;
-            loop {
-                match receiver.try_recv() {
-                    Ok(MapJobUpdate::Preview(data)) => {
-                        self.map_cache = Some((running.clone(), Ok(data)));
-                    }
-                    Ok(MapJobUpdate::Complete(result)) => {
-                        match result {
-                            Ok((data, plane)) => {
-                                if let Some(plane) = plane {
-                                    self.map_plane = Some((
-                                        MapPlaneKey {
-                                            file: running.file,
-                                            path: running.path.clone(),
-                                            time: running.time.unwrap_or(0),
-                                            spectral: running.spectral,
-                                        },
-                                        plane,
-                                    ));
-                                }
-                                self.map_cache = Some((running.clone(), Ok(data)));
+        let mut completed = false;
+        while let Some((running, event)) = self.geo.map_job.poll("Map worker stopped unexpectedly")
+        {
+            match event {
+                JobEvent::Progress(data) => {
+                    self.geo.map_cache = Some((running, Ok(data)));
+                }
+                JobEvent::Finished(result) => {
+                    match result {
+                        Ok((data, plane)) => {
+                            if let Some(plane) = plane {
+                                self.geo.map_plane = Some((
+                                    MapPlaneKey {
+                                        file: running.file,
+                                        path: running.path.clone(),
+                                        time: running.time.unwrap_or(0),
+                                        spectral: running.spectral,
+                                    },
+                                    plane,
+                                ));
                             }
-                            Err(error) => {
-                                self.notices
-                                    .error(format!("Could not load map data: {error}"));
-                                self.map_cache = Some((running.clone(), Err(error)));
-                            }
+                            self.geo.map_cache = Some((running, Ok(data)));
                         }
-                        completed = true;
-                        break;
+                        Err(error) => {
+                            self.session
+                                .notices
+                                .error(format!("Could not load map data: {error}"));
+                            self.geo.map_cache = Some((running, Err(error)));
+                        }
                     }
-                    Err(mpsc::TryRecvError::Empty) => break,
-                    Err(mpsc::TryRecvError::Disconnected) => {
-                        let error = "Map worker stopped unexpectedly";
-                        self.notices
-                            .error(format!("Could not load map data: {error}"));
-                        self.map_cache = Some((running.clone(), Err(error.into())));
-                        completed = true;
-                        break;
-                    }
+                    completed = true;
                 }
             }
-            if !completed {
-                self.map_job = Some((running, receiver));
-                return Some(key);
-            }
+        }
+        if !completed && self.geo.map_job.is_busy() {
+            return Some(key);
         }
         if self
+            .geo
             .map_cache
             .as_ref()
             .is_some_and(|(cached, _)| cached == &key)
         {
             return Some(key);
         }
-        let file_path = self.file_paths[source.selection.file].clone();
+        let file_path = self.session.file_paths[source.selection.file].clone();
         let path = source.selection.path.clone();
         let shape = source.shape.clone();
         let geolocation = source.geolocation.clone();
@@ -253,113 +245,115 @@ impl App {
             spectral: key.spectral,
         };
         let cached_plane = self
+            .geo
             .map_plane
             .as_ref()
             .filter(|(cached, _)| cached == &plane_key)
             .map(|(_, plane)| Arc::clone(plane));
-        let generation = Arc::clone(&self.map_load_generation);
+        let generation = Arc::clone(&self.geo.map_load_generation);
         let expected_generation = generation.load(Ordering::Relaxed);
-        let (sender, receiver) = mpsc::channel();
-        thread::spawn(move || {
-            let result = (|| {
-                let cancelled = || generation.load(Ordering::Relaxed) != expected_generation;
-                if cancelled() {
-                    return Err("Map request cancelled".into());
-                }
-                let file = open_dataset_reader(&file_path)?;
-                let (rows, columns) = if shape.len() >= 3 {
-                    (shape[1], shape[2])
-                } else {
-                    (shape[0], shape[1])
-                };
-                let single_time = shape.len() == 2 || shape[0] == 1 || time.is_some();
-                let cacheable = single_time
-                    && rows
-                        .checked_mul(columns)
-                        .is_some_and(|count| count <= MAX_PLANE_CELLS);
-                let mut plane = cached_plane;
-                if cacheable {
-                    let disk_key = MapPlaneCacheKey {
-                        source: &file_path,
-                        dataset: &path,
-                        time: time.unwrap_or(0),
-                        spectral,
-                        rows,
-                        columns,
+        self.geo
+            .map_job
+            .start(key.clone(), move |job_cancelled, progress| {
+                (|| {
+                    let cancelled = || {
+                        job_cancelled() || generation.load(Ordering::Relaxed) != expected_generation
                     };
-                    if plane.is_none() {
-                        plane = load_map_plane(&disk_key).map(Arc::new);
-                    }
-                }
-                if plane.is_none() && single_time && rows.saturating_mul(columns) > 100_000 {
-                    if let Ok(preview) = load_map_preview(
-                        &file,
-                        &path,
-                        &shape,
-                        &geolocation,
-                        time,
-                        spectral,
-                        preview_points,
-                    ) {
-                        if sender.send(MapJobUpdate::Preview(preview)).is_err() {
-                            return Err("Map request cancelled".into());
-                        }
-                    }
-                }
-                if cacheable && plane.is_none() {
-                    let disk_key = MapPlaneCacheKey {
-                        source: &file_path,
-                        dataset: &path,
-                        time: time.unwrap_or(0),
-                        spectral,
-                        rows,
-                        columns,
-                    };
-                    let decoded = read_map_radiance_plane_with_cancel(
-                        &file, &path, &shape, time, spectral, &cancelled,
-                    )?;
                     if cancelled() {
                         return Err("Map request cancelled".into());
                     }
-                    store_map_plane(&disk_key, &decoded);
-                    plane = Some(Arc::new(decoded));
-                }
-                if cancelled() {
-                    return Err("Map request cancelled".into());
-                }
-                let data = if let Some(decoded) = plane.as_deref() {
-                    load_map_data_with_radiance(
-                        &file,
-                        &path,
-                        &shape,
-                        &geolocation,
-                        time,
-                        spectral,
-                        max_points,
-                        decoded,
-                    )?
-                } else {
-                    load_map_data(
-                        &file,
-                        &path,
-                        &shape,
-                        &geolocation,
-                        time,
-                        spectral,
-                        max_points,
-                    )?
-                };
-                Ok((data, plane))
-            })();
-            let _ = sender.send(MapJobUpdate::Complete(result));
-        });
-        self.map_job = Some((key.clone(), receiver));
+                    let file = open_dataset_reader(&file_path)?;
+                    let (rows, columns) = if shape.len() >= 3 {
+                        (shape[1], shape[2])
+                    } else {
+                        (shape[0], shape[1])
+                    };
+                    let single_time = shape.len() == 2 || shape[0] == 1 || time.is_some();
+                    let cacheable = single_time
+                        && rows
+                            .checked_mul(columns)
+                            .is_some_and(|count| count <= MAX_PLANE_CELLS);
+                    let mut plane = cached_plane;
+                    if cacheable {
+                        let disk_key = MapPlaneCacheKey {
+                            source: &file_path,
+                            dataset: &path,
+                            time: time.unwrap_or(0),
+                            spectral,
+                            rows,
+                            columns,
+                        };
+                        if plane.is_none() {
+                            plane = load_map_plane(&disk_key).map(Arc::new);
+                        }
+                    }
+                    if plane.is_none() && single_time && rows.saturating_mul(columns) > 100_000 {
+                        if let Ok(preview) = load_map_preview(
+                            &file,
+                            &path,
+                            &shape,
+                            &geolocation,
+                            time,
+                            spectral,
+                            preview_points,
+                        ) {
+                            if !progress(preview) {
+                                return Err("Map request cancelled".into());
+                            }
+                        }
+                    }
+                    if cacheable && plane.is_none() {
+                        let disk_key = MapPlaneCacheKey {
+                            source: &file_path,
+                            dataset: &path,
+                            time: time.unwrap_or(0),
+                            spectral,
+                            rows,
+                            columns,
+                        };
+                        let decoded = read_map_radiance_plane_with_cancel(
+                            &file, &path, &shape, time, spectral, &cancelled,
+                        )?;
+                        if cancelled() {
+                            return Err("Map request cancelled".into());
+                        }
+                        store_map_plane(&disk_key, &decoded);
+                        plane = Some(Arc::new(decoded));
+                    }
+                    if cancelled() {
+                        return Err("Map request cancelled".into());
+                    }
+                    let data = if let Some(decoded) = plane.as_deref() {
+                        load_map_data_with_radiance(
+                            &file,
+                            &path,
+                            &shape,
+                            &geolocation,
+                            time,
+                            spectral,
+                            max_points,
+                            decoded,
+                        )?
+                    } else {
+                        load_map_data(
+                            &file,
+                            &path,
+                            &shape,
+                            &geolocation,
+                            time,
+                            spectral,
+                            max_points,
+                        )?
+                    };
+                    Ok((data, plane))
+                })()
+            });
         Some(key)
     }
 
     pub(crate) fn draw_world_map_view(&mut self, ui: &Ui, plot_ctx: &PlotContext) {
         let source = self.selected_geo_source();
-        self.map_controls.sync_source(
+        self.geo.map_controls.sync_source(
             source
                 .as_ref()
                 .map(|source| (&source.selection, source.shape.as_slice())),
@@ -369,7 +363,7 @@ impl App {
                 .and_then(|source| source.geolocation.scan_direction.as_ref())
                 .map_or(ScanFilter::Both, |scan| scan.default_filter),
         );
-        let options = self.map_controls.applied;
+        let options = self.geo.map_controls.applied;
         let has_pixel_bounds = source.as_ref().is_some_and(|source| {
             source.geolocation.latitude_bounds.is_some()
                 && source.geolocation.longitude_bounds.is_some()
@@ -378,7 +372,7 @@ impl App {
             geospatial_point_budget(
                 self.settings.map_max_points,
                 self.settings.map_zoom_detail_factor,
-                self.map_viewport.zoom,
+                self.geo.map_viewport.zoom,
                 source.shape.iter().take(3).product(),
             )
         } else {
@@ -388,8 +382,8 @@ impl App {
         let available = ui.content_region_avail();
         let legend_width = self.settings.heatmap_legend_width.min(available[0] * 0.23);
         let legend_gap = PANEL_GAP;
-        let controls_height = if self.map_footer_height > 0.0 {
-            self.map_footer_height
+        let controls_height = if self.geo.map_footer_height > 0.0 {
+            self.geo.map_footer_height
         } else {
             geo_controls_height(
                 ui,
@@ -408,7 +402,7 @@ impl App {
         let map_width = map_area[0].min(map_area[1] * 2.0);
         let map_size = [map_width, map_width * 0.5];
         let cursor = ui.cursor_screen_pos();
-        self.view_rect = [cursor[0], cursor[1], available[0], map_area[1]];
+        self.session.view_rect = [cursor[0], cursor[1], available[0], map_area[1]];
         let origin = [
             cursor[0] + (map_area[0] - map_width) * 0.5,
             cursor[1] + (map_area[1] - map_size[1]) * 0.5,
@@ -422,13 +416,18 @@ impl App {
         let hovered = ui.is_item_hovered() && inside;
         if hovered && ui.io().mouse_wheel() != 0.0 {
             let factor = self.settings.map_zoom_factor.powf(ui.io().mouse_wheel());
-            self.map_viewport
-                .zoom_at(origin, map_size, mouse, factor, self.settings.map_max_zoom);
+            self.geo.map_viewport.zoom_at(
+                origin,
+                map_size,
+                mouse,
+                factor,
+                self.settings.map_max_zoom,
+            );
         }
         if ui.is_item_active() && ui.is_mouse_dragging(dear_app::imgui::MouseButton::Left) {
-            self.map_viewport.pan(map_size, ui.io().mouse_delta());
+            self.geo.map_viewport.pan(map_size, ui.io().mouse_delta());
         }
-        let view = self.map_viewport;
+        let view = self.geo.map_viewport;
         let draw = ui.get_window_draw_list();
         let palette = &self.settings.palette;
         let ocean = palette.panel;
@@ -517,6 +516,7 @@ impl App {
                         continue;
                     }
                     if !self
+                        .workspace
                         .value_visibility
                         .allows_class(point.value, point.special)
                     {
@@ -615,6 +615,7 @@ impl App {
         }
         if let Some(Ok(data)) = map_data {
             let current = self
+                .geo
                 .map_cache
                 .as_ref()
                 .is_some_and(|(cached, _)| key.as_ref() == Some(cached));
@@ -633,8 +634,8 @@ impl App {
                 map_area,
                 view,
                 &self.settings.pics_sites,
-                self.selected_site_group.as_deref(),
-                self.selected_pics,
+                self.geo.selected_site_group.as_deref(),
+                self.geo.selected_pics,
                 palette,
             )
         } else {
@@ -702,21 +703,21 @@ impl App {
             "world",
             [cursor[0] + available[0] - nav_width, cursor[1]],
             nav_width,
-            self.map_viewport.zoom,
-            &mut self.value_visibility,
+            self.geo.map_viewport.zoom,
+            &mut self.workspace.value_visibility,
             palette,
             self.settings.tutorial_tips,
             None,
         );
         if visibility_changed {
-            self.profile_cache = None;
+            self.profile.cache = None;
         }
         match nav {
-            PlotNavAction::Reset => self.map_viewport = MapViewport::default(),
+            PlotNavAction::Reset => self.geo.map_viewport = MapViewport::default(),
             PlotNavAction::ZoomOut | PlotNavAction::ZoomIn => {
                 let step = if nav == PlotNavAction::ZoomIn { 1 } else { -1 };
                 let center = [origin[0] + map_size[0] * 0.5, origin[1] + map_size[1] * 0.5];
-                self.map_viewport.zoom_at(
+                self.geo.map_viewport.zoom_at(
                     origin,
                     map_size,
                     center,
@@ -730,35 +731,39 @@ impl App {
         let changes = draw_geo_controls(
             ui,
             "map",
-            &mut self.map_controls,
+            &mut self.geo.map_controls,
             source.as_ref().map(|source| source.shape.as_slice()),
-            self.axis_names.get(3).map_or("axis 3", String::as_str),
+            self.dataset
+                .axis_names
+                .get(3)
+                .map_or("axis 3", String::as_str),
             has_pixel_bounds,
             source
                 .as_ref()
                 .is_some_and(|source| source.geolocation.scan_direction.is_some()),
-            &mut self.selected_pics,
-            &mut self.selected_site_group,
+            &mut self.geo.selected_pics,
+            &mut self.geo.selected_site_group,
             &self.settings,
         );
         if changes.site_changed {
             if let Some(site) = self
+                .geo
                 .selected_pics
                 .checked_sub(1)
                 .and_then(|index| self.settings.pics_sites.get(index))
             {
-                self.map_viewport.center = site.center;
-                self.map_viewport.zoom = self.settings.map_site_zoom;
-                self.map_viewport.clamp();
+                self.geo.map_viewport.center = site.center;
+                self.geo.map_viewport.zoom = self.settings.map_site_zoom;
+                self.geo.map_viewport.clamp();
             } else {
-                self.map_viewport = MapViewport::default();
+                self.geo.map_viewport = MapViewport::default();
             }
         }
         if changes.refresh_data {
-            self.map_job = None;
-            self.map_load_generation.fetch_add(1, Ordering::Relaxed);
+            self.geo.map_job.cancel();
+            self.geo.map_load_generation.fetch_add(1, Ordering::Relaxed);
         }
         // Use the measured footer on the next frame so controls meet the bottom edge.
-        self.map_footer_height = (ui.cursor_pos_y() - content_start_y - map_area[1]).max(1.0);
+        self.geo.map_footer_height = (ui.cursor_pos_y() - content_start_y - map_area[1]).max(1.0);
     }
 }
